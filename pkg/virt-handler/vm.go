@@ -2150,10 +2150,6 @@ func (d *VirtualMachineController) checkNetworkInterfacesForMigration(vmi *v1.Vi
 		return nil
 	}
 
-	if !netvmispec.IsPodNetworkWithMasqueradeBindingInterface(vmi.Spec.Networks, ifaces) {
-		return fmt.Errorf("cannot migrate VMI which does not use masquerade to connect to the pod network")
-	}
-
 	sriovLiveMigrationEnabled := d.clusterConfig.SRIOVLiveMigrationEnabled()
 	if len(netvmispec.FilterSRIOVInterfaces(ifaces)) > 0 && !sriovLiveMigrationEnabled {
 		return fmt.Errorf("SRIOVLiveMigration feature-gate is closed, can't migrate VMI with SRIOV interfaces")

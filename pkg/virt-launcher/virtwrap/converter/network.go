@@ -109,9 +109,6 @@ func createDomainInterfaces(vmi *v1.VirtualMachineInstance, domain *api.Domain, 
 				return nil, err
 			}
 		} else if iface.Macvtap != nil {
-			if net.Multus == nil {
-				return nil, fmt.Errorf("macvtap interface %s requires Multus meta-cni", iface.Name)
-			}
 
 			domainIface.Type = "ethernet"
 			if iface.BootOrder != nil {
