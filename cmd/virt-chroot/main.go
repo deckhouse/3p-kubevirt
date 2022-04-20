@@ -182,6 +182,7 @@ func main() {
 	createTapCmd.Flags().Uint("uid", 0, "the owner of the tap device")
 	createTapCmd.Flags().Uint("gid", 0, "the group of the owner of the tap device")
 	createTapCmd.Flags().Uint32("queue-number", 0, "the number of queues to use on multi-queued devices")
+	createTapCmd.Flags().Int("parent-index", 0, "the index of parent device for macvtap")
 	createTapCmd.Flags().Uint32("mtu", 1500, "the link MTU of the tap device")
 
 	createMDEVCmd := NewCreateMDEVCommand()

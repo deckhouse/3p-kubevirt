@@ -16,7 +16,6 @@ import (
 	"kubevirt.io/kubevirt/pkg/network/istio"
 	"kubevirt.io/kubevirt/pkg/network/link"
 	virtnetlink "kubevirt.io/kubevirt/pkg/network/link"
-	"kubevirt.io/kubevirt/pkg/util"
 	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/api"
 )
 
@@ -118,16 +117,16 @@ func (b *MasqueradePodNetworkConfigurator) PreparePodNetworkInterface() error {
 		return err
 	}
 
-	tapOwner := netdriver.LibvirtUserAndGroupId
-	if util.IsNonRootVMI(b.vmi) {
-		tapOwner = strconv.Itoa(util.NonRootUID)
-	}
-	tapDeviceName := virtnetlink.GenerateTapDeviceName(b.podNicLink.Attrs().Name)
-	err := createAndBindTapToBridge(b.handler, tapDeviceName, b.bridgeInterfaceName, b.launcherPID, b.podNicLink.Attrs().MTU, tapOwner, b.vmi)
-	if err != nil {
-		log.Log.Reason(err).Errorf("failed to create tap device named %s", tapDeviceName)
-		return err
-	}
+	//tapOwner := netdriver.LibvirtUserAndGroupId
+	//if util.IsNonRootVMI(b.vmi) {
+	//	tapOwner = strconv.Itoa(util.NonRootUID)
+	//}
+	//tapDeviceName := virtnetlink.GenerateTapDeviceName(b.podNicLink.Attrs().Name)
+	//err := createAndBindTapToBridge(b.handler, tapDeviceName, b.bridgeInterfaceName, b.launcherPID, b.podNicLink.Attrs().MTU, tapOwner, b.vmi)
+	//if err != nil {
+	//	log.Log.Reason(err).Errorf("failed to create tap device named %s", tapDeviceName)
+	//	return err
+	//}
 
 	ipv4Enabled, err := b.handler.HasIPv4GlobalUnicastAddress(b.podNicLink.Attrs().Name)
 	if err != nil {

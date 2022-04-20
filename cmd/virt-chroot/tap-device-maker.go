@@ -8,7 +8,6 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/vishvananda/netlink"
-	"kubevirt.io/client-go/log"
 )
 
 func createTapDevice(name string, parentIndex int, owner uint, group uint, queueNumber int, mtu int) error {
@@ -22,11 +21,6 @@ func createTapDevice(name string, parentIndex int, owner uint, group uint, queue
 			},
 			Mode: netlink.MACVLAN_MODE_BRIDGE,
 		},
-	}
-	err := netlink.LinkAdd(tapDevice)
-	if err != nil {
-		log.Log.Reason(err).Errorf("failed to create a macvtap")
-		return err
 	}
 
 	// Device creation is retried due to https://bugzilla.redhat.com/1933627
