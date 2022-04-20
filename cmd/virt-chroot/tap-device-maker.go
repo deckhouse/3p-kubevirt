@@ -23,6 +23,10 @@ func createTapDevice(name string, parentIndex int, owner uint, group uint, queue
 		},
 	}
 
+	if queueNumber == 1 {
+		tapDevice.Macvlan.Flags = netlink.TUNTAP_DEFAULTS
+	}
+
 	// Device creation is retried due to https://bugzilla.redhat.com/1933627
 	// which has been observed on multiple occasions on CI runs.
 	const retryAttempts = 5
