@@ -38,12 +38,13 @@ type LibvirtSpecGenerator interface {
 	Generate() error
 }
 
-func NewMacvtapLibvirtSpecGenerator(iface *v1.Interface, domain *api.Domain, podInterfaceName string, handler netdriver.NetworkHandler) *MacvtapLibvirtSpecGenerator {
+func NewMacvtapLibvirtSpecGenerator(iface *v1.Interface, domain *api.Domain, cachedDomainInterface api.Interface, podInterfaceName string, handler netdriver.NetworkHandler) *MacvtapLibvirtSpecGenerator {
 	return &MacvtapLibvirtSpecGenerator{
-		vmiSpecIface:     iface,
-		domain:           domain,
-		podInterfaceName: podInterfaceName,
-		handler:          handler,
+		vmiSpecIface:          iface,
+		domain:                domain,
+		cachedDomainInterface: cachedDomainInterface,
+		podInterfaceName:      podInterfaceName,
+		handler:               handler,
 	}
 }
 
@@ -207,10 +208,11 @@ func (b *SlirpLibvirtSpecGenerator) Generate() error {
 }
 
 type MacvtapLibvirtSpecGenerator struct {
-	vmiSpecIface     *v1.Interface
-	domain           *api.Domain
-	podInterfaceName string
-	handler          netdriver.NetworkHandler
+	vmiSpecIface          *v1.Interface
+	domain                *api.Domain
+	cachedDomainInterface api.Interface
+	podInterfaceName      string
+	handler               netdriver.NetworkHandler
 }
 
 func (b *MacvtapLibvirtSpecGenerator) Generate() error {
@@ -236,20 +238,20 @@ func (b *MacvtapLibvirtSpecGenerator) discoverDomainIfaceSpec() (*api.Interface,
 		log.Log.Reason(err).Errorf(linkIfaceFailFmt, b.podInterfaceName)
 		return nil, err
 	}
-	mac, err := virtnetlink.RetrieveMacAddressFromVMISpecIface(b.vmiSpecIface)
-	if err != nil {
-		return nil, err
-	}
-	if mac == nil {
-		mac = &podNicLink.Attrs().HardwareAddr
+	_, dummy := podNicLink.(*netlink.Dummy)
+	if dummy {
+		newPodNicName := virtnetlink.GenerateNewBridgedVmiInterfaceName(b.podInterfaceName)
+		podNicLink, err = b.handler.LinkByName(newPodNicName)
+		if err != nil {
+			log.Log.Reason(err).Errorf(linkIfaceFailFmt, newPodNicName)
+			return nil, err
+		}
 	}
 
-	return &api.Interface{
-		MAC: &api.MAC{MAC: mac.String()},
-		MTU: &api.MTU{Size: strconv.Itoa(podNicLink.Attrs().MTU)},
-		Target: &api.InterfaceTarget{
-			Device:  b.podInterfaceName,
-			Managed: "no",
-		},
-	}, nil
+	b.cachedDomainInterface.MTU = &api.MTU{Size: strconv.Itoa(podNicLink.Attrs().MTU)}
+
+	b.cachedDomainInterface.Target = &api.InterfaceTarget{
+		Device:  virtnetlink.GenerateTapDeviceName(b.podInterfaceName),
+		Managed: "no"}
+	return &b.cachedDomainInterface, nil
 }

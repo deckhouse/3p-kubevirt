@@ -46,6 +46,10 @@ func createAndBindTapToBridge(handler netdriver.NetworkHandler, deviceName strin
 	return handler.BindTapDeviceToBridge(deviceName, bridgeIfaceName)
 }
 
+func createMacvtap(handler netdriver.NetworkHandler, deviceName string, parentName string, launcherPID int, mtu int, tapOwner string, vmi *v1.VirtualMachineInstance) error {
+	return handler.CreateMacvtapDevice(deviceName, parentName, calculateNetworkQueues(vmi), launcherPID, mtu, tapOwner)
+}
+
 func calculateNetworkQueues(vmi *v1.VirtualMachineInstance) uint32 {
 	if isMultiqueue(vmi) {
 		return converter.CalculateNetworkQueues(vmi)
