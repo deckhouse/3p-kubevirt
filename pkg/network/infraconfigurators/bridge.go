@@ -199,7 +199,8 @@ func (b *BridgePodNetworkConfigurator) createMacvtap() error {
 				MTU:         b.podNicLink.Attrs().MTU,
 				ParentIndex: b.podNicLink.Attrs().Index,
 			},
-			Mode: netlink.MACVLAN_MODE_BRIDGE,
+			//Mode: netlink.MACVLAN_MODE_BRIDGE,
+			Mode: netlink.MACVLAN_MODE_VEPA,
 		},
 	}
 	err := b.handler.LinkAdd(macvtap)
