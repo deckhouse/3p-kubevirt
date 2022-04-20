@@ -83,8 +83,8 @@ type NetworkHandler interface {
 	NftablesAppendRule(proto iptables.Protocol, table, chain string, rulespec ...string) error
 	NftablesLoad(proto iptables.Protocol) error
 	GetNFTIPString(proto iptables.Protocol) string
-	CreateTapDevice(tapName string, queueNumber uint32, launcherPID int, mtu int, tapOwner string) error
-	BindTapDeviceToBridge(tapName string, bridgeName string) error
+	CreateTapDevice(tapName string, parentIndex int, queueNumber uint32, launcherPID int, mtu int, tapOwner string) error
+	BindTapDeviceToBridge(tapName string) error
 	DisableTXOffloadChecksum(ifaceName string) error
 }
 
@@ -406,8 +406,8 @@ func (h *NetworkUtilsHandler) StartDHCP(nic *cache.DHCPConfig, bridgeInterfaceNa
 	return nil
 }
 
-func (h *NetworkUtilsHandler) CreateTapDevice(tapName string, queueNumber uint32, launcherPID int, mtu int, tapOwner string) error {
-	tapDeviceSELinuxCmdExecutor, err := buildTapDeviceMaker(tapName, queueNumber, launcherPID, mtu, tapOwner)
+func (h *NetworkUtilsHandler) CreateTapDevice(tapName string, parentIndex int, queueNumber uint32, launcherPID int, mtu int, tapOwner string) error {
+	tapDeviceSELinuxCmdExecutor, err := buildTapDeviceMaker(tapName, parentIndex, queueNumber, launcherPID, mtu, tapOwner)
 	if err != nil {
 		return err
 	}
@@ -419,10 +419,11 @@ func (h *NetworkUtilsHandler) CreateTapDevice(tapName string, queueNumber uint32
 	return nil
 }
 
-func buildTapDeviceMaker(tapName string, queueNumber uint32, virtLauncherPID int, mtu int, tapOwner string) (*selinux.ContextExecutor, error) {
+func buildTapDeviceMaker(tapName string, parentIndex int, queueNumber uint32, virtLauncherPID int, mtu int, tapOwner string) (*selinux.ContextExecutor, error) {
 	createTapDeviceArgs := []string{
 		"create-tap",
 		"--tap-name", tapName,
+		"--parent-index", fmt.Sprintf("%d", parentIndex),
 		"--uid", tapOwner,
 		"--gid", tapOwner,
 		"--queue-number", fmt.Sprintf("%d", queueNumber),
@@ -433,20 +434,11 @@ func buildTapDeviceMaker(tapName string, queueNumber uint32, virtLauncherPID int
 	return selinux.NewContextExecutor(virtLauncherPID, cmd)
 }
 
-func (h *NetworkUtilsHandler) BindTapDeviceToBridge(tapName string, bridgeName string) error {
+func (h *NetworkUtilsHandler) BindTapDeviceToBridge(tapName string) error {
 	tap, err := netlink.LinkByName(tapName)
 	log.Log.V(4).Infof("Looking for tap device: %s", tapName)
 	if err != nil {
 		return fmt.Errorf("could not find tap device %s; %v", tapName, err)
-	}
-
-	bridge := &netlink.Bridge{
-		LinkAttrs: netlink.LinkAttrs{
-			Name: bridgeName,
-		},
-	}
-	if err := netlink.LinkSetMaster(tap, bridge); err != nil {
-		return fmt.Errorf("failed to bind tap device %s to bridge %s; %v", tapName, bridgeName, err)
 	}
 
 	err = netlink.LinkSetUp(tap)

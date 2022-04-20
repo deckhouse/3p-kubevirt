@@ -8,26 +8,25 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/vishvananda/netlink"
-	"golang.org/x/sys/unix"
+	"kubevirt.io/client-go/log"
 )
 
-func createTapDevice(name string, owner uint, group uint, queueNumber int, mtu int) error {
-	tapDevice := &netlink.Tuntap{
-		LinkAttrs:  netlink.LinkAttrs{Name: name},
-		Mode:       unix.IFF_TAP,
-		NonPersist: false,
-		Queues:     queueNumber,
-		Owner:      uint32(owner),
-		Group:      uint32(group),
-	}
+func createTapDevice(name string, parentIndex int, owner uint, group uint, queueNumber int, mtu int) error {
 
-	// when netlink receives a request for a tap device with 1 queue, it uses
-	// the MULTI_QUEUE flag, which differs from libvirt; as such, we need to
-	// manually request the single queue flags, enabling libvirt to consume
-	// the tap device.
-	// See https://github.com/vishvananda/netlink/issues/574
-	if queueNumber == 1 {
-		tapDevice.Flags = netlink.TUNTAP_DEFAULTS
+	// Create a macvtap
+	tapDevice := &netlink.Macvtap{
+		Macvlan: netlink.Macvlan{
+			LinkAttrs: netlink.LinkAttrs{
+				Name:        name,
+				ParentIndex: parentIndex,
+			},
+			Mode: netlink.MACVLAN_MODE_BRIDGE,
+		},
+	}
+	err := netlink.LinkAdd(tapDevice)
+	if err != nil {
+		log.Log.Reason(err).Errorf("failed to create a macvtap")
+		return err
 	}
 
 	// Device creation is retried due to https://bugzilla.redhat.com/1933627
@@ -55,6 +54,10 @@ func NewCreateTapCommand() *cobra.Command {
 		Short: "create a tap device in a given PID net ns",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			tapName := cmd.Flag("tap-name").Value.String()
+			parentIndex, err := cmd.Flags().GetInt("parent-index")
+			if err != nil {
+				return fmt.Errorf("could not access parent-index parameter: %v", err)
+			}
 			uidStr := cmd.Flag("uid").Value.String()
 			gidStr := cmd.Flag("gid").Value.String()
 			queueNumber, err := cmd.Flags().GetUint32("queue-number")
@@ -75,7 +78,7 @@ func NewCreateTapCommand() *cobra.Command {
 				return fmt.Errorf("could not parse tap device group: %v", err)
 			}
 
-			return createTapDevice(tapName, uint(uid), uint(gid), int(queueNumber), int(mtu))
+			return createTapDevice(tapName, parentIndex, uint(uid), uint(gid), int(queueNumber), int(mtu))
 		},
 	}
 }

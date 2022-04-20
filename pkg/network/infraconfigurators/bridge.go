@@ -3,6 +3,7 @@ package infraconfigurators
 import (
 	"fmt"
 	"net"
+	"strconv"
 
 	"github.com/vishvananda/netlink"
 
@@ -11,6 +12,7 @@ import (
 	"kubevirt.io/kubevirt/pkg/network/cache"
 	netdriver "kubevirt.io/kubevirt/pkg/network/driver"
 	virtnetlink "kubevirt.io/kubevirt/pkg/network/link"
+	"kubevirt.io/kubevirt/pkg/util"
 	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/api"
 )
 
@@ -127,37 +129,20 @@ func (b *BridgePodNetworkConfigurator) PreparePodNetworkInterface() error {
 		return err
 	}
 
-	//// TODO
-	////tapOwner := netdriver.LibvirtUserAndGroupId
-	////if util.IsNonRootVMI(b.vmi) {
-	////	tapOwner = strconv.Itoa(util.NonRootUID)
-	////}
-	////err := createAndBindTapToBridge(b.handler, b.tapDeviceName, b.bridgeInterfaceName, b.launcherPID, b.podNicLink.Attrs().MTU, tapOwner, b.vmi)
-	////if err != nil {
-	////	log.Log.Reason(err).Errorf("failed to create tap device named %s", b.tapDeviceName)
-	////	return err
-	////}
-
-	if err := b.createMacvtap(); err != nil {
+	tapOwner := netdriver.LibvirtUserAndGroupId
+	if util.IsNonRootVMI(b.vmi) {
+		tapOwner = strconv.Itoa(util.NonRootUID)
+	}
+	err := createAndBindTapToBridge(b.handler, b.tapDeviceName, b.podNicLink.Attrs().Index, b.launcherPID, b.podNicLink.Attrs().MTU, tapOwner, b.vmi)
+	if err != nil {
+		log.Log.Reason(err).Errorf("failed to create tap device named %s", b.tapDeviceName)
 		return err
 	}
-
-	//// Rename pod interface to bridged name for DHCP
-	//err := b.handler.LinkSetName(b.podNicLink, b.bridgeInterfaceName)
-	//if err != nil {
-	//	log.Log.Reason(err).Errorf("failed to rename interface : %s", b.podNicLink.Attrs().Name)
-	//	return err
-	//}
 
 	if err := b.handler.LinkSetUp(b.podNicLink); err != nil {
 		log.Log.Reason(err).Errorf("failed to bring link up for interface: %s", b.podNicLink.Attrs().Name)
 		return err
 	}
-
-	// if err := b.handler.LinkSetLearningOff(b.podNicLink); err != nil {
-	// 	log.Log.Reason(err).Errorf("failed to disable mac learning for interface: %s", b.podNicLink.Attrs().Name)
-	// 	return err
-	// }
 
 	return nil
 }
@@ -188,43 +173,6 @@ func (b *BridgePodNetworkConfigurator) decorateDhcpConfigRoutes(dhcpConfig *cach
 		dhcpRoutes := virtnetlink.FilterPodNetworkRoutes(b.podIfaceRoutes, dhcpConfig)
 		dhcpConfig.Routes = &dhcpRoutes
 	}
-}
-
-func (b *BridgePodNetworkConfigurator) createMacvtap() error {
-	// Create a macvtap
-	macvtap := &netlink.Macvtap{
-		Macvlan: netlink.Macvlan{
-			LinkAttrs: netlink.LinkAttrs{
-				Name:        b.tapDeviceName,
-				MTU:         b.podNicLink.Attrs().MTU,
-				ParentIndex: b.podNicLink.Attrs().Index,
-			},
-			//Mode: netlink.MACVLAN_MODE_BRIDGE,
-			Mode: netlink.MACVLAN_MODE_VEPA,
-		},
-	}
-	err := b.handler.LinkAdd(macvtap)
-	if err != nil {
-		log.Log.Reason(err).Errorf("failed to create a macvtap")
-		return err
-	}
-
-	err = b.handler.LinkSetUp(macvtap)
-	if err != nil {
-		log.Log.Reason(err).Errorf("failed to bring link up for interface: %s", b.tapDeviceName)
-		return err
-	}
-
-	// set fake ip on a pod Interface
-	addr := virtnetlink.GetFakeBridgeIP(b.vmi.Spec.Domain.Devices.Interfaces, b.vmiSpecIface)
-	fakeaddr, _ := b.handler.ParseAddr(addr)
-
-	if err := b.handler.AddrAdd(b.podNicLink, fakeaddr); err != nil {
-		log.Log.Reason(err).Errorf("failed to set pod interface IP")
-		return err
-	}
-
-	return nil
 }
 
 func (b *BridgePodNetworkConfigurator) createBridge() error {
