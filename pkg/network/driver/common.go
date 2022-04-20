@@ -386,7 +386,7 @@ func (h *NetworkUtilsHandler) StartDHCP(nic *cache.DHCPConfig, bridgeInterfaceNa
 				dhcpOptions,
 			); err != nil {
 				log.Log.Errorf("failed to run DHCP: %v", err)
-				panic(err)
+				//panic(err)
 			}
 		}()
 	}

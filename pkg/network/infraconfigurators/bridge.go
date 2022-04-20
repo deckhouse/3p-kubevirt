@@ -142,12 +142,12 @@ func (b *BridgePodNetworkConfigurator) PreparePodNetworkInterface() error {
 		return err
 	}
 
-	// Rename pod interface to bridged name for DHCP
-	err := b.handler.LinkSetName(b.podNicLink, b.bridgeInterfaceName)
-	if err != nil {
-		log.Log.Reason(err).Errorf("failed to rename interface : %s", b.podNicLink.Attrs().Name)
-		return err
-	}
+	//// Rename pod interface to bridged name for DHCP
+	//err := b.handler.LinkSetName(b.podNicLink, b.bridgeInterfaceName)
+	//if err != nil {
+	//	log.Log.Reason(err).Errorf("failed to rename interface : %s", b.podNicLink.Attrs().Name)
+	//	return err
+	//}
 
 	if err := b.handler.LinkSetUp(b.podNicLink); err != nil {
 		log.Log.Reason(err).Errorf("failed to bring link up for interface: %s", b.podNicLink.Attrs().Name)
