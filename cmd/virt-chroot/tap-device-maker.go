@@ -12,19 +12,31 @@ import (
 
 func createTapDevice(name string, parentIndex int, owner uint, group uint, queueNumber int, mtu int) error {
 
+	m, err := netlink.LinkByIndex(parentIndex)
+	if err != nil {
+		return fmt.Errorf("failed to lookup lowerDevice %q: %v", parentIndex, err)
+	}
+
 	// Create a macvtap
 	tapDevice := &netlink.Macvtap{
 		Macvlan: netlink.Macvlan{
 			LinkAttrs: netlink.LinkAttrs{
 				Name:        name,
 				ParentIndex: parentIndex,
+				// we had crashes if we did not set txqlen to some value
+				TxQLen: m.Attrs().TxQLen,
 			},
 			Mode: netlink.MACVLAN_MODE_BRIDGE,
 		},
 	}
 
+	// when netlink receives a request for a tap device with 1 queue, it uses
+	// the MULTI_QUEUE flag, which differs from libvirt; as such, we need to
+	// manually request the single queue flags, enabling libvirt to consume
+	// the tap device.
+	// See https://github.com/vishvananda/netlink/issues/574
 	if queueNumber == 1 {
-		tapDevice.Macvlan.Flags = netlink.TUNTAP_DEFAULTS
+		tapDevice.Flags = netlink.TUNTAP_DEFAULTS
 	}
 
 	// Device creation is retried due to https://bugzilla.redhat.com/1933627
