@@ -470,7 +470,7 @@ func (t *templateService) renderLaunchManifest(vmi *v1.VirtualMachineInstance, i
 	var imagePullSecrets []k8sv1.LocalObjectReference
 
 	var userId int64 = util.RootUser
-	var privileged bool = true
+	var privileged bool = false
 
 	nonRoot := util.IsNonRootVMI(vmi)
 	if nonRoot {
@@ -1139,7 +1139,8 @@ func (t *templateService) renderLaunchManifest(vmi *v1.VirtualMachineInstance, i
 			RunAsUser:  &userId,
 			Privileged: &privileged,
 			Capabilities: &k8sv1.Capabilities{
-				Add: getRequiredCapabilities(vmi),
+				Add:  getRequiredCapabilities(vmi),
+				Drop: []k8sv1.Capability{CAP_NET_RAW},
 			},
 		},
 		Command:       command,
