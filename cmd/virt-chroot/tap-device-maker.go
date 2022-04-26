@@ -8,26 +8,49 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/vishvananda/netlink"
+	"golang.org/x/sys/unix"
 )
 
-func createTapDevice(name string, parentIndex int, owner uint, group uint, queueNumber int, mtu int) error {
+func createTapDevice(name string, parentName string, owner uint, group uint, queueNumber int, mtu int) error {
+	var tapDevice netlink.Link
 
-	m, err := netlink.LinkByIndex(parentIndex)
-	if err != nil {
-		return fmt.Errorf("failed to lookup lowerDevice %q: %v", parentIndex, err)
-	}
+	if parentName == "" {
+		tapDevice = &netlink.Tuntap{
+			LinkAttrs:  netlink.LinkAttrs{Name: name},
+			Mode:       unix.IFF_TAP,
+			NonPersist: false,
+			Queues:     queueNumber,
+			Owner:      uint32(owner),
+			Group:      uint32(group),
+		}
 
-	// Create a macvtap
-	tapDevice := &netlink.Macvtap{
-		Macvlan: netlink.Macvlan{
-			LinkAttrs: netlink.LinkAttrs{
-				Name:        name,
-				ParentIndex: parentIndex,
-				// we had crashes if we did not set txqlen to some value
-				TxQLen: m.Attrs().TxQLen,
+		// when netlink receives a request for a tap device with 1 queue, it uses
+		// the MULTI_QUEUE flag, which differs from libvirt; as such, we need to
+		// manually request the single queue flags, enabling libvirt to consume
+		// the tap device.
+		// See https://github.com/vishvananda/netlink/issues/574
+		if queueNumber == 1 {
+			tapDevice.Flags = netlink.TUNTAP_DEFAULTS
+		}
+
+	} else {
+		m, err := netlink.LinkByName(parentName)
+		if err != nil {
+			return fmt.Errorf("failed to lookup lowerDevice %q: %v", parentName, err)
+		}
+
+		// Create a macvtap
+		tapDevice = &netlink.Macvtap{
+			Macvlan: netlink.Macvlan{
+				LinkAttrs: netlink.LinkAttrs{
+					Name:        name,
+					ParentIndex: m.Attrs().Index,
+					// we had crashes if we did not set txqlen to some value
+					TxQLen: m.Attrs().TxQLen,
+				},
+				Mode: netlink.MACVLAN_MODE_BRIDGE,
 			},
-			Mode: netlink.MACVLAN_MODE_BRIDGE,
-		},
+		}
 	}
 
 	// Device creation is retried due to https://bugzilla.redhat.com/1933627
@@ -55,10 +78,7 @@ func NewCreateTapCommand() *cobra.Command {
 		Short: "create a tap device in a given PID net ns",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			tapName := cmd.Flag("tap-name").Value.String()
-			parentIndex, err := cmd.Flags().GetInt("parent-index")
-			if err != nil {
-				return fmt.Errorf("could not access parent-index parameter: %v", err)
-			}
+			parentName := cmd.Flag("parent-name").Value.String()
 			uidStr := cmd.Flag("uid").Value.String()
 			gidStr := cmd.Flag("gid").Value.String()
 			queueNumber, err := cmd.Flags().GetUint32("queue-number")
@@ -79,7 +99,7 @@ func NewCreateTapCommand() *cobra.Command {
 				return fmt.Errorf("could not parse tap device group: %v", err)
 			}
 
-			return createTapDevice(tapName, parentIndex, uint(uid), uint(gid), int(queueNumber), int(mtu))
+			return createTapDevice(tapName, parentName, uint(uid), uint(gid), int(queueNumber), int(mtu))
 		},
 	}
 }
