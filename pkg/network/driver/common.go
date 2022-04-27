@@ -23,7 +23,6 @@ package driver
 
 import (
 	"fmt"
-	"io/ioutil"
 	"net"
 	"os"
 	"os/exec"
@@ -36,7 +35,6 @@ import (
 	"github.com/opencontainers/runc/libcontainer/devices"
 	lmf "github.com/subgraph/libmacouflage"
 	"github.com/vishvananda/netlink"
-	"golang.org/x/sys/unix"
 
 	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/converter"
 
@@ -423,35 +421,43 @@ func (h *NetworkUtilsHandler) CreateTapDevice(tapName string, parentName string,
 		return fmt.Errorf("error creating tap device named %s; %v", tapName, err)
 	}
 
-	// join the network namespace of a process
-	fd, err := os.Open(filepath.Join("/proc", strconv.Itoa(launcherPID), "ns/net"))
-	if err != nil {
-		return fmt.Errorf("failed to open network namespace: %v", err)
-	}
-	defer fd.Close()
-
-	if err = unix.Unshare(unix.CLONE_NEWNET); err != nil {
-		return fmt.Errorf("failed to detach from parent network namespace: %v", err)
-	}
-	if err := unix.Setns(int(fd.Fd()), unix.CLONE_NEWNET); err != nil {
-		return fmt.Errorf("failed to join the network namespace: %v", err)
-	}
+	// // join the network namespace of a process
+	// fd, err := os.Open(filepath.Join("/proc", strconv.Itoa(launcherPID), "ns/net"))
+	// if err != nil {
+	// 	return fmt.Errorf("failed to open network namespace: %v", err)
+	// }
+	// defer fd.Close()
+	//
+	// if err = unix.Unshare(unix.CLONE_NEWNET); err != nil {
+	// 	return fmt.Errorf("failed to detach from parent network namespace: %v", err)
+	// }
+	// if err := unix.Setns(int(fd.Fd()), unix.CLONE_NEWNET); err != nil {
+	// 	return fmt.Errorf("failed to join the network namespace: %v", err)
+	// }
 
 	// fix permissions
 	manager, _ := cgroup.NewManagerFromPid(launcherPID)
 
 	tapSysPath := filepath.Join("/sys/class/net", tapName, "macvtap")
-	dirContent, err := ioutil.ReadDir(tapSysPath)
+	// dirContent, err := ioutil.ReadDir(tapSysPath)
+	cmd := exec.Command("/usr/bin/nsenter", "-t", strconv.Itoa(launcherPID), "-n", "/bin/sh", "-c", "ls -1 "+tapSysPath)
+	out, err := cmd.Output()
 	if err != nil {
-		return fmt.Errorf("Filed to open directory %s. error: %v", tapSysPath, err)
+		return fmt.Errorf("failed to open directory %s. error: %v", tapSysPath, err)
 	}
 
-	devName := dirContent[0].Name()
+	// devName := dirContent[0].Name()
+	devName := string(out)
+
 	devSysPath := filepath.Join(tapSysPath, devName, "dev")
-	devString, err := ioutil.ReadFile(devSysPath)
+	cmd = exec.Command("/usr/bin/nsenter", "-t", strconv.Itoa(launcherPID), "-n", "/bin/sh", "-c", "cat "+devSysPath)
+
+	// devString, err := ioutil.ReadFile(devSysPath)
+	out, err = cmd.Output()
 	if err != nil {
 		return fmt.Errorf("unable to read file %s. error: %v", devSysPath, err)
 	}
+	devString := string(out)
 
 	m := strings.Split(strings.TrimSuffix(string(devString), "\n"), ":")
 	major, err := strconv.Atoi(m[0])
