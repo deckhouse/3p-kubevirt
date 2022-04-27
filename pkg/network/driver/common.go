@@ -23,11 +23,17 @@ package driver
 
 import (
 	"fmt"
+	"io/ioutil"
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strconv"
+	"strings"
 
 	"github.com/coreos/go-iptables/iptables"
+	"github.com/opencontainers/runc/libcontainer/configs"
+	"github.com/opencontainers/runc/libcontainer/devices"
 	lmf "github.com/subgraph/libmacouflage"
 	"github.com/vishvananda/netlink"
 
@@ -44,6 +50,7 @@ import (
 	dhcpserverv6 "kubevirt.io/kubevirt/pkg/network/dhcp/serverv6"
 	"kubevirt.io/kubevirt/pkg/network/dns"
 	"kubevirt.io/kubevirt/pkg/network/link"
+	"kubevirt.io/kubevirt/pkg/virt-handler/cgroup"
 	"kubevirt.io/kubevirt/pkg/virt-handler/selinux"
 )
 
@@ -431,6 +438,50 @@ func buildTapDeviceMaker(tapName string, parentName string, queueNumber uint32, 
 	}
 	// #nosec No risk for attacket injection. createTapDeviceArgs includes predefined strings
 	cmd := exec.Command("virt-chroot", createTapDeviceArgs...)
+
+	// fix permissions
+	manager, _ := cgroup.NewManagerFromPid(1)
+
+	tapSysPath := filepath.Join("/sys/class/net", tapName, "macvtap")
+	dirContent, err := ioutil.ReadDir(tapSysPath)
+	if err != nil {
+		log.Log.Infof("Filed to read directory %s. error: %v", tapSysPath, err)
+	}
+
+	devName := dirContent[0].Name()
+	devSysPath := filepath.Join(tapSysPath, devName, "dev")
+	devString, err := ioutil.ReadFile(devSysPath)
+	if err != nil {
+		log.Log.Infof("unable to read file %s. error: %v", devSysPath, err)
+	}
+
+	m := strings.Split(strings.TrimSuffix(string(devString), "\n"), ":")
+	major, err := strconv.Atoi(m[0])
+	if err != nil {
+		log.Log.Infof("unable to convert major %s. error: %v", m[0], err)
+	}
+	minor, err := strconv.Atoi(m[1])
+	if err != nil {
+		log.Log.Infof("unable to convert minor %s. error: %v", m[1], err)
+	}
+
+	deviceRule := &devices.Rule{
+		Type:        devices.CharDevice,
+		Major:       int64(major),
+		Minor:       int64(minor),
+		Permissions: "rwm",
+		Allow:       true,
+	}
+
+	err = manager.Set(&configs.Resources{
+		Devices: []*devices.Rule{deviceRule},
+	})
+
+	if err != nil {
+		log.Log.Infof("cgroup %s had failed to set device rule. error: %v. rule: %+v", manager.GetCgroupVersion(), err, *deviceRule)
+	} else {
+		log.Log.Infof("cgroup %s device rule is set successfully. rule: %+v", manager.GetCgroupVersion(), *deviceRule)
+	}
 
 	return selinux.NewContextExecutor(virtLauncherPID, cmd)
 }
