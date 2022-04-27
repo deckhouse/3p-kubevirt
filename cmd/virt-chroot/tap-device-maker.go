@@ -16,10 +16,9 @@ import (
 )
 
 func createTapDevice(name string, parentName string, owner uint, group uint, queueNumber int, mtu int) error {
-	var tapDevice netlink.Link
-
 	if parentName == "" {
-		tapDevice = &netlink.Tuntap{
+		// Parent not specified. Create a tap interface.
+		tapDevice := &netlink.Tuntap{
 			LinkAttrs:  netlink.LinkAttrs{Name: name},
 			Mode:       unix.IFF_TAP,
 			NonPersist: false,
@@ -28,50 +27,56 @@ func createTapDevice(name string, parentName string, owner uint, group uint, que
 			Group:      uint32(group),
 		}
 
-		// // when netlink receives a request for a tap device with 1 queue, it uses
-		// // the MULTI_QUEUE flag, which differs from libvirt; as such, we need to
-		// // manually request the single queue flags, enabling libvirt to consume
-		// // the tap device.
-		// // See https://github.com/vishvananda/netlink/issues/574
-		// if queueNumber == 1 {
-		// 	tapDevice.Flags = netlink.TUNTAP_DEFAULTS
-		// }
+		// when netlink receives a request for a tap device with 1 queue, it uses
+		// the MULTI_QUEUE flag, which differs from libvirt; as such, we need to
+		// manually request the single queue flags, enabling libvirt to consume
+		// the tap device.
+		// See https://github.com/vishvananda/netlink/issues/574
+		if queueNumber == 1 {
+			tapDevice.Flags = netlink.TUNTAP_DEFAULTS
+		}
 
-	} else {
-		m, err := netlink.LinkByName(parentName)
+		// Device creation is retried due to https://bugzilla.redhat.com/1933627
+		// which has been observed on multiple occasions on CI runs.
+		const retryAttempts = 5
+		attempt, err := retry(retryAttempts, func() error {
+			return netlink.LinkAdd(tapDevice)
+		})
 		if err != nil {
-			return fmt.Errorf("failed to lookup lowerDevice %q: %v", parentName, err)
+			return fmt.Errorf("failed to create tap device named %s. Reason: %v", name, err)
 		}
 
-		// Create a macvtap
-		tapDevice = &netlink.Macvtap{
-			Macvlan: netlink.Macvlan{
-				LinkAttrs: netlink.LinkAttrs{
-					Name:        name,
-					ParentIndex: m.Attrs().Index,
-					// we had crashes if we did not set txqlen to some value
-					TxQLen: m.Attrs().TxQLen,
-				},
-				Mode: netlink.MACVLAN_MODE_BRIDGE,
-			},
+		if err := netlink.LinkSetMTU(tapDevice, mtu); err != nil {
+			return fmt.Errorf("failed to set MTU on tap device named %s. Reason: %v", name, err)
 		}
+
+		fmt.Printf("Successfully created tap device %s, attempt %d\n", name, attempt)
+		return nil
 	}
 
-	// Device creation is retried due to https://bugzilla.redhat.com/1933627
-	// which has been observed on multiple occasions on CI runs.
-	const retryAttempts = 5
-	attempt, err := retry(retryAttempts, func() error {
-		return netlink.LinkAdd(tapDevice)
-	})
+	// Parent specified. Create a macvtap.
+	p, err := netlink.LinkByName(parentName)
 	if err != nil {
-		return fmt.Errorf("failed to create tap device named %s. Reason: %v", name, err)
+		return fmt.Errorf("failed to lookup lowerDevice %q: %v", parentName, err)
 	}
 
-	if err := netlink.LinkSetMTU(tapDevice, mtu); err != nil {
-		return fmt.Errorf("failed to set MTU on tap device named %s. Reason: %v", name, err)
+	macvtapDevice := &netlink.Macvtap{
+		Macvlan: netlink.Macvlan{
+			LinkAttrs: netlink.LinkAttrs{
+				Name:        name,
+				ParentIndex: p.Attrs().Index,
+				// we had crashes if we did not set txqlen to some value
+				TxQLen: p.Attrs().TxQLen,
+			},
+			Mode: netlink.MACVLAN_MODE_BRIDGE,
+		},
 	}
 
-	// Create /dev/tapX device
+	if err := netlink.LinkAdd(macvtapDevice); err != nil {
+		return fmt.Errorf("failed to create macvtap device named %s. Reason: %v", name, err)
+	}
+
+	// In case of macvtap we must create /dev/tapX device
 	tapSysPath := filepath.Join("/sys/class/net", name, "macvtap")
 	dirContent, err := ioutil.ReadDir(tapSysPath)
 	if err != nil {
@@ -111,8 +116,7 @@ func createTapDevice(name string, parentName string, owner uint, group uint, que
 		return fmt.Errorf("failed to create characted device %s. error: %v", tapDevPath, err)
 	}
 
-	fmt.Printf("Successfully created tap device %s, attempt %d\n", name, attempt)
-
+	fmt.Printf("Successfully created macvtap device %s", name)
 	return nil
 }
 
