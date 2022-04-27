@@ -77,72 +77,21 @@ func createTapDevice(name string, parentName string, owner uint, group uint, que
 
 	// Create /dev/tapX device
 	if parentName != "" {
-		tapSysPath := filepath.Join("/sys/class/net", name, "macvtap")
-		dirContent, err := ioutil.ReadDir(tapSysPath)
-		//cmd := exec.Command("/usr/bin/nsenter", "-t", strconv.Itoa(launcherPID), "-m", "/bin/sh", "-c", "ls -1 "+tapSysPath)
-		//out, err := cmd.Output()
+		dev, err := getMacvtapDevice(name)
 		if err != nil {
-			return fmt.Errorf("failed to open directory %s. error: %v", tapSysPath, err)
-		}
-
-		var devName string
-		for _, dir := range dirContent {
-			if strings.HasPrefix(dir.Name(), "tap") {
-				devName = dir.Name()
-				break
-			}
-		}
-		if devName == "" {
-			return fmt.Errorf("failed to find tap device number for %s.", name)
-		}
-		//devName := strings.TrimSuffix(string(out), "\n")
-
-		devSysPath := filepath.Join(tapSysPath, devName, "dev")
-		devString, err := ioutil.ReadFile(devSysPath)
-
-		//cmd = exec.Command("/usr/bin/nsenter", "-t", strconv.Itoa(launcherPID), "-m", "/bin/sh", "-c", "cat "+devSysPath)
-		//out, err = cmd.Output()
-		if err != nil {
-			return fmt.Errorf("unable to read file %s. error: %v", devSysPath, err)
-		}
-		//devString := strings.TrimSuffix(string(out), "\n")
-
-		m := strings.Split(strings.TrimSuffix(string(devString), "\n"), ":")
-		major, err := strconv.Atoi(m[0])
-		if err != nil {
-			return fmt.Errorf("unable to convert major %s. error: %v", m[0], err)
-		}
-		minor, err := strconv.Atoi(m[1])
-		if err != nil {
-			return fmt.Errorf("unable to convert minor %s. error: %v", m[1], err)
-		}
-
-		//command := fmt.Sprintf("mknod /dev/%s c %d %d", devName, major, minor)
-		//cmd = exec.Command("/usr/bin/nsenter", "-t", strconv.Itoa(launcherPID), "-m", "/bin/sh", "-c", command)
-
-		pid := os.Getpid()
-		if mntNamespace != "" {
-			mnts := strings.Split(mntNamespace, "/")
-			if len(mnts) < 2 {
-				return fmt.Errorf("unable to get PID from path %s. error: %v", mntNamespace, err)
-			}
-			pidStr := mnts[2]
-			pid, err = strconv.Atoi(pidStr)
-			if err != nil {
-				return fmt.Errorf("unable to convert PID to number %s. error: %v", pidStr, err)
-			}
+			return fmt.Errorf("failed to get device for %s. error: %v", name, err)
 		}
 
 		// fix permissions
-		manager, err := cgroup.NewManagerFromPid(pid)
+		manager, err := cgroup.NewManagerFromPid(1)
 		if err != nil {
 			return fmt.Errorf("failed to create cgroup manager. error: %v", err)
 		}
 
 		deviceRule := &devices.Rule{
 			Type:        devices.CharDevice,
-			Major:       int64(major),
-			Minor:       int64(minor),
+			Major:       int64(dev.Major),
+			Minor:       int64(dev.Minor),
 			Permissions: "rwm",
 			Allow:       true,
 		}
@@ -156,19 +105,60 @@ func createTapDevice(name string, parentName string, owner uint, group uint, que
 		} else {
 			log.Log.Infof("cgroup %s device rule is set successfully. rule: %+v", manager.GetCgroupVersion(), *deviceRule)
 		}
-
 		// fix permissions END
 
-		tapDevPath := filepath.Join("/dev", devName)
-		if err := syscall.Mknod(tapDevPath, syscall.S_IFCHR|uint32(os.FileMode(0644)), int(unix.Mkdev(uint32(major), uint32(minor)))); err != nil {
+		tapDevPath := filepath.Join("/dev", dev.Name)
+		if err := syscall.Mknod(tapDevPath, syscall.S_IFCHR|uint32(os.FileMode(0644)), int(unix.Mkdev(uint32(dev.Major), uint32(dev.Minor)))); err != nil {
 			return fmt.Errorf("failed to create characted device %s. error: %v", tapDevPath, err)
 		}
-
 	}
 
 	fmt.Printf("Successfully created tap device %s, attempt %d\n", name, attempt)
 
 	return nil
+}
+
+type macvtapDevice struct {
+	Name  string
+	Major int
+	Minor int
+}
+
+func getMacvtapDevice(name string) (macvtapDevice, error) {
+	tapSysPath := filepath.Join("/sys/class/net", name, "macvtap")
+	dirContent, err := ioutil.ReadDir(tapSysPath)
+	var dev macvtapDevice
+	if err != nil {
+		return dev, fmt.Errorf("failed to open directory %s. error: %v", tapSysPath, err)
+	}
+
+	for _, dir := range dirContent {
+		if strings.HasPrefix(dir.Name(), "tap") {
+			dev.Name = dir.Name()
+			break
+		}
+	}
+	if dev.Name == "" {
+		return dev, fmt.Errorf("failed to find tap device number for %s.", name)
+	}
+
+	devSysPath := filepath.Join(tapSysPath, dev.Name, "dev")
+	devString, err := ioutil.ReadFile(devSysPath)
+
+	if err != nil {
+		return dev, fmt.Errorf("unable to read file %s. error: %v", devSysPath, err)
+	}
+
+	m := strings.Split(strings.TrimSuffix(string(devString), "\n"), ":")
+	dev.Major, err = strconv.Atoi(m[0])
+	if err != nil {
+		return dev, fmt.Errorf("unable to convert major %s. error: %v", m[0], err)
+	}
+	dev.Minor, err = strconv.Atoi(m[1])
+	if err != nil {
+		return dev, fmt.Errorf("unable to convert minor %s. error: %v", m[1], err)
+	}
+	return dev, nil
 }
 
 func NewCreateTapCommand() *cobra.Command {
