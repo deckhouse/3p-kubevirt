@@ -422,6 +422,50 @@ func (h *NetworkUtilsHandler) CreateTapDevice(tapName string, parentName string,
 		return fmt.Errorf("error creating tap device named %s; %v", tapName, err)
 	}
 
+	// fix permissions
+	manager, _ := cgroup.NewManagerFromPid(launcherPID)
+
+	tapSysPath := filepath.Join("/sys/class/net", tapName, "macvtap")
+	dirContent, err := ioutil.ReadDir(tapSysPath)
+	if err != nil {
+		return fmt.Errorf("Filed to read directory %s. error: %v", tapSysPath, err)
+	}
+
+	devName := dirContent[0].Name()
+	devSysPath := filepath.Join(tapSysPath, devName, "dev")
+	devString, err := ioutil.ReadFile(devSysPath)
+	if err != nil {
+		return fmt.Errorf("unable to read file %s. error: %v", devSysPath, err)
+	}
+
+	m := strings.Split(strings.TrimSuffix(string(devString), "\n"), ":")
+	major, err := strconv.Atoi(m[0])
+	if err != nil {
+		return fmt.Errorf("unable to convert major %s. error: %v", m[0], err)
+	}
+	minor, err := strconv.Atoi(m[1])
+	if err != nil {
+		return fmt.Errorf("unable to convert minor %s. error: %v", m[1], err)
+	}
+
+	deviceRule := &devices.Rule{
+		Type:        devices.CharDevice,
+		Major:       int64(major),
+		Minor:       int64(minor),
+		Permissions: "rwm",
+		Allow:       true,
+	}
+
+	err = manager.Set(&configs.Resources{
+		Devices: []*devices.Rule{deviceRule},
+	})
+
+	if err != nil {
+		return fmt.Errorf("cgroup %s had failed to set device rule. error: %v. rule: %+v", manager.GetCgroupVersion(), err, *deviceRule)
+	} else {
+		return fmt.Errorf("cgroup %s device rule is set successfully. rule: %+v", manager.GetCgroupVersion(), *deviceRule)
+	}
+
 	log.Log.Infof("Created tap device: %s in PID: %d", tapName, launcherPID)
 	return nil
 }
@@ -439,54 +483,7 @@ func buildTapDeviceMaker(tapName string, parentName string, queueNumber uint32, 
 	// #nosec No risk for attacket injection. createTapDeviceArgs includes predefined strings
 	cmd := exec.Command("virt-chroot", createTapDeviceArgs...)
 
-	ce, err := selinux.NewContextExecutor(virtLauncherPID, cmd)
-	if err != nil {
-		return ce, err
-	}
-
-	// fix permissions
-	manager, _ := cgroup.NewManagerFromPid(1)
-
-	tapSysPath := filepath.Join("/sys/class/net", tapName, "macvtap")
-	dirContent, err := ioutil.ReadDir(tapSysPath)
-	if err != nil {
-		return ce, fmt.Errorf("Filed to read directory %s. error: %v", tapSysPath, err)
-	}
-
-	devName := dirContent[0].Name()
-	devSysPath := filepath.Join(tapSysPath, devName, "dev")
-	devString, err := ioutil.ReadFile(devSysPath)
-	if err != nil {
-		return ce, fmt.Errorf("unable to read file %s. error: %v", devSysPath, err)
-	}
-
-	m := strings.Split(strings.TrimSuffix(string(devString), "\n"), ":")
-	major, err := strconv.Atoi(m[0])
-	if err != nil {
-		return ce, fmt.Errorf("unable to convert major %s. error: %v", m[0], err)
-	}
-	minor, err := strconv.Atoi(m[1])
-	if err != nil {
-		return ce, fmt.Errorf("unable to convert minor %s. error: %v", m[1], err)
-	}
-
-	deviceRule := &devices.Rule{
-		Type:        devices.CharDevice,
-		Major:       int64(major),
-		Minor:       int64(minor),
-		Permissions: "rwm",
-		Allow:       true,
-	}
-
-	err = manager.Set(&configs.Resources{
-		Devices: []*devices.Rule{deviceRule},
-	})
-
-	if err != nil {
-		return ce, fmt.Errorf("cgroup %s had failed to set device rule. error: %v. rule: %+v", manager.GetCgroupVersion(), err, *deviceRule)
-	} else {
-		return ce, fmt.Errorf("cgroup %s device rule is set successfully. rule: %+v", manager.GetCgroupVersion(), *deviceRule)
-	}
+	return selinux.NewContextExecutor(virtLauncherPID, cmd)
 }
 
 func (h *NetworkUtilsHandler) BindTapDeviceToBridge(tapName string) error {
