@@ -414,13 +414,13 @@ func (h *NetworkUtilsHandler) StartDHCP(nic *cache.DHCPConfig, bridgeInterfaceNa
 }
 
 func (h *NetworkUtilsHandler) CreateTapDevice(tapName string, parentName string, queueNumber uint32, launcherPID int, mtu int, tapOwner string) error {
-	tapDeviceSELinuxCmdExecutor, err := buildTapDeviceMaker(tapName, parentName, queueNumber, launcherPID, mtu, tapOwner)
-	if err != nil {
-		return err
-	}
-	if err := tapDeviceSELinuxCmdExecutor.Execute(); err != nil {
-		return fmt.Errorf("error creating tap device named %s; %v", tapName, err)
-	}
+	///// tapDeviceSELinuxCmdExecutor, err := buildTapDeviceMaker(tapName, parentName, queueNumber, launcherPID, mtu, tapOwner)
+	///// if err != nil {
+	///// 	return err
+	///// }
+	///// if err := tapDeviceSELinuxCmdExecutor.Execute(); err != nil {
+	///// 	return fmt.Errorf("error creating tap device named %s; %v", tapName, err)
+	///// }
 
 	// // join the network namespace of a process
 	// fd, err := os.Open(filepath.Join("/proc", strconv.Itoa(launcherPID), "ns/net"))
