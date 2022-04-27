@@ -29,6 +29,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/coreos/go-iptables/iptables"
 	"github.com/opencontainers/runc/libcontainer/configs"
@@ -443,6 +444,8 @@ func (h *NetworkUtilsHandler) CreateTapDevice(tapName string, parentName string,
 	cmd := exec.Command("/usr/bin/nsenter", "-t", strconv.Itoa(launcherPID), "-n", "/bin/sh", "-c", "ls -1 "+tapSysPath)
 	out, err := cmd.Output()
 	if err != nil {
+		log.Log.Infof("command failed: %+v", []string{"/usr/bin/nsenter", "-t", strconv.Itoa(launcherPID), "-n", "/bin/sh", "-c", "ls -1 " + tapSysPath})
+		time.Sleep(10 * time.Minute)
 		return fmt.Errorf("failed to open directory %s. error: %v", tapSysPath, err)
 	}
 
