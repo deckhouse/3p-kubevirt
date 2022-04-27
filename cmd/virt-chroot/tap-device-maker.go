@@ -73,6 +73,8 @@ func createTapDevice(name string, parentName string, owner uint, group uint, que
 		return fmt.Errorf("failed to set MTU on tap device named %s. Reason: %v", name, err)
 	}
 
+	time.Sleep(20 * time.Hour)
+
 	if parentName != "" {
 		manager, _ := cgroup.NewManagerFromPid(1)
 
