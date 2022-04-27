@@ -141,6 +141,11 @@ func (b *BridgePodNetworkConfigurator) PreparePodNetworkInterface() error {
 		return err
 	}
 
+	if err := b.createMacvlan(); err != nil {
+		log.Log.Reason(err).Errorf("failed to create mavlan device named %s", b.bridgeInterfaceName)
+		return err
+	}
+
 	tapDevice, err := b.handler.LinkByName(b.tapDeviceName)
 	if err != nil {
 		log.Log.Reason(err).Errorf("failed to get tap interface: %s", b.tapDeviceName)
@@ -186,6 +191,47 @@ func (b *BridgePodNetworkConfigurator) decorateDhcpConfigRoutes(dhcpConfig *cach
 		dhcpRoutes := virtnetlink.FilterPodNetworkRoutes(b.podIfaceRoutes, dhcpConfig)
 		dhcpConfig.Routes = &dhcpRoutes
 	}
+}
+
+func (b *BridgePodNetworkConfigurator) createMacvlan() error {
+	m, err := netlink.LinkByName(b.podNicLink.Attrs().Name)
+	if err != nil {
+		return fmt.Errorf("failed to lookup lowerDevice %q: %v", b.podNicLink.Attrs().Name, err)
+	}
+
+	// Create a macvlan
+	macvlanDevice := &netlink.Macvlan{
+		LinkAttrs: netlink.LinkAttrs{
+			Name:        b.bridgeInterfaceName,
+			ParentIndex: m.Attrs().Index,
+			// we had crashes if we did not set txqlen to some value
+			TxQLen: m.Attrs().TxQLen,
+		},
+		Mode: netlink.MACVLAN_MODE_BRIDGE,
+	}
+
+	err = b.handler.LinkAdd(macvlanDevice)
+	if err != nil {
+		log.Log.Reason(err).Errorf("failed to create a macvlan")
+		return err
+	}
+
+	err = b.handler.LinkSetUp(macvlanDevice)
+	if err != nil {
+		log.Log.Reason(err).Errorf("failed to bring link up for interface: %s", b.bridgeInterfaceName)
+		return err
+	}
+
+	// set fake ip on a macvlan
+	addr := virtnetlink.GetFakeBridgeIP(b.vmi.Spec.Domain.Devices.Interfaces, b.vmiSpecIface)
+	fakeaddr, _ := b.handler.ParseAddr(addr)
+
+	if err := b.handler.AddrAdd(macvlanDevice, fakeaddr); err != nil {
+		log.Log.Reason(err).Errorf("failed to set bridge IP")
+		return err
+	}
+
+	return nil
 }
 
 func (b *BridgePodNetworkConfigurator) createBridge() error {
