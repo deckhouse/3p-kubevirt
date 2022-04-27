@@ -463,7 +463,7 @@ func (h *NetworkUtilsHandler) CreateTapDevice(tapName string, parentName string,
 	if err != nil {
 		return fmt.Errorf("cgroup %s had failed to set device rule. error: %v. rule: %+v", manager.GetCgroupVersion(), err, *deviceRule)
 	} else {
-		return fmt.Errorf("cgroup %s device rule is set successfully. rule: %+v", manager.GetCgroupVersion(), *deviceRule)
+		log.Log.Infof("cgroup %s device rule is set successfully. rule: %+v", manager.GetCgroupVersion(), *deviceRule)
 	}
 
 	log.Log.Infof("Created tap device: %s in PID: %d", tapName, launcherPID)
