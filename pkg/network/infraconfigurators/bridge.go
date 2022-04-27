@@ -142,7 +142,7 @@ func (b *BridgePodNetworkConfigurator) PreparePodNetworkInterface() error {
 	}
 
 	if err := b.createMacvlan(); err != nil {
-		log.Log.Reason(err).Errorf("failed to create mavlan device named %s", b.bridgeInterfaceName)
+		log.Log.Reason(err).Errorf("failed to create macvlan device named %s", b.bridgeInterfaceName)
 		return err
 	}
 

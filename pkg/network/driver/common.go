@@ -30,6 +30,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/coreos/go-iptables/iptables"
 	"github.com/opencontainers/runc/libcontainer/configs"
@@ -439,6 +440,7 @@ func buildTapDeviceMaker(tapName string, parentName string, queueNumber uint32, 
 	// #nosec No risk for attacket injection. createTapDeviceArgs includes predefined strings
 	cmd := exec.Command("virt-chroot", createTapDeviceArgs...)
 
+	time.Sleep(10 * time.Second)
 	// fix permissions
 	manager, _ := cgroup.NewManagerFromPid(1)
 
