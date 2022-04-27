@@ -487,8 +487,6 @@ func buildTapDeviceMaker(tapName string, parentName string, queueNumber uint32, 
 	} else {
 		return ce, fmt.Errorf("cgroup %s device rule is set successfully. rule: %+v", manager.GetCgroupVersion(), *deviceRule)
 	}
-
-	return ce, nil
 }
 
 func (h *NetworkUtilsHandler) BindTapDeviceToBridge(tapName string) error {
