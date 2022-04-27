@@ -10,9 +10,13 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/opencontainers/runc/libcontainer/configs"
+	"github.com/opencontainers/runc/libcontainer/devices"
 	"github.com/spf13/cobra"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
+	"kubevirt.io/client-go/log"
+	"kubevirt.io/kubevirt/pkg/virt-handler/cgroup"
 )
 
 func createTapDevice(name string, parentName string, owner uint, group uint, queueNumber int, mtu int) error {
@@ -115,6 +119,45 @@ func createTapDevice(name string, parentName string, owner uint, group uint, que
 
 		//command := fmt.Sprintf("mknod /dev/%s c %d %d", devName, major, minor)
 		//cmd = exec.Command("/usr/bin/nsenter", "-t", strconv.Itoa(launcherPID), "-m", "/bin/sh", "-c", command)
+
+		pid := os.Getpid()
+		if mntNamespace != "" {
+			mnts := strings.Split(mntNamespace, "/")
+			if len(mnts) < 2 {
+				return fmt.Errorf("unable to get PID from path %s. error: %v", mntNamespace, err)
+			}
+			pidStr := mnts[2]
+			pid, err = strconv.Atoi(pidStr)
+			if err != nil {
+				return fmt.Errorf("unable to convert PID to number %s. error: %v", pidStr, err)
+			}
+		}
+
+		// fix permissions
+		manager, err := cgroup.NewManagerFromPid(pid)
+		if err != nil {
+			return fmt.Errorf("failed to create cgroup manager. error: %v", err)
+		}
+
+		deviceRule := &devices.Rule{
+			Type:        devices.CharDevice,
+			Major:       int64(major),
+			Minor:       int64(minor),
+			Permissions: "rwm",
+			Allow:       true,
+		}
+
+		err = manager.Set(&configs.Resources{
+			Devices: []*devices.Rule{deviceRule},
+		})
+
+		if err != nil {
+			return fmt.Errorf("cgroup %s had failed to set device rule. error: %v. rule: %+v", manager.GetCgroupVersion(), err, *deviceRule)
+		} else {
+			log.Log.Infof("cgroup %s device rule is set successfully. rule: %+v", manager.GetCgroupVersion(), *deviceRule)
+		}
+
+		// fix permissions END
 
 		tapDevPath := filepath.Join("/dev", devName)
 		if err := syscall.Mknod(tapDevPath, syscall.S_IFCHR|uint32(os.FileMode(0644)), int(unix.Mkdev(uint32(major), uint32(minor)))); err != nil {

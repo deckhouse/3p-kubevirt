@@ -415,27 +415,6 @@ func (h *NetworkUtilsHandler) CreateTapDevice(tapName string, parentName string,
 		return fmt.Errorf("error creating tap device named %s; %v", tapName, err)
 	}
 
-	//  // fix permissions
-	//  manager, _ := cgroup.NewManagerFromPid(launcherPID)
-
-	//  deviceRule := &devices.Rule{
-	//  	Type:        devices.CharDevice,
-	//  	Major:       int64(major),
-	//  	Minor:       int64(minor),
-	//  	Permissions: "rwm",
-	//  	Allow:       true,
-	//  }
-
-	//  err = manager.Set(&configs.Resources{
-	//  	Devices: []*devices.Rule{deviceRule},
-	//  })
-
-	//  if err != nil {
-	//  	return fmt.Errorf("cgroup %s had failed to set device rule. error: %v. rule: %+v", manager.GetCgroupVersion(), err, *deviceRule)
-	//  } else {
-	//  	log.Log.Infof("cgroup %s device rule is set successfully. rule: %+v", manager.GetCgroupVersion(), *deviceRule)
-	//  }
-
 	log.Log.Infof("Created tap device: %s in PID: %d", tapName, launcherPID)
 	return nil
 }
