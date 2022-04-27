@@ -58,8 +58,7 @@ func createTapDevice(name string, parentName string, owner uint, group uint, que
 	const retryAttempts = 5
 	attempt, err := retry(retryAttempts, func() error {
 		return netlink.LinkAdd(tapDevice)
-	}	fmt.Printf("Successfully created tap device %s, attempt %d\n", name, attempt)
-)
+	})
 	if err != nil {
 		return fmt.Errorf("failed to create tap device named %s. Reason: %v", name, err)
 	}

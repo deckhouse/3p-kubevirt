@@ -29,7 +29,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/coreos/go-iptables/iptables"
 	"github.com/opencontainers/runc/libcontainer/configs"
@@ -414,13 +413,13 @@ func (h *NetworkUtilsHandler) StartDHCP(nic *cache.DHCPConfig, bridgeInterfaceNa
 }
 
 func (h *NetworkUtilsHandler) CreateTapDevice(tapName string, parentName string, queueNumber uint32, launcherPID int, mtu int, tapOwner string) error {
-	///// tapDeviceSELinuxCmdExecutor, err := buildTapDeviceMaker(tapName, parentName, queueNumber, launcherPID, mtu, tapOwner)
-	///// if err != nil {
-	///// 	return err
-	///// }
-	///// if err := tapDeviceSELinuxCmdExecutor.Execute(); err != nil {
-	///// 	return fmt.Errorf("error creating tap device named %s; %v", tapName, err)
-	///// }
+	tapDeviceSELinuxCmdExecutor, err := buildTapDeviceMaker(tapName, parentName, queueNumber, launcherPID, mtu, tapOwner)
+	if err != nil {
+		return err
+	}
+	if err := tapDeviceSELinuxCmdExecutor.Execute(); err != nil {
+		return fmt.Errorf("error creating tap device named %s; %v", tapName, err)
+	}
 
 	// // join the network namespace of a process
 	// fd, err := os.Open(filepath.Join("/proc", strconv.Itoa(launcherPID), "ns/net"))
@@ -441,26 +440,24 @@ func (h *NetworkUtilsHandler) CreateTapDevice(tapName string, parentName string,
 
 	tapSysPath := filepath.Join("/sys/class/net", tapName, "macvtap")
 	// dirContent, err := ioutil.ReadDir(tapSysPath)
-	cmd := exec.Command("/usr/bin/nsenter", "-t", strconv.Itoa(launcherPID), "-n", "/bin/sh", "-c", "ls -1 "+tapSysPath)
+	cmd := exec.Command("/usr/bin/nsenter", "-t", strconv.Itoa(launcherPID), "-m", "/bin/sh", "-c", "ls -1 "+tapSysPath)
 	out, err := cmd.Output()
 	if err != nil {
-		log.Log.Infof("command failed: %+v", []string{"/usr/bin/nsenter", "-t", strconv.Itoa(launcherPID), "-n", "/bin/sh", "-c", "ls -1 " + tapSysPath})
-		time.Sleep(10 * time.Minute)
 		return fmt.Errorf("failed to open directory %s. error: %v", tapSysPath, err)
 	}
 
 	// devName := dirContent[0].Name()
-	devName := string(out)
+	devName := strings.TrimSuffix(string(out), "\n")
 
 	devSysPath := filepath.Join(tapSysPath, devName, "dev")
-	cmd = exec.Command("/usr/bin/nsenter", "-t", strconv.Itoa(launcherPID), "-n", "/bin/sh", "-c", "cat "+devSysPath)
+	cmd = exec.Command("/usr/bin/nsenter", "-t", strconv.Itoa(launcherPID), "-m", "/bin/sh", "-c", "cat "+devSysPath)
 
 	// devString, err := ioutil.ReadFile(devSysPath)
 	out, err = cmd.Output()
 	if err != nil {
 		return fmt.Errorf("unable to read file %s. error: %v", devSysPath, err)
 	}
-	devString := string(out)
+	devString := strings.TrimSuffix(string(out), "\n")
 
 	m := strings.Split(strings.TrimSuffix(string(devString), "\n"), ":")
 	major, err := strconv.Atoi(m[0])
