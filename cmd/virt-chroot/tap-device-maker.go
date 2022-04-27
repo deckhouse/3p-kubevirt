@@ -24,14 +24,14 @@ func createTapDevice(name string, parentName string, owner uint, group uint, que
 			Group:      uint32(group),
 		}
 
-		// when netlink receives a request for a tap device with 1 queue, it uses
-		// the MULTI_QUEUE flag, which differs from libvirt; as such, we need to
-		// manually request the single queue flags, enabling libvirt to consume
-		// the tap device.
-		// See https://github.com/vishvananda/netlink/issues/574
-		if queueNumber == 1 {
-			tapDevice.Flags = netlink.TUNTAP_DEFAULTS
-		}
+		// // when netlink receives a request for a tap device with 1 queue, it uses
+		// // the MULTI_QUEUE flag, which differs from libvirt; as such, we need to
+		// // manually request the single queue flags, enabling libvirt to consume
+		// // the tap device.
+		// // See https://github.com/vishvananda/netlink/issues/574
+		// if queueNumber == 1 {
+		// 	tapDevice.Flags = netlink.TUNTAP_DEFAULTS
+		// }
 
 	} else {
 		m, err := netlink.LinkByName(parentName)

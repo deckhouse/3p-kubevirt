@@ -38,8 +38,8 @@ type PodNetworkInfraConfigurator interface {
 	GenerateNonRecoverableDHCPConfig() *cache.DHCPConfig
 }
 
-func createAndBindTapToBridge(handler netdriver.NetworkHandler, deviceName string, parentIndex int, launcherPID int, mtu int, tapOwner string, vmi *v1.VirtualMachineInstance) error {
-	err := handler.CreateTapDevice(deviceName, parentIndex, calculateNetworkQueues(vmi), launcherPID, mtu, tapOwner)
+func createAndBindTapToBridge(handler netdriver.NetworkHandler, deviceName string, parentName string, launcherPID int, mtu int, tapOwner string, vmi *v1.VirtualMachineInstance) error {
+	err := handler.CreateTapDevice(deviceName, parentName, calculateNetworkQueues(vmi), launcherPID, mtu, tapOwner)
 	if err != nil {
 		return err
 	}

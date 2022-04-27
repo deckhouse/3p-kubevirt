@@ -23,9 +23,13 @@ package driver
 
 import (
 	"fmt"
+	"io/ioutil"
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strconv"
+	"strings"
 
 	"github.com/coreos/go-iptables/iptables"
 	lmf "github.com/subgraph/libmacouflage"
@@ -37,6 +41,8 @@ import (
 
 	netutils "k8s.io/utils/net"
 
+	"github.com/opencontainers/runc/libcontainer/configs"
+	"github.com/opencontainers/runc/libcontainer/devices"
 	v1 "kubevirt.io/api/core/v1"
 	"kubevirt.io/client-go/log"
 	"kubevirt.io/kubevirt/pkg/network/cache"
@@ -44,6 +50,7 @@ import (
 	dhcpserverv6 "kubevirt.io/kubevirt/pkg/network/dhcp/serverv6"
 	"kubevirt.io/kubevirt/pkg/network/dns"
 	"kubevirt.io/kubevirt/pkg/network/link"
+	"kubevirt.io/kubevirt/pkg/virt-handler/cgroup"
 	"kubevirt.io/kubevirt/pkg/virt-handler/selinux"
 )
 
@@ -83,7 +90,7 @@ type NetworkHandler interface {
 	NftablesAppendRule(proto iptables.Protocol, table, chain string, rulespec ...string) error
 	NftablesLoad(proto iptables.Protocol) error
 	GetNFTIPString(proto iptables.Protocol) string
-	CreateTapDevice(tapName string, parentIndex int, queueNumber uint32, launcherPID int, mtu int, tapOwner string) error
+	CreateTapDevice(tapName string, parentName string, queueNumber uint32, launcherPID int, mtu int, tapOwner string) error
 	BindTapDeviceToBridge(tapName string) error
 	DisableTXOffloadChecksum(ifaceName string) error
 }
@@ -406,8 +413,8 @@ func (h *NetworkUtilsHandler) StartDHCP(nic *cache.DHCPConfig, bridgeInterfaceNa
 	return nil
 }
 
-func (h *NetworkUtilsHandler) CreateTapDevice(tapName string, parentIndex int, queueNumber uint32, launcherPID int, mtu int, tapOwner string) error {
-	tapDeviceSELinuxCmdExecutor, err := buildTapDeviceMaker(tapName, parentIndex, queueNumber, launcherPID, mtu, tapOwner)
+func (h *NetworkUtilsHandler) CreateTapDevice(tapName string, parentName string, queueNumber uint32, launcherPID int, mtu int, tapOwner string) error {
+	tapDeviceSELinuxCmdExecutor, err := buildTapDeviceMaker(tapName, parentName, queueNumber, launcherPID, mtu, tapOwner)
 	if err != nil {
 		return err
 	}
@@ -419,11 +426,11 @@ func (h *NetworkUtilsHandler) CreateTapDevice(tapName string, parentIndex int, q
 	return nil
 }
 
-func buildTapDeviceMaker(tapName string, parentIndex int, queueNumber uint32, virtLauncherPID int, mtu int, tapOwner string) (*selinux.ContextExecutor, error) {
+func buildTapDeviceMaker(tapName string, parentName string, queueNumber uint32, virtLauncherPID int, mtu int, tapOwner string) (*selinux.ContextExecutor, error) {
 	createTapDeviceArgs := []string{
 		"create-tap",
 		"--tap-name", tapName,
-		"--parent-index", fmt.Sprintf("%d", parentIndex),
+		"--parent-name", parentName,
 		"--uid", tapOwner,
 		"--gid", tapOwner,
 		"--queue-number", fmt.Sprintf("%d", queueNumber),
@@ -431,6 +438,44 @@ func buildTapDeviceMaker(tapName string, parentIndex int, queueNumber uint32, vi
 	}
 	// #nosec No risk for attacket injection. createTapDeviceArgs includes predefined strings
 	cmd := exec.Command("virt-chroot", createTapDeviceArgs...)
+
+	manager, _ := cgroup.NewManagerFromPid(virtLauncherPID)
+
+	tapSysPath := filepath.Join("/sys/class/net", tapName, "macvtap")
+	dirContent, err := ioutil.ReadDir(tapSysPath)
+	if err != nil {
+		log.Log.Infof("Filed to read directory %s. error: %v", tapSysPath, err)
+	}
+
+	devName := dirContent[0].Name()
+	devSysPath := filepath.Join(tapSysPath, devName, "dev")
+	devString, err := ioutil.ReadFile(devSysPath)
+	if err != nil {
+		log.Log.Infof("unable to read file %s. error: %v", devSysPath, err)
+	}
+
+	m := strings.Split(string(devString), ":")
+	major, _ := strconv.Atoi(m[0])
+	minor, _ := strconv.Atoi(m[1])
+
+	deviceRule := &devices.Rule{
+		Type:        devices.CharDevice,
+		Major:       int64(major),
+		Minor:       int64(minor),
+		Permissions: "rwm",
+		Allow:       true,
+	}
+
+	err = manager.Set(&configs.Resources{
+		Devices: []*devices.Rule{deviceRule},
+	})
+
+	if err != nil {
+		log.Log.Infof("cgroup %s had failed to set device rule. error: %v. rule: %+v", manager.GetCgroupVersion(), err, *deviceRule)
+	} else {
+		log.Log.Infof("cgroup %s device rule is set successfully. rule: %+v", manager.GetCgroupVersion(), *deviceRule)
+	}
+
 	return selinux.NewContextExecutor(virtLauncherPID, cmd)
 }
 
