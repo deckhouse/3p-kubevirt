@@ -2,8 +2,12 @@ package main
 
 import (
 	"fmt"
+	"io/ioutil"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -65,6 +69,58 @@ func createTapDevice(name string, parentName string, owner uint, group uint, que
 
 	if err := netlink.LinkSetMTU(tapDevice, mtu); err != nil {
 		return fmt.Errorf("failed to set MTU on tap device named %s. Reason: %v", name, err)
+	}
+
+	// Create /dev/tapX device
+	if parentName != "" {
+		tapSysPath := filepath.Join("/sys/class/net", name, "macvtap")
+		dirContent, err := ioutil.ReadDir(tapSysPath)
+		//cmd := exec.Command("/usr/bin/nsenter", "-t", strconv.Itoa(launcherPID), "-m", "/bin/sh", "-c", "ls -1 "+tapSysPath)
+		//out, err := cmd.Output()
+		if err != nil {
+			return fmt.Errorf("failed to open directory %s. error: %v", tapSysPath, err)
+		}
+
+		var devName string
+		for _, dir := range dirContent {
+			if strings.HasPrefix(dir.Name(), "tap") {
+				devName = dir.Name()
+				break
+			}
+		}
+		if devName == "" {
+			return fmt.Errorf("failed to find tap device number for %s.", name)
+		}
+		//devName := strings.TrimSuffix(string(out), "\n")
+
+		devSysPath := filepath.Join(tapSysPath, devName, "dev")
+		devString, err := ioutil.ReadFile(devSysPath)
+
+		//cmd = exec.Command("/usr/bin/nsenter", "-t", strconv.Itoa(launcherPID), "-m", "/bin/sh", "-c", "cat "+devSysPath)
+		//out, err = cmd.Output()
+		if err != nil {
+			return fmt.Errorf("unable to read file %s. error: %v", devSysPath, err)
+		}
+		//devString := strings.TrimSuffix(string(out), "\n")
+
+		m := strings.Split(strings.TrimSuffix(string(devString), "\n"), ":")
+		major, err := strconv.Atoi(m[0])
+		if err != nil {
+			return fmt.Errorf("unable to convert major %s. error: %v", m[0], err)
+		}
+		minor, err := strconv.Atoi(m[1])
+		if err != nil {
+			return fmt.Errorf("unable to convert minor %s. error: %v", m[1], err)
+		}
+
+		//command := fmt.Sprintf("mknod /dev/%s c %d %d", devName, major, minor)
+		//cmd = exec.Command("/usr/bin/nsenter", "-t", strconv.Itoa(launcherPID), "-m", "/bin/sh", "-c", command)
+
+		tapDevPath := filepath.Join("/dev", devName)
+		if err := syscall.Mknod(tapDevPath, syscall.S_IFCHR|uint32(os.FileMode(0644)), int(unix.Mkdev(uint32(major), uint32(minor)))); err != nil {
+			return fmt.Errorf("failed to create characted device %s. error: %v", tapDevPath, err)
+		}
+
 	}
 
 	fmt.Printf("Successfully created tap device %s, attempt %d\n", name, attempt)

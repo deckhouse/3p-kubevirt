@@ -23,18 +23,11 @@ package driver
 
 import (
 	"fmt"
-	"io/ioutil"
 	"net"
 	"os"
 	"os/exec"
-	"path/filepath"
-	"strconv"
-	"strings"
-	"syscall"
 
 	"github.com/coreos/go-iptables/iptables"
-	"github.com/opencontainers/runc/libcontainer/configs"
-	"github.com/opencontainers/runc/libcontainer/devices"
 	lmf "github.com/subgraph/libmacouflage"
 	"github.com/vishvananda/netlink"
 
@@ -51,7 +44,6 @@ import (
 	dhcpserverv6 "kubevirt.io/kubevirt/pkg/network/dhcp/serverv6"
 	"kubevirt.io/kubevirt/pkg/network/dns"
 	"kubevirt.io/kubevirt/pkg/network/link"
-	"kubevirt.io/kubevirt/pkg/virt-handler/cgroup"
 	"kubevirt.io/kubevirt/pkg/virt-handler/selinux"
 )
 
@@ -423,100 +415,26 @@ func (h *NetworkUtilsHandler) CreateTapDevice(tapName string, parentName string,
 		return fmt.Errorf("error creating tap device named %s; %v", tapName, err)
 	}
 
-	//// join the mount namespace of a process
-	//fd, err := os.Open(filepath.Join("/proc", strconv.Itoa(launcherPID), "ns/mnt"))
-	//if err != nil {
-	//	return fmt.Errorf("failed to open mount namespace: %v", err)
-	//}
-	//defer fd.Close()
+	//  // fix permissions
+	//  manager, _ := cgroup.NewManagerFromPid(launcherPID)
 
-	//if err = unix.Unshare(unix.CLONE_NEWNS); err != nil {
-	//	return fmt.Errorf("failed to detach from parent mount namespace: %v", err)
-	//}
-	//if err := unix.Setns(int(fd.Fd()), unix.CLONE_NEWNS); err != nil {
-	//	return fmt.Errorf("failed to join the mount namespace: %v", err)
-	//}
+	//  deviceRule := &devices.Rule{
+	//  	Type:        devices.CharDevice,
+	//  	Major:       int64(major),
+	//  	Minor:       int64(minor),
+	//  	Permissions: "rwm",
+	//  	Allow:       true,
+	//  }
 
-	// fix permissions
-	manager, _ := cgroup.NewManagerFromPid(launcherPID)
+	//  err = manager.Set(&configs.Resources{
+	//  	Devices: []*devices.Rule{deviceRule},
+	//  })
 
-	tapSysPath := filepath.Join("/sys/class/net", tapName, "macvtap")
-	dirContent, err := ioutil.ReadDir(tapSysPath)
-	//cmd := exec.Command("/usr/bin/nsenter", "-t", strconv.Itoa(launcherPID), "-m", "/bin/sh", "-c", "ls -1 "+tapSysPath)
-	//out, err := cmd.Output()
-	if err != nil {
-		return fmt.Errorf("failed to open directory %s. error: %v", tapSysPath, err)
-	}
-
-	var devName string
-	for _, dir := range dirContent {
-		if strings.HasPrefix(dir.Name(), "tap") {
-			devName = dir.Name()
-			break
-		}
-	}
-	if devName == "" {
-		return fmt.Errorf("failed to find tap device number for %s.", tapName)
-	}
-	//devName := strings.TrimSuffix(string(out), "\n")
-
-	devSysPath := filepath.Join(tapSysPath, devName, "dev")
-	devString, err := ioutil.ReadFile(devSysPath)
-
-	//cmd = exec.Command("/usr/bin/nsenter", "-t", strconv.Itoa(launcherPID), "-m", "/bin/sh", "-c", "cat "+devSysPath)
-	//out, err = cmd.Output()
-	if err != nil {
-		return fmt.Errorf("unable to read file %s. error: %v", devSysPath, err)
-	}
-	//devString := strings.TrimSuffix(string(out), "\n")
-
-	m := strings.Split(strings.TrimSuffix(string(devString), "\n"), ":")
-	major, err := strconv.Atoi(m[0])
-	if err != nil {
-		return fmt.Errorf("unable to convert major %s. error: %v", m[0], err)
-	}
-	minor, err := strconv.Atoi(m[1])
-	if err != nil {
-		return fmt.Errorf("unable to convert minor %s. error: %v", m[1], err)
-	}
-
-	deviceRule := &devices.Rule{
-		Type:        devices.CharDevice,
-		Major:       int64(major),
-		Minor:       int64(minor),
-		Permissions: "rwm",
-		Allow:       true,
-	}
-	deviceNum, err := deviceRule.Mkdev()
-	if err != nil {
-		return fmt.Errorf("unable to generate darwin device number. error: %v", err)
-	}
-
-	err = manager.Set(&configs.Resources{
-		Devices: []*devices.Rule{deviceRule},
-	})
-
-	if err != nil {
-		return fmt.Errorf("cgroup %s had failed to set device rule. error: %v. rule: %+v", manager.GetCgroupVersion(), err, *deviceRule)
-	} else {
-		log.Log.Infof("cgroup %s device rule is set successfully. rule: %+v", manager.GetCgroupVersion(), *deviceRule)
-	}
-
-	//command := fmt.Sprintf("mknod /dev/%s c %d %d", devName, major, minor)
-	//cmd = exec.Command("/usr/bin/nsenter", "-t", strconv.Itoa(launcherPID), "-m", "/bin/sh", "-c", command)
-
-	tapDevPath := filepath.Join("/dev", tapName)
-	if err := syscall.Mknod(tapDevPath, syscall.S_IFCHR|uint32(os.FileMode(0644)), int(deviceNum)); err != nil {
-		return fmt.Errorf("failed to create characted device %s. error: %v", tapDevPath, err)
-	}
-
-	//fd.Close()
-
-	// devString, err := ioutil.ReadFile(devSysPath)
-	//_, err = cmd.Output()
-	//if err != nil {
-	//	return fmt.Errorf("unable to read file %s. error: %v", devSysPath, err)
-	//}
+	//  if err != nil {
+	//  	return fmt.Errorf("cgroup %s had failed to set device rule. error: %v. rule: %+v", manager.GetCgroupVersion(), err, *deviceRule)
+	//  } else {
+	//  	log.Log.Infof("cgroup %s device rule is set successfully. rule: %+v", manager.GetCgroupVersion(), *deviceRule)
+	//  }
 
 	log.Log.Infof("Created tap device: %s in PID: %d", tapName, launcherPID)
 	return nil
@@ -525,6 +443,7 @@ func (h *NetworkUtilsHandler) CreateTapDevice(tapName string, parentName string,
 func buildTapDeviceMaker(tapName string, parentName string, queueNumber uint32, virtLauncherPID int, mtu int, tapOwner string) (*selinux.ContextExecutor, error) {
 	createTapDeviceArgs := []string{
 		"create-tap",
+		"--mount", fmt.Sprintf("/proc/%d/ns/mnt", virtLauncherPID),
 		"--tap-name", tapName,
 		"--parent-name", parentName,
 		"--uid", tapOwner,
