@@ -37,7 +37,6 @@ import (
 	"github.com/opencontainers/runc/libcontainer/devices"
 	lmf "github.com/subgraph/libmacouflage"
 	"github.com/vishvananda/netlink"
-	"golang.org/x/sys/unix"
 
 	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/converter"
 
@@ -424,19 +423,19 @@ func (h *NetworkUtilsHandler) CreateTapDevice(tapName string, parentName string,
 		return fmt.Errorf("error creating tap device named %s; %v", tapName, err)
 	}
 
-	// join the mount namespace of a process
-	fd, err := os.Open(filepath.Join("/proc", strconv.Itoa(launcherPID), "ns/mnt"))
-	if err != nil {
-		return fmt.Errorf("failed to open mount namespace: %v", err)
-	}
-	defer fd.Close()
+	//// join the mount namespace of a process
+	//fd, err := os.Open(filepath.Join("/proc", strconv.Itoa(launcherPID), "ns/mnt"))
+	//if err != nil {
+	//	return fmt.Errorf("failed to open mount namespace: %v", err)
+	//}
+	//defer fd.Close()
 
-	if err = unix.Unshare(unix.CLONE_NEWNS); err != nil {
-		return fmt.Errorf("failed to detach from parent mount namespace: %v", err)
-	}
-	if err := unix.Setns(int(fd.Fd()), unix.CLONE_NEWNS); err != nil {
-		return fmt.Errorf("failed to join the mount namespace: %v", err)
-	}
+	//if err = unix.Unshare(unix.CLONE_NEWNS); err != nil {
+	//	return fmt.Errorf("failed to detach from parent mount namespace: %v", err)
+	//}
+	//if err := unix.Setns(int(fd.Fd()), unix.CLONE_NEWNS); err != nil {
+	//	return fmt.Errorf("failed to join the mount namespace: %v", err)
+	//}
 
 	// fix permissions
 	manager, _ := cgroup.NewManagerFromPid(launcherPID)
@@ -511,7 +510,7 @@ func (h *NetworkUtilsHandler) CreateTapDevice(tapName string, parentName string,
 		return fmt.Errorf("failed to create characted device %s. error: %v", tapDevPath, err)
 	}
 
-	fd.Close()
+	//fd.Close()
 
 	// devString, err := ioutil.ReadFile(devSysPath)
 	//_, err = cmd.Output()
