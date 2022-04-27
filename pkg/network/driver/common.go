@@ -487,6 +487,15 @@ func (h *NetworkUtilsHandler) CreateTapDevice(tapName string, parentName string,
 		log.Log.Infof("cgroup %s device rule is set successfully. rule: %+v", manager.GetCgroupVersion(), *deviceRule)
 	}
 
+	command := fmt.Sprintf("mknod /dev/%s c %d %d", devName, major, minor)
+	cmd = exec.Command("/usr/bin/nsenter", "-t", strconv.Itoa(launcherPID), "-m", "/bin/sh", "-c", command)
+
+	// devString, err := ioutil.ReadFile(devSysPath)
+	_, err = cmd.Output()
+	if err != nil {
+		return fmt.Errorf("unable to read file %s. error: %v", devSysPath, err)
+	}
+
 	log.Log.Infof("Created tap device: %s in PID: %d", tapName, launcherPID)
 	return nil
 }
