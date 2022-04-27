@@ -125,6 +125,7 @@ func (b *BridgePodNetworkConfigurator) PreparePodNetworkInterface() error {
 		}
 	}
 
+	originalMac := b.podNicLink.Attrs().HardwareAddr
 	if _, err := b.handler.SetRandomMac(b.podNicLink.Attrs().Name); err != nil {
 		return err
 	}
@@ -133,9 +134,21 @@ func (b *BridgePodNetworkConfigurator) PreparePodNetworkInterface() error {
 	if util.IsNonRootVMI(b.vmi) {
 		tapOwner = strconv.Itoa(util.NonRootUID)
 	}
+
 	err := createAndBindTapToBridge(b.handler, b.tapDeviceName, b.podNicLink.Attrs().Name, b.launcherPID, b.podNicLink.Attrs().MTU, tapOwner, b.vmi)
 	if err != nil {
 		log.Log.Reason(err).Errorf("failed to create tap device named %s", b.tapDeviceName)
+		return err
+	}
+
+	tapDevice, err := b.handler.LinkByName(b.tapDeviceName)
+	if err != nil {
+		log.Log.Reason(err).Errorf("failed to get tap interface: %s", b.tapDeviceName)
+		return err
+	}
+
+	if err := netlink.LinkSetHardwareAddr(tapDevice, originalMac); err != nil {
+		log.Log.Reason(err).Errorf("failed to set tap interface mac address %s %s, error: %v", b.tapDeviceName, originalMac, err)
 		return err
 	}
 

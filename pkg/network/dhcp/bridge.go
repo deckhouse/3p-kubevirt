@@ -39,7 +39,8 @@ func (d *BridgeConfigGenerator) Generate() (*cache.DHCPConfig, error) {
 	fakeServerAddr, _ := netlink.ParseAddr(fakeBridgeIP)
 	dhcpConfig.AdvertisingIPAddr = fakeServerAddr.IP
 
-	podNicLink, err := d.handler.LinkByName(d.podInterfaceName)
+	newPodNicName := virtnetlink.GenerateNewBridgedVmiInterfaceName(d.podInterfaceName)
+	podNicLink, err := d.handler.LinkByName(newPodNicName)
 	if err != nil {
 		return nil, err
 	}
