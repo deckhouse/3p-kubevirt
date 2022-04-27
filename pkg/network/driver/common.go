@@ -36,6 +36,7 @@ import (
 	"github.com/opencontainers/runc/libcontainer/devices"
 	lmf "github.com/subgraph/libmacouflage"
 	"github.com/vishvananda/netlink"
+	"golang.org/x/sys/unix"
 
 	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/converter"
 
@@ -422,13 +423,27 @@ func (h *NetworkUtilsHandler) CreateTapDevice(tapName string, parentName string,
 		return fmt.Errorf("error creating tap device named %s; %v", tapName, err)
 	}
 
+	// join the network namespace of a process
+	fd, err := os.Open(filepath.Join("/proc", strconv.Itoa(launcherPID), "ns/net"))
+	if err != nil {
+		return fmt.Errorf("failed to open network namespace: %v", err)
+	}
+	defer fd.Close()
+
+	if err = unix.Unshare(unix.CLONE_NEWNET); err != nil {
+		return fmt.Errorf("failed to detach from parent network namespace: %v", err)
+	}
+	if err := unix.Setns(int(fd.Fd()), unix.CLONE_NEWNET); err != nil {
+		return fmt.Errorf("failed to join the network namespace: %v", err)
+	}
+
 	// fix permissions
 	manager, _ := cgroup.NewManagerFromPid(launcherPID)
 
 	tapSysPath := filepath.Join("/sys/class/net", tapName, "macvtap")
 	dirContent, err := ioutil.ReadDir(tapSysPath)
 	if err != nil {
-		return fmt.Errorf("Filed to read directory %s. error: %v", tapSysPath, err)
+		return fmt.Errorf("Filed to open directory %s. error: %v", tapSysPath, err)
 	}
 
 	devName := dirContent[0].Name()
