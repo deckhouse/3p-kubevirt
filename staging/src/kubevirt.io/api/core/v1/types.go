@@ -1441,6 +1441,8 @@ const (
 	SlirpInterface NetworkInterfaceType = "slirp"
 	// Virtual machine instance masquerade interface
 	MasqueradeInterface NetworkInterfaceType = "masquerade"
+	// Virtual machine instance macvtap interface
+	MacvtapInterface NetworkInterfaceType = "macvtap"
 )
 
 type DriverCache string

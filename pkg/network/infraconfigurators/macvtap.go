@@ -227,7 +227,7 @@ func (b *MacvtapPodNetworkConfigurator) createMacvlan() error {
 	fakeaddr, _ := b.handler.ParseAddr(addr)
 
 	if err := b.handler.AddrAdd(macvlanDevice, fakeaddr); err != nil {
-		log.Log.Reason(err).Errorf("failed to set bridge IP")
+		log.Log.Reason(err).Errorf("failed to set macvlan IP")
 		return err
 	}
 
