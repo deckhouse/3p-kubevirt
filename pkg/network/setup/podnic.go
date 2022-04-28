@@ -309,7 +309,14 @@ func (l *podNIC) newLibvirtSpecGenerator(domain *api.Domain) domainspec.LibvirtS
 		return domainspec.NewSlirpLibvirtSpecGenerator(l.vmiSpecIface, domain)
 	}
 	if l.vmiSpecIface.Macvtap != nil {
-		return domainspec.NewMacvtapLibvirtSpecGenerator(l.vmiSpecIface, domain, l.podInterfaceName, l.handler)
+		cachedDomainIface, err := l.cachedDomainInterface()
+		if err != nil {
+			return nil
+		}
+		if cachedDomainIface == nil {
+			cachedDomainIface = &api.Interface{}
+		}
+		return domainspec.NewMacvtapLibvirtSpecGenerator(l.vmiSpecIface, domain, *cachedDomainIface, l.podInterfaceName, l.handler)
 	}
 	return nil
 }
