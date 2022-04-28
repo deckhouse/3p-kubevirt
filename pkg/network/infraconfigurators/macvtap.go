@@ -16,7 +16,7 @@ import (
 	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/api"
 )
 
-type BridgePodNetworkConfigurator struct {
+type MacvtapPodNetworkConfigurator struct {
 	bridgeInterfaceName string
 	vmiSpecIface        *v1.Interface
 	ipamEnabled         bool
@@ -30,8 +30,8 @@ type BridgePodNetworkConfigurator struct {
 	vmi                 *v1.VirtualMachineInstance
 }
 
-func NewBridgePodNetworkConfigurator(vmi *v1.VirtualMachineInstance, vmiSpecIface *v1.Interface, bridgeIfaceName string, launcherPID int, handler netdriver.NetworkHandler) *BridgePodNetworkConfigurator {
-	return &BridgePodNetworkConfigurator{
+func NewMacvtapPodNetworkConfigurator(vmi *v1.VirtualMachineInstance, vmiSpecIface *v1.Interface, bridgeIfaceName string, launcherPID int, handler netdriver.NetworkHandler) *MacvtapPodNetworkConfigurator {
+	return &MacvtapPodNetworkConfigurator{
 		vmi:                 vmi,
 		vmiSpecIface:        vmiSpecIface,
 		bridgeInterfaceName: bridgeIfaceName,
@@ -40,7 +40,7 @@ func NewBridgePodNetworkConfigurator(vmi *v1.VirtualMachineInstance, vmiSpecIfac
 	}
 }
 
-func (b *BridgePodNetworkConfigurator) DiscoverPodNetworkInterface(podIfaceName string) error {
+func (b *MacvtapPodNetworkConfigurator) DiscoverPodNetworkInterface(podIfaceName string) error {
 	link, err := b.handler.LinkByName(podIfaceName)
 	if err != nil {
 		log.Log.Reason(err).Errorf("failed to get a link for interface: %s", podIfaceName)
@@ -76,7 +76,7 @@ func (b *BridgePodNetworkConfigurator) DiscoverPodNetworkInterface(podIfaceName 
 	return nil
 }
 
-func (b *BridgePodNetworkConfigurator) GenerateNonRecoverableDHCPConfig() *cache.DHCPConfig {
+func (b *MacvtapPodNetworkConfigurator) GenerateNonRecoverableDHCPConfig() *cache.DHCPConfig {
 	if !b.ipamEnabled {
 		return &cache.DHCPConfig{IPAMDisabled: true}
 	}
@@ -94,7 +94,7 @@ func (b *BridgePodNetworkConfigurator) GenerateNonRecoverableDHCPConfig() *cache
 	return dhcpConfig
 }
 
-func (b *BridgePodNetworkConfigurator) PreparePodNetworkInterface() error {
+func (b *MacvtapPodNetworkConfigurator) PreparePodNetworkInterface() error {
 	// Set interface link to down to change its MAC address
 	if err := b.handler.LinkSetDown(b.podNicLink); err != nil {
 		log.Log.Reason(err).Errorf("failed to bring link down for interface: %s", b.podNicLink.Attrs().Name)
@@ -125,11 +125,8 @@ func (b *BridgePodNetworkConfigurator) PreparePodNetworkInterface() error {
 		}
 	}
 
+	originalMac := b.podNicLink.Attrs().HardwareAddr
 	if _, err := b.handler.SetRandomMac(b.podNicLink.Attrs().Name); err != nil {
-		return err
-	}
-
-	if err := b.createBridge(); err != nil {
 		return err
 	}
 
@@ -137,9 +134,26 @@ func (b *BridgePodNetworkConfigurator) PreparePodNetworkInterface() error {
 	if util.IsNonRootVMI(b.vmi) {
 		tapOwner = strconv.Itoa(util.NonRootUID)
 	}
-	err := createAndBindTapToBridge(b.handler, b.tapDeviceName, b.bridgeInterfaceName, b.launcherPID, b.podNicLink.Attrs().MTU, tapOwner, b.vmi)
+
+	err := createMacvtap(b.handler, b.tapDeviceName, b.podNicLink.Attrs().Name, b.launcherPID, b.podNicLink.Attrs().MTU, tapOwner, b.vmi)
 	if err != nil {
 		log.Log.Reason(err).Errorf("failed to create tap device named %s", b.tapDeviceName)
+		return err
+	}
+
+	if err := b.createMacvlan(); err != nil {
+		log.Log.Reason(err).Errorf("failed to create macvlan device named %s", b.bridgeInterfaceName)
+		return err
+	}
+
+	tapDevice, err := b.handler.LinkByName(b.tapDeviceName)
+	if err != nil {
+		log.Log.Reason(err).Errorf("failed to get tap interface: %s", b.tapDeviceName)
+		return err
+	}
+
+	if err := netlink.LinkSetHardwareAddr(tapDevice, originalMac); err != nil {
+		log.Log.Reason(err).Errorf("failed to set tap interface mac address %s %s, error: %v", b.tapDeviceName, originalMac, err)
 		return err
 	}
 
@@ -148,21 +162,16 @@ func (b *BridgePodNetworkConfigurator) PreparePodNetworkInterface() error {
 		return err
 	}
 
-	if err := b.handler.LinkSetLearningOff(b.podNicLink); err != nil {
-		log.Log.Reason(err).Errorf("failed to disable mac learning for interface: %s", b.podNicLink.Attrs().Name)
-		return err
-	}
-
 	return nil
 }
 
-func (b *BridgePodNetworkConfigurator) GenerateNonRecoverableDomainIfaceSpec() *api.Interface {
+func (b *MacvtapPodNetworkConfigurator) GenerateNonRecoverableDomainIfaceSpec() *api.Interface {
 	return &api.Interface{
 		MAC: &api.MAC{MAC: b.vmMac.String()},
 	}
 }
 
-func (b *BridgePodNetworkConfigurator) learnInterfaceRoutes() error {
+func (b *MacvtapPodNetworkConfigurator) learnInterfaceRoutes() error {
 	routes, err := b.handler.RouteList(b.podNicLink, netlink.FAMILY_V4)
 	if err != nil {
 		log.Log.Reason(err).Errorf("failed to get routes for %s", b.podNicLink.Attrs().Name)
@@ -175,7 +184,7 @@ func (b *BridgePodNetworkConfigurator) learnInterfaceRoutes() error {
 	return nil
 }
 
-func (b *BridgePodNetworkConfigurator) decorateDhcpConfigRoutes(dhcpConfig *cache.DHCPConfig) {
+func (b *MacvtapPodNetworkConfigurator) decorateDhcpConfigRoutes(dhcpConfig *cache.DHCPConfig) {
 	log.Log.V(4).Infof("the default route is: %s", b.podIfaceRoutes[0].String())
 	dhcpConfig.Gateway = b.podIfaceRoutes[0].Gw
 	if len(b.podIfaceRoutes) > 1 {
@@ -184,49 +193,48 @@ func (b *BridgePodNetworkConfigurator) decorateDhcpConfigRoutes(dhcpConfig *cach
 	}
 }
 
-func (b *BridgePodNetworkConfigurator) createBridge() error {
-	// Create a bridge
-	bridge := &netlink.Bridge{
+func (b *MacvtapPodNetworkConfigurator) createMacvlan() error {
+	m, err := netlink.LinkByName(b.podNicLink.Attrs().Name)
+	if err != nil {
+		return fmt.Errorf("failed to lookup lowerDevice %q: %v", b.podNicLink.Attrs().Name, err)
+	}
+
+	// Create a macvlan
+	macvlanDevice := &netlink.Macvlan{
 		LinkAttrs: netlink.LinkAttrs{
-			Name: b.bridgeInterfaceName,
+			Name:        b.bridgeInterfaceName,
+			ParentIndex: m.Attrs().Index,
+			// we had crashes if we did not set txqlen to some value
+			TxQLen: m.Attrs().TxQLen,
 		},
+		Mode: netlink.MACVLAN_MODE_BRIDGE,
 	}
-	err := b.handler.LinkAdd(bridge)
+
+	err = b.handler.LinkAdd(macvlanDevice)
 	if err != nil {
-		log.Log.Reason(err).Errorf("failed to create a bridge")
+		log.Log.Reason(err).Errorf("failed to create a macvlan")
 		return err
 	}
 
-	err = b.handler.LinkSetMaster(b.podNicLink, bridge)
-	if err != nil {
-		log.Log.Reason(err).Errorf("failed to connect interface %s to bridge %s", b.podNicLink.Attrs().Name, bridge.Name)
-		return err
-	}
-
-	err = b.handler.LinkSetUp(bridge)
+	err = b.handler.LinkSetUp(macvlanDevice)
 	if err != nil {
 		log.Log.Reason(err).Errorf("failed to bring link up for interface: %s", b.bridgeInterfaceName)
 		return err
 	}
 
-	// set fake ip on a bridge
+	// set fake ip on a macvlan
 	addr := virtnetlink.GetFakeBridgeIP(b.vmi.Spec.Domain.Devices.Interfaces, b.vmiSpecIface)
 	fakeaddr, _ := b.handler.ParseAddr(addr)
 
-	if err := b.handler.AddrAdd(bridge, fakeaddr); err != nil {
+	if err := b.handler.AddrAdd(macvlanDevice, fakeaddr); err != nil {
 		log.Log.Reason(err).Errorf("failed to set bridge IP")
-		return err
-	}
-
-	if err = b.handler.DisableTXOffloadChecksum(b.bridgeInterfaceName); err != nil {
-		log.Log.Reason(err).Error("failed to disable TX offload checksum on bridge interface")
 		return err
 	}
 
 	return nil
 }
 
-func (b *BridgePodNetworkConfigurator) switchPodInterfaceWithDummy() error {
+func (b *MacvtapPodNetworkConfigurator) switchPodInterfaceWithDummy() error {
 	originalPodInterfaceName := b.podNicLink.Attrs().Name
 	newPodInterfaceName := virtnetlink.GenerateNewBridgedVmiInterfaceName(originalPodInterfaceName)
 	dummy := &netlink.Dummy{LinkAttrs: netlink.LinkAttrs{Name: originalPodInterfaceName}}
