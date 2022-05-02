@@ -410,7 +410,7 @@ func (h *NetworkUtilsHandler) CreateMacvtapDevice(tapName string, parentName str
 		"--mount", fmt.Sprintf("/proc/%d/ns/mnt", launcherPID),
 		"--",
 		"/bin/sh", "-c",
-		fmt.Sprintf("cat /sys/class/net/tap%d/macvtap/tap*/dev", queueNumber),
+		fmt.Sprintf("cat /sys/class/net/%s/macvtap/tap*/dev", tapName),
 	}
 
 	cmd := exec.Command("virt-chroot", args...)
