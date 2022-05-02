@@ -96,6 +96,20 @@ func (b *MacvtapPodNetworkConfigurator) GenerateNonRecoverableDHCPConfig() *cach
 }
 
 func (b *MacvtapPodNetworkConfigurator) PreparePodNetworkInterface() error {
+
+	if b.ipamEnabled {
+		// In case if podNicLink is configured via 'macvtap-cni', we have no access to the lower device.
+		// But we can use existing macvtap on this purpose. This way macvlan will inherit the same parent.
+		if err := b.createMacvlan(); err != nil {
+			log.Log.Reason(err).Errorf("failed to create macvlan device named %s", b.bridgeInterfaceName)
+			return err
+		}
+	}
+
+	if b.podNicLink.Type() == "macvtap" {
+		return nil
+	}
+
 	// Set interface link to down to change its MAC address
 	if err := b.handler.LinkSetDown(b.podNicLink); err != nil {
 		log.Log.Reason(err).Errorf("failed to bring link down for interface: %s", b.podNicLink.Attrs().Name)
@@ -134,11 +148,6 @@ func (b *MacvtapPodNetworkConfigurator) PreparePodNetworkInterface() error {
 	err := createMacvtap(b.handler, b.tapDeviceName, b.podNicLink.Attrs().Name, b.launcherPID, b.podNicLink.Attrs().MTU, tapOwner, b.vmi)
 	if err != nil {
 		log.Log.Reason(err).Errorf("failed to create tap device named %s", b.tapDeviceName)
-		return err
-	}
-
-	if err := b.createMacvlan(); err != nil {
-		log.Log.Reason(err).Errorf("failed to create macvlan device named %s", b.bridgeInterfaceName)
 		return err
 	}
 

@@ -250,8 +250,14 @@ func (b *MacvtapLibvirtSpecGenerator) discoverDomainIfaceSpec() (*api.Interface,
 
 	b.cachedDomainInterface.MTU = &api.MTU{Size: strconv.Itoa(podNicLink.Attrs().MTU)}
 
+	// In case of macvtap-cni, we don't rename any interfaces
+	deviceName := b.podInterfaceName
+	if podNicLink.Type() != "macvtap" {
+		deviceName = virtnetlink.GenerateTapDeviceName(b.podInterfaceName)
+	}
+
 	b.cachedDomainInterface.Target = &api.InterfaceTarget{
-		Device:  virtnetlink.GenerateTapDeviceName(b.podInterfaceName),
+		Device:  deviceName,
 		Managed: "no"}
 	return &b.cachedDomainInterface, nil
 }
