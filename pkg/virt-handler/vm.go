@@ -105,6 +105,14 @@ const (
 	unableCreateVirtLauncherConnectionFmt = "unable to create virt-launcher client connection: %v"
 )
 
+var (
+	supportedMACAnnotations = []string{
+		"cni.cilium.io/macAddrs",           // cilium
+		"ovn.kubernetes.io/mac_address",    // kube-ovn
+		"cni.projectcalico.org/hwAdddress", // calico
+	}
+)
+
 const (
 	//VolumeReadyReason is the reason set when the volume is ready.
 	VolumeReadyReason = "VolumeReady"
@@ -2202,8 +2210,15 @@ func (d *VirtualMachineController) checkNetworkInterfacesForMigration(vmi *v1.Vi
 		return nil
 	}
 
-	if !netvmispec.IsPodNetworkWithMasqueradeBindingInterface(vmi.Spec.Networks, ifaces) {
-		return fmt.Errorf("cannot migrate VMI which does not use masquerade to connect to the pod network")
+	hasMACDefined := false
+	for _, annotation := range supportedMACAnnotations {
+		if _, ok := vmi.Annotations[annotation]; ok {
+			hasMACDefined = true
+			break
+		}
+	}
+	if !hasMACDefined && !netvmispec.IsPodNetworkWithMasqueradeBindingInterface(vmi.Spec.Networks, ifaces) {
+		return fmt.Errorf("cannot migrate VMI which has no MAC-address defined and does not use masquerade to connect to the pod network")
 	}
 
 	sriovLiveMigrationEnabled := d.clusterConfig.SRIOVLiveMigrationEnabled()

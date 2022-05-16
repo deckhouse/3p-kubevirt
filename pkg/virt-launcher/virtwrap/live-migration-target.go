@@ -39,6 +39,10 @@ import (
 )
 
 func (l *LibvirtDomainManager) finalizeMigrationTarget(vmi *v1.VirtualMachineInstance) error {
+	if err := l.reconnectGuestNics(vmi); err != nil {
+		return err
+	}
+
 	if err := l.setGuestTime(vmi); err != nil {
 		return err
 	}

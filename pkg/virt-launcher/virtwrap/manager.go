@@ -86,6 +86,7 @@ import (
 const (
 	failedSyncGuestTime             = "failed to sync guest time"
 	failedGetDomain                 = "Getting the domain failed."
+	failedReconnectGuestNic         = "failed to reconnect guest interfaces"
 	failedGetDomainState            = "Getting the domain state failed."
 	failedDomainMemoryDump          = "Domain memory dump failed"
 	affectLiveAndConfigLibvirtFlags = libvirt.DOMAIN_DEVICE_MODIFY_LIVE | libvirt.DOMAIN_DEVICE_MODIFY_CONFIG
@@ -301,6 +302,52 @@ func (l *LibvirtDomainManager) setGuestTime(vmi *v1.VirtualMachineInstance) erro
 			}
 		}
 	}()
+
+	return nil
+}
+
+func (l *LibvirtDomainManager) reconnectGuestNics(vmi *v1.VirtualMachineInstance) error {
+	// Set interfaces link down and up to renew DHCP leases
+
+	domName := api.VMINamespaceKeyFunc(vmi)
+	dom, err := l.virConn.LookupDomainByName(domName)
+	if err != nil {
+		log.Log.Object(vmi).Reason(err).Error(failedReconnectGuestNic)
+		return err
+	}
+	xmlstr, err := dom.GetXMLDesc(0)
+	if err != nil {
+		return err
+	}
+
+	var domain api.DomainSpec
+	err = xml.Unmarshal([]byte(xmlstr), &domain)
+	if err != nil {
+		return fmt.Errorf("parsing domain XML failed, err: %v", err)
+	}
+
+	//Look up all the interfaces and reconnect them
+	for _, iface := range domain.Devices.Interfaces {
+		ifaceBytes, err := xml.Marshal(iface)
+		if err != nil {
+			return fmt.Errorf("failed to encode (xml) interface %v, err: %v", iface, err)
+		}
+		disconnectedIface := iface.DeepCopy()
+		disconnectedIface.LinkState = &api.LinkState{State: "down"}
+		disconnectedIfaceBytes, err := xml.Marshal(disconnectedIface)
+		if err != nil {
+			return fmt.Errorf("failed to encode (xml) interface %v, err: %v", disconnectedIface, err)
+		}
+
+		err = dom.UpdateDeviceFlags(string(disconnectedIfaceBytes), affectLiveAndConfigLibvirtFlags)
+		if err != nil {
+			return fmt.Errorf("failed to set link status down %s, err: %v", iface.Alias.GetName(), err)
+		}
+		err = dom.UpdateDeviceFlags(string(ifaceBytes), affectLiveAndConfigLibvirtFlags)
+		if err != nil {
+			return fmt.Errorf("failed to set link status up %s, err: %v", iface.Alias.GetName(), err)
+		}
+	}
 
 	return nil
 }
