@@ -306,9 +306,9 @@ func (l *LibvirtDomainManager) setGuestTime(vmi *v1.VirtualMachineInstance) erro
 	return nil
 }
 
+// Set interfaces link down and up to renew DHCP leases
 func (l *LibvirtDomainManager) reconnectGuestNics(vmi *v1.VirtualMachineInstance) error {
-	// Set interfaces link down and up to renew DHCP leases
-
+	logger := log.Log.Object(vmi)
 	domName := api.VMINamespaceKeyFunc(vmi)
 	dom, err := l.virConn.LookupDomainByName(domName)
 	if err != nil {
@@ -326,12 +326,49 @@ func (l *LibvirtDomainManager) reconnectGuestNics(vmi *v1.VirtualMachineInstance
 		return fmt.Errorf("parsing domain XML failed, err: %v", err)
 	}
 
-	//Look up all the interfaces and reconnect them
+	// Look up all the interfaces and reconnect them
 	for _, iface := range domain.Devices.Interfaces {
+		specIface := getIfaceByName(vmi, iface.Alias.GetName())
+
+		// For masquerade and slirp we don't have to do anything
+		if specIface.Masquerade != nil || specIface.Slirp != nil {
+			continue
+		}
+
 		ifaceBytes, err := xml.Marshal(iface)
 		if err != nil {
 			return fmt.Errorf("failed to encode (xml) interface %v, err: %v", iface, err)
 		}
+
+		cachedIface, err := cache.ReadDomainInterfaceCache(cache.CacheCreator{}, "1", iface.Alias.GetName())
+		if err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("failed to read pod interface network state from cache %s", err.Error())
+		}
+
+		// If MAC address is different, reattach nic as it is already not working anyway
+		if cachedIface.MAC.MAC != "" && !strings.EqualFold(cachedIface.MAC.MAC, iface.MAC.MAC) {
+			logger.Info("MAC address is changed: reattaching network " + iface.Alias.GetName())
+			newIface := iface.DeepCopy()
+			newIface.MAC.MAC = cachedIface.MAC.MAC
+			newIfaceBytes, err := xml.Marshal(newIface)
+			if err != nil {
+				return fmt.Errorf("failed to encode (xml) interface %v, err: %v", newIface, err)
+			}
+			err = dom.DetachDevice(string(ifaceBytes))
+			if err != nil {
+				return fmt.Errorf("failed to detach network %s, err: %v", iface.Alias.GetName(), err)
+			}
+			err = dom.AttachDevice(string(newIfaceBytes))
+			if err != nil {
+				return fmt.Errorf("failed to attach network %s, err: %v", iface.Alias.GetName(), err)
+			}
+			continue
+		}
+
+		// TODO: should we check if local DHCP is running?
+
+		// In other case force VM to renew IP by setting link down and up
+		logger.Info("MAC address doesn't require update: forcing VM to renew DHCP lease on network " + iface.Alias.GetName())
 		disconnectedIface := iface.DeepCopy()
 		disconnectedIface.LinkState = &api.LinkState{State: "down"}
 		disconnectedIfaceBytes, err := xml.Marshal(disconnectedIface)
@@ -1989,4 +2026,13 @@ func getDomainCreateFlags(vmi *v1.VirtualMachineInstance) libvirt.DomainCreateFl
 		flags |= libvirt.DOMAIN_START_PAUSED
 	}
 	return flags
+}
+
+func getIfaceByName(vmi *v1.VirtualMachineInstance, name string) *v1.Interface {
+	for i, iface := range vmi.Spec.Domain.Devices.Interfaces {
+		if iface.Name == name {
+			return &vmi.Spec.Domain.Devices.Interfaces[i]
+		}
+	}
+	return nil
 }
