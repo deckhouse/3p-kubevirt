@@ -315,6 +315,7 @@ func (l *LibvirtDomainManager) reconnectGuestNics(vmi *v1.VirtualMachineInstance
 		log.Log.Object(vmi).Reason(err).Error(failedReconnectGuestNic)
 		return err
 	}
+	defer dom.Free()
 	xmlstr, err := dom.GetXMLDesc(0)
 	if err != nil {
 		return err
