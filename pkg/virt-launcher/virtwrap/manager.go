@@ -336,11 +336,6 @@ func (l *LibvirtDomainManager) reconnectGuestNics(vmi *v1.VirtualMachineInstance
 			continue
 		}
 
-		ifaceBytes, err := xml.Marshal(iface)
-		if err != nil {
-			return fmt.Errorf("failed to encode (xml) interface %v, err: %v", iface, err)
-		}
-
 		cachedIface, err := cache.ReadDomainInterfaceCache(cache.CacheCreator{}, "1", iface.Alias.GetName())
 		if err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("failed to read pod interface network state from cache %s", err.Error())
@@ -349,20 +344,11 @@ func (l *LibvirtDomainManager) reconnectGuestNics(vmi *v1.VirtualMachineInstance
 		// If MAC address is different, reattach nic as it is already not working anyway
 		if cachedIface.MAC.MAC != "" && !strings.EqualFold(cachedIface.MAC.MAC, iface.MAC.MAC) {
 			logger.Info("MAC address is changed: reattaching network " + iface.Alias.GetName())
-			newIface := iface.DeepCopy()
-			newIface.MAC.MAC = cachedIface.MAC.MAC
-			newIfaceBytes, err := xml.Marshal(newIface)
+			reattachIfaceWithMacAddress(dom, iface, cachedIface.MAC.MAC)
 			if err != nil {
-				return fmt.Errorf("failed to encode (xml) interface %v, err: %v", newIface, err)
+				return fmt.Errorf("failed to reattach network %s, err: %v", iface.Alias.GetName(), err)
 			}
-			err = dom.DetachDevice(string(ifaceBytes))
-			if err != nil {
-				return fmt.Errorf("failed to detach network %s, err: %v", iface.Alias.GetName(), err)
-			}
-			err = dom.AttachDevice(string(newIfaceBytes))
-			if err != nil {
-				return fmt.Errorf("failed to attach network %s, err: %v", iface.Alias.GetName(), err)
-			}
+
 			continue
 		}
 
@@ -370,23 +356,59 @@ func (l *LibvirtDomainManager) reconnectGuestNics(vmi *v1.VirtualMachineInstance
 
 		// In other case force VM to renew IP by setting link down and up
 		logger.Info("MAC address doesn't require update: forcing VM to renew DHCP lease on network " + iface.Alias.GetName())
-		disconnectedIface := iface.DeepCopy()
-		disconnectedIface.LinkState = &api.LinkState{State: "down"}
-		disconnectedIfaceBytes, err := xml.Marshal(disconnectedIface)
+		reconnectIface(dom, iface)
 		if err != nil {
-			return fmt.Errorf("failed to encode (xml) interface %v, err: %v", disconnectedIface, err)
+			return fmt.Errorf("failed to reconnect network %s, err: %v", iface.Alias.GetName(), err)
 		}
 
-		err = dom.UpdateDeviceFlags(string(disconnectedIfaceBytes), affectLiveAndConfigLibvirtFlags)
-		if err != nil {
-			return fmt.Errorf("failed to set link status down %s, err: %v", iface.Alias.GetName(), err)
-		}
-		err = dom.UpdateDeviceFlags(string(ifaceBytes), affectLiveAndConfigLibvirtFlags)
-		if err != nil {
-			return fmt.Errorf("failed to set link status up %s, err: %v", iface.Alias.GetName(), err)
-		}
 	}
 
+	return nil
+}
+
+// Reattaches NIC with new MAC Address
+func reattachIfaceWithMacAddress(dom cli.VirDomain, iface api.Interface, mac string) error {
+	ifaceBytes, err := xml.Marshal(iface)
+	if err != nil {
+		return fmt.Errorf("failed to encode (xml) interface, err: %v", err)
+	}
+	newIface := iface.DeepCopy()
+	newIface.MAC.MAC = mac
+	newIfaceBytes, err := xml.Marshal(newIface)
+	if err != nil {
+		return fmt.Errorf("failed to encode (xml) interface, err: %v", err)
+	}
+	err = dom.DetachDevice(string(ifaceBytes))
+	if err != nil {
+		return fmt.Errorf("failed to detach network interface, err: %v", err)
+	}
+	err = dom.AttachDevice(string(newIfaceBytes))
+	if err != nil {
+		return fmt.Errorf("failed to attach network interface, err: %v", err)
+	}
+	return nil
+}
+
+// Sets link down and up for specified interface
+func reconnectIface(dom cli.VirDomain, iface api.Interface) error {
+	ifaceBytes, err := xml.Marshal(iface)
+	if err != nil {
+		return fmt.Errorf("failed to encode (xml) interface, err: %v", err)
+	}
+	disconnectedIface := iface.DeepCopy()
+	disconnectedIface.LinkState = &api.LinkState{State: "down"}
+	disconnectedIfaceBytes, err := xml.Marshal(disconnectedIface)
+	if err != nil {
+		return fmt.Errorf("failed to encode (xml) interface, err: %v", err)
+	}
+	err = dom.UpdateDeviceFlags(string(disconnectedIfaceBytes), affectLiveAndConfigLibvirtFlags)
+	if err != nil {
+		return fmt.Errorf("failed to set link down, err: %v", err)
+	}
+	err = dom.UpdateDeviceFlags(string(ifaceBytes), affectLiveAndConfigLibvirtFlags)
+	if err != nil {
+		return fmt.Errorf("failed to set link up, err: %v", err)
+	}
 	return nil
 }
 
