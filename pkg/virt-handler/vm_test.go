@@ -35,8 +35,6 @@ import (
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/testing"
 
-	virtcontroller "kubevirt.io/kubevirt/pkg/controller"
-
 	api2 "kubevirt.io/client-go/api"
 
 	netcache "kubevirt.io/kubevirt/pkg/network/cache"
@@ -2405,21 +2403,6 @@ var _ = Describe("VirtualMachineInstance", func() {
 			Expect(condition.Reason).To(Equal(v1.VirtualMachineInstanceReasonVirtIOFSNotMigratable))
 		})
 
-		It("should not be allowed to live-migrate if the VMI does not use masquerade to connect to the pod network", func() {
-			vmi := api2.NewMinimalVMI("testvmi")
-
-			strategy := v1.EvictionStrategyLiveMigrate
-			vmi.Spec.EvictionStrategy = &strategy
-
-			vmi.Spec.Domain.Devices.Interfaces = []v1.Interface{*v1.DefaultBridgeNetworkInterface()}
-			vmi.Spec.Networks = []v1.Network{*v1.DefaultPodNetwork()}
-
-			conditionManager := virtcontroller.NewVirtualMachineInstanceConditionManager()
-			controller.updateLiveMigrationConditions(vmi, conditionManager)
-
-			testutils.ExpectEvent(recorder, "cannot migrate VMI which does not use masquerade to connect to the pod network")
-		})
-
 		Context("check that migration is not supported when using Host Devices", func() {
 			envName := util.ResourceNameToEnvVar(v1.PCIResourcePrefix, "dev1")
 
@@ -2484,28 +2467,6 @@ var _ = Describe("VirtualMachineInstance", func() {
 		})
 
 		Context("with network configuration", func() {
-			It("should block migration for bridge binding assigned to the pod network", func() {
-				vmi := api2.NewMinimalVMI("testvmi")
-				interface_name := "interface_name"
-
-				vmi.Spec.Networks = []v1.Network{
-					{
-						Name:          interface_name,
-						NetworkSource: v1.NetworkSource{Pod: &v1.PodNetwork{}},
-					},
-				}
-				vmi.Spec.Domain.Devices.Interfaces = []v1.Interface{
-					{
-						Name: interface_name,
-						InterfaceBindingMethod: v1.InterfaceBindingMethod{
-							Bridge: &v1.InterfaceBridge{},
-						},
-					},
-				}
-
-				err := controller.checkNetworkInterfacesForMigration(vmi)
-				Expect(err).To(HaveOccurred())
-			})
 			It("should block migration for VMI with SRIOV interface when feature-gate SRIOVLiveMigration is off", func() {
 				vmi := api2.NewMinimalVMI("testvmi")
 				sriovInterfaceName := "sriovnet1"

@@ -30,27 +30,6 @@ import (
 
 var _ = Describe("VMI network spec", func() {
 
-	Context("pod network", func() {
-		const podNet0 = "podnet0"
-
-		networks := []v1.Network{podNetwork(podNet0)}
-
-		It("does not exist", func() {
-			ifaces := []v1.Interface{interfaceWithBridgeBinding(podNet0)}
-			Expect(netvmispec.IsPodNetworkWithMasqueradeBindingInterface([]v1.Network{}, ifaces)).To(BeTrue())
-		})
-
-		It("is used by a masquerade interface", func() {
-			ifaces := []v1.Interface{interfaceWithMasqueradeBinding(podNet0)}
-			Expect(netvmispec.IsPodNetworkWithMasqueradeBindingInterface(networks, ifaces)).To(BeTrue())
-		})
-
-		It("used by a non-masquerade interface", func() {
-			ifaces := []v1.Interface{interfaceWithBridgeBinding(podNet0)}
-			Expect(netvmispec.IsPodNetworkWithMasqueradeBindingInterface(networks, ifaces)).To(BeFalse())
-		})
-	})
-
 	Context("SR-IOV", func() {
 		It("finds no SR-IOV interfaces in list", func() {
 			ifaces := []v1.Interface{

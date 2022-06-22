@@ -331,39 +331,44 @@ func (l *LibvirtDomainManager) reconnectGuestNics(vmi *v1.VirtualMachineInstance
 	for _, iface := range domain.Devices.Interfaces {
 		specIface := getIfaceByName(vmi, iface.Alias.GetName())
 
-		// For masquerade and slirp we don't have to do anything
-		if specIface.Masquerade != nil || specIface.Slirp != nil {
+		// TODO: support macvtap as well (PR #7648)
+		if specIface.Bridge == nil {
 			continue
 		}
 
-		cachedIface, err := cache.ReadDomainInterfaceCache(cache.CacheCreator{}, "1", iface.Alias.GetName())
-		if err != nil && !os.IsNotExist(err) {
-			return fmt.Errorf("failed to read pod interface network state from cache %s", err.Error())
-		}
-
-		// If MAC address is different, reattach nic as it is already not working anyway
-		if cachedIface.MAC.MAC != "" && !strings.EqualFold(cachedIface.MAC.MAC, iface.MAC.MAC) {
-			logger.Info("MAC address is changed: reattaching network " + iface.Alias.GetName())
-			reattachIfaceWithMacAddress(dom, iface, cachedIface.MAC.MAC)
-			if err != nil {
-				return fmt.Errorf("failed to reattach network %s, err: %v", iface.Alias.GetName(), err)
-			}
-
-			continue
-		}
-
-		// TODO: should we check if local DHCP is running?
-
-		// In other case force VM to renew IP by setting link down and up
-		logger.Info("MAC address doesn't require update: forcing VM to renew DHCP lease on network " + iface.Alias.GetName())
-		reconnectIface(dom, iface)
+		cachedMAC, err := getIfaceMACAddressFromCache(iface)
 		if err != nil {
-			return fmt.Errorf("failed to reconnect network %s, err: %v", iface.Alias.GetName(), err)
+			return fmt.Errorf("failed to get actual MAC address for network %s, err: %v", iface.Alias.GetName(), err)
 		}
-
+		if cachedMAC != "" && cachedMAC != iface.MAC.MAC {
+			logger.Info("MAC address for " + iface.Alias.GetName() + " network is changed. Reattaching interfaces")
+			err = reattachIfaceWithMacAddress(dom, iface, cachedMAC)
+		} else {
+			// TODO: should we check if local DHCP is running?
+			logger.Info("MAC address for " + iface.Alias.GetName() + " network does not require update. Forcing VM to renew DHCP lease")
+			err = reconnectIface(dom, iface)
+		}
+		if err != nil {
+			return fmt.Errorf("failed to update network %s, err: %v", iface.Alias.GetName(), err)
+		}
 	}
 
 	return nil
+}
+
+// Returns actual MAC address for NIC
+func getIfaceMACAddressFromCache(iface api.Interface) (string, error) {
+	if iface.MAC == nil {
+		return "", nil
+	}
+	cachedIface, err := cache.ReadDomainInterfaceCache(cache.CacheCreator{}, "1", iface.Alias.GetName())
+	if os.IsNotExist(err) {
+		return iface.MAC.MAC, nil
+	}
+	if err != nil {
+		return iface.MAC.MAC, fmt.Errorf("failed to read pod interface network state from cache %s", err.Error())
+	}
+	return cachedIface.MAC.MAC, nil
 }
 
 // Reattaches NIC with new MAC Address
