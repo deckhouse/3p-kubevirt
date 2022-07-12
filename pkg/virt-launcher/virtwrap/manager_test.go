@@ -2195,7 +2195,7 @@ var _ = Describe("Manager", func() {
 				Device:  "tap0",
 			},
 		}
-		err := cache.WriteDomainInterfaceCache(cache.CacheCreator{}, "1", iface.Alias.GetName(), &iface)
+		Expect(cache.WriteDomainInterfaceCache(cache.CacheCreator{}, "1", iface.Alias.GetName(), &iface)).To(Succeed())
 		defer func() { os.Remove("/var/run/kubevirt-private/interface-cache-" + iface.Alias.GetName() + ".json") }()
 		vmi.Spec.Domain.Devices.Interfaces = append(
 			vmi.Spec.Domain.Devices.Interfaces,
@@ -2246,7 +2246,7 @@ var _ = Describe("Manager", func() {
 				Device:  "tap0",
 			},
 		}
-		err := cache.WriteDomainInterfaceCache(cache.CacheCreator{}, "1", iface.Alias.GetName(), &iface)
+		Expect(cache.WriteDomainInterfaceCache(cache.CacheCreator{}, "1", iface.Alias.GetName(), &iface)).To(Succeed())
 		defer func() { os.Remove("/var/run/kubevirt-private/interface-cache-default.json") }()
 		vmi.Spec.Domain.Devices.Interfaces = append(
 			vmi.Spec.Domain.Devices.Interfaces,
@@ -2315,7 +2315,7 @@ var _ = Describe("Manager", func() {
 				Device:  "tap1",
 			},
 		}
-		err := cache.WriteDomainInterfaceCache(cache.CacheCreator{}, "1", iface.Alias.GetName(), &iface)
+		Expect(cache.WriteDomainInterfaceCache(cache.CacheCreator{}, "1", iface.Alias.GetName(), &iface)).To(Succeed())
 		defer func() { os.Remove("/var/run/kubevirt-private/interface-cache-" + iface.Alias.GetName() + ".json") }()
 		vmi.Spec.Domain.Devices.Interfaces = append(
 			vmi.Spec.Domain.Devices.Interfaces,
@@ -2344,7 +2344,7 @@ var _ = Describe("Manager", func() {
 				Device:  "tap2",
 			},
 		}
-		err = cache.WriteDomainInterfaceCache(cache.CacheCreator{}, "1", iface.Alias.GetName(), &iface)
+		Expect(cache.WriteDomainInterfaceCache(cache.CacheCreator{}, "1", iface.Alias.GetName(), &iface)).To(Succeed())
 		defer func() { os.Remove("/var/run/kubevirt-private/interface-cache-" + iface.Alias.GetName() + ".json") }()
 		vmi.Spec.Domain.Devices.Interfaces = append(
 			vmi.Spec.Domain.Devices.Interfaces,

@@ -49,6 +49,15 @@ func FilterInterfacesSpec(ifaces []v1.Interface, predicate func(i v1.Interface) 
 	return filteredIfaces
 }
 
+func IsPodNetworkWithMasqueradeBindingInterface(networks []v1.Network, ifaces []v1.Interface) bool {
+	if podNetwork := lookupPodNetwork(networks); podNetwork != nil {
+		if podInterface := LookupInterfaceByNetwork(ifaces, podNetwork); podInterface != nil {
+			return podInterface.Masquerade != nil
+		}
+	}
+	return true
+}
+
 func LookupInterfaceStatusByMac(interfaces []v1.VirtualMachineInstanceNetworkInterface, macAddress string) *v1.VirtualMachineInstanceNetworkInterface {
 	for index := range interfaces {
 		if interfaces[index].MAC == macAddress {

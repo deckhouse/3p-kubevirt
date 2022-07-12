@@ -67,6 +67,7 @@ import (
 	sdkapi "kubevirt.io/controller-lifecycle-operator-sdk/api"
 
 	"kubevirt.io/kubevirt/pkg/controller"
+	virtconfig "kubevirt.io/kubevirt/pkg/virt-config"
 	"kubevirt.io/kubevirt/pkg/virt-operator/resource/apply"
 	"kubevirt.io/kubevirt/pkg/virt-operator/resource/generate/components"
 	"kubevirt.io/kubevirt/pkg/virt-operator/util"
@@ -752,8 +753,10 @@ var _ = Describe("[Serial][sig-operator]Operator", func() {
 			vmis := []*v1.VirtualMachineInstance{}
 			for i := 0; i < num; i++ {
 				vmi := tests.NewRandomVMIWithEphemeralDisk(cd.ContainerDiskFor(cd.ContainerDiskCirros))
-				// Add read-only cdrom, which isn't allowed to migrate
-				tests.AddEphemeralCdrom(vmi, "cdrom-0", v1.DiskBusSATA, cd.ContainerDiskFor(cd.ContainerDiskAlpine))
+				// Remove the masquerade interface to use the default bridge one
+				// bridge interface isn't allowed to migrate
+				vmi.Spec.Domain.Devices.Interfaces = nil
+				vmi.Spec.Networks = nil
 				vmis = append(vmis, vmi)
 			}
 
@@ -1959,6 +1962,12 @@ spec:
 		})
 
 		It("[test_id:3150]should be able to update kubevirt install with custom image tag", func() {
+			BeforeEach(func() {
+				if checks.HasFeature(virtconfig.NetworkAwareLiveMigrationGate) {
+					Skip("Test specific to case when NetworkAwareLiveMigration featureGate is not enabled")
+				}
+			})
+
 			if flags.KubeVirtVersionTagAlt == "" {
 				Skip("Skip operator custom image tag test because alt tag is not present")
 			}

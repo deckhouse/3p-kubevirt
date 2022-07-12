@@ -679,7 +679,59 @@ var _ = Describe("[rfe_id:393][crit:high][vendor:cnv-qe@redhat.com][level:system
 			tests.WaitForVirtualMachineToDisappearWithTimeout(vmi, 120)
 		}
 
-		Context("with a bridge network interface", func() {
+		Context("with a bridge network interface when feature-gate NetworkAwareLiveMigration is off", func() {
+			It("[test_id:3226]should reject a migration of a vmi with a bridge interface", func() {
+				vmi := tests.NewRandomVMIWithEphemeralDisk(cd.ContainerDiskFor(cd.ContainerDiskAlpine))
+				vmi.Spec.Domain.Devices.Interfaces = []v1.Interface{
+					{
+						Name: "default",
+						InterfaceBindingMethod: v1.InterfaceBindingMethod{
+							Bridge: &v1.InterfaceBridge{},
+						},
+					},
+				}
+				vmi = runVMIAndExpectLaunch(vmi, 240)
+
+				// Verify console on last iteration to verify the VirtualMachineInstance is still booting properly
+				// after being restarted multiple times
+				By("Checking that the VirtualMachineInstance console has expected output")
+				Expect(console.LoginToAlpine(vmi)).To(Succeed())
+
+				gotExpectedCondition := false
+				for _, c := range vmi.Status.Conditions {
+					if c.Type == v1.VirtualMachineInstanceIsMigratable {
+						Expect(c.Status).To(Equal(k8sv1.ConditionFalse))
+						gotExpectedCondition = true
+					}
+				}
+
+				Expect(gotExpectedCondition).Should(BeTrue())
+
+				// execute a migration, wait for finalized state
+				migration := tests.NewRandomMigration(vmi.Name, vmi.Namespace)
+
+				By("Starting a Migration")
+				migration, err = virtClient.VirtualMachineInstanceMigration(migration.Namespace).Create(migration, &metav1.CreateOptions{})
+				Expect(err).To(HaveOccurred())
+				Expect(err.Error()).To(ContainSubstring("InterfaceNotLiveMigratable"))
+
+				// delete VMI
+				By("Deleting the VMI")
+				Expect(virtClient.VirtualMachineInstance(vmi.Namespace).Delete(vmi.Name, &metav1.DeleteOptions{})).To(Succeed())
+
+				By("Waiting for VMI to disappear")
+				tests.WaitForVirtualMachineToDisappearWithTimeout(vmi, 120)
+			})
+		})
+
+		Context("with a bridge network interface when feature-gate NetworkAwareLiveMigration is on", func() {
+			BeforeEach(func() {
+				tests.EnableFeatureGate(virtconfig.NetworkAwareLiveMigrationGate)
+			})
+			AfterEach(func() {
+				tests.DisableFeatureGate(virtconfig.NetworkAwareLiveMigrationGate)
+			})
+
 			var clientVMI *v1.VirtualMachineInstance
 			var serverVMI *v1.VirtualMachineInstance
 			var clientVMIPodName string

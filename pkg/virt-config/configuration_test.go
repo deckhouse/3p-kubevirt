@@ -665,4 +665,24 @@ var _ = Describe("test configuration", func() {
 		Entry("LiveMigration is open, SRIOVLiveMigration should be close",
 			[]string{virtconfig.LiveMigrationGate}, true, false),
 	)
+
+	DescribeTable("when feature-gate", func(fgs []string, isLiveMigrationEnabled, isNetworkAwareLiveMigrationEnabled bool) {
+		clusterConfig, _, _ := testutils.NewFakeClusterConfigUsingKVConfig(&v1.KubeVirtConfiguration{
+			DeveloperConfiguration: &v1.DeveloperConfiguration{
+				FeatureGates: fgs,
+			},
+		})
+
+		Expect(clusterConfig.LiveMigrationEnabled()).To(Equal(isLiveMigrationEnabled))
+		Expect(clusterConfig.NetworkAwareLiveMigrationEnabled()).To(Equal(isNetworkAwareLiveMigrationEnabled))
+	},
+		Entry("LiveMigration and NetworkAwareLiveMigration are closed, both should be closed",
+			[]string{}, false, false),
+		Entry("LiveMigration and NetworkAwareLiveMigration are open, both should be open",
+			[]string{virtconfig.LiveMigrationGate, virtconfig.NetworkAwareLiveMigrationGate}, true, true),
+		Entry("NetworkAwareLiveMigration is open, LiveMigration should be open",
+			[]string{virtconfig.NetworkAwareLiveMigrationGate}, true, true),
+		Entry("LiveMigration is open, NetworkAwareLiveMigration should be close",
+			[]string{virtconfig.LiveMigrationGate}, true, false),
+	)
 })

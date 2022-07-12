@@ -30,23 +30,25 @@ const (
 	IgnitionGate      = "ExperimentalIgnitionSupport"
 	LiveMigrationGate = "LiveMigration"
 	// SRIOVLiveMigrationGate enable's Live Migration for VM's with SRIOV interfaces.
-	SRIOVLiveMigrationGate     = "SRIOVLiveMigration"
-	CPUNodeDiscoveryGate       = "CPUNodeDiscovery"
-	HypervStrictCheckGate      = "HypervStrictCheck"
-	SidecarGate                = "Sidecar"
-	GPUGate                    = "GPU"
-	HostDevicesGate            = "HostDevices"
-	SnapshotGate               = "Snapshot"
-	VMExportGate               = "VMExport"
-	HotplugVolumesGate         = "HotplugVolumes"
-	HostDiskGate               = "HostDisk"
-	VirtIOFSGate               = "ExperimentalVirtiofsSupport"
-	MacvtapGate                = "Macvtap"
-	DownwardMetricsFeatureGate = "DownwardMetrics"
-	NonRootDeprecated          = "NonRootExperimental"
-	NonRoot                    = "NonRoot"
-	ClusterProfiler            = "ClusterProfiler"
-	WorkloadEncryptionSEV      = "WorkloadEncryptionSEV"
+	SRIOVLiveMigrationGate = "SRIOVLiveMigration"
+	// NetworkAwareLiveMigrationGate enable's Live Migration for VM's with bridged pod network
+	NetworkAwareLiveMigrationGate = "NetworkAwareLiveMigration"
+	CPUNodeDiscoveryGate          = "CPUNodeDiscovery"
+	HypervStrictCheckGate         = "HypervStrictCheck"
+	SidecarGate                   = "Sidecar"
+	GPUGate                       = "GPU"
+	HostDevicesGate               = "HostDevices"
+	SnapshotGate                  = "Snapshot"
+	VMExportGate                  = "VMExport"
+	HotplugVolumesGate            = "HotplugVolumes"
+	HostDiskGate                  = "HostDisk"
+	VirtIOFSGate                  = "ExperimentalVirtiofsSupport"
+	MacvtapGate                   = "Macvtap"
+	DownwardMetricsFeatureGate    = "DownwardMetrics"
+	NonRootDeprecated             = "NonRootExperimental"
+	NonRoot                       = "NonRoot"
+	ClusterProfiler               = "ClusterProfiler"
+	WorkloadEncryptionSEV         = "WorkloadEncryptionSEV"
 )
 
 func (c *ClusterConfig) isFeatureGateEnabled(featureGate string) bool {
@@ -80,11 +82,16 @@ func (config *ClusterConfig) IgnitionEnabled() bool {
 
 func (config *ClusterConfig) LiveMigrationEnabled() bool {
 	return config.isFeatureGateEnabled(LiveMigrationGate) ||
-		config.isFeatureGateEnabled(SRIOVLiveMigrationGate)
+		config.isFeatureGateEnabled(SRIOVLiveMigrationGate) ||
+		config.isFeatureGateEnabled(NetworkAwareLiveMigrationGate)
 }
 
 func (config *ClusterConfig) SRIOVLiveMigrationEnabled() bool {
 	return config.isFeatureGateEnabled(SRIOVLiveMigrationGate)
+}
+
+func (config *ClusterConfig) NetworkAwareLiveMigrationEnabled() bool {
+	return config.isFeatureGateEnabled(NetworkAwareLiveMigrationGate)
 }
 
 func (config *ClusterConfig) HypervStrictCheckEnabled() bool {
