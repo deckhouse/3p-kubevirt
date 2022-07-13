@@ -95,6 +95,10 @@ const (
 const maxConcurrentHotplugHostDevices = 1
 const maxConcurrentMemoryDumps = 1
 
+type cacheCreator interface {
+	New(filePath string) *cache.Cache
+}
+
 type contextStore struct {
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -307,7 +311,7 @@ func (l *LibvirtDomainManager) setGuestTime(vmi *v1.VirtualMachineInstance) erro
 }
 
 // Set interfaces link down and up to renew DHCP leases
-func (l *LibvirtDomainManager) reconnectGuestNics(vmi *v1.VirtualMachineInstance) error {
+func (l *LibvirtDomainManager) reconnectGuestNics(vmi *v1.VirtualMachineInstance, c cacheCreator) error {
 	logger := log.Log.Object(vmi)
 	domName := api.VMINamespaceKeyFunc(vmi)
 	dom, err := l.virConn.LookupDomainByName(domName)
@@ -336,7 +340,7 @@ func (l *LibvirtDomainManager) reconnectGuestNics(vmi *v1.VirtualMachineInstance
 			continue
 		}
 
-		cachedMAC, err := getIfaceMACAddressFromCache(iface)
+		cachedMAC, err := getIfaceMACAddressFromCache(iface, c)
 		if err != nil {
 			return fmt.Errorf("failed to get actual MAC address for network %s, err: %v", iface.Alias.GetName(), err)
 		}
@@ -357,11 +361,11 @@ func (l *LibvirtDomainManager) reconnectGuestNics(vmi *v1.VirtualMachineInstance
 }
 
 // Returns actual MAC address for NIC
-func getIfaceMACAddressFromCache(iface api.Interface) (string, error) {
+func getIfaceMACAddressFromCache(iface api.Interface, c cacheCreator) (string, error) {
 	if iface.MAC == nil {
 		return "", nil
 	}
-	cachedIface, err := cache.ReadDomainInterfaceCache(cache.CacheCreator{}, "1", iface.Alias.GetName())
+	cachedIface, err := cache.ReadDomainInterfaceCache(c, "1", iface.Alias.GetName())
 	if os.IsNotExist(err) {
 		return iface.MAC.MAC, nil
 	}

@@ -29,6 +29,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"k8s.io/apimachinery/pkg/types"
@@ -52,6 +53,7 @@ import (
 	"kubevirt.io/kubevirt/pkg/ephemeral-disk/fake"
 	cmdv1 "kubevirt.io/kubevirt/pkg/handler-launcher-com/cmd/v1"
 	"kubevirt.io/kubevirt/pkg/network/cache"
+	kfs "kubevirt.io/kubevirt/pkg/os/fs"
 	"kubevirt.io/kubevirt/pkg/util/net/ip"
 	cmdclient "kubevirt.io/kubevirt/pkg/virt-handler/cmd-client"
 	agentpoller "kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/agent-poller"
@@ -2195,8 +2197,9 @@ var _ = Describe("Manager", func() {
 				Device:  "tap0",
 			},
 		}
-		Expect(cache.WriteDomainInterfaceCache(cache.CacheCreator{}, "1", iface.Alias.GetName(), &iface)).To(Succeed())
-		defer func() { os.Remove("/var/run/kubevirt-private/interface-cache-" + iface.Alias.GetName() + ".json") }()
+
+		cacheCreator := new(tempCacheCreator)
+		Expect(cache.WriteDomainInterfaceCache(cacheCreator, "1", iface.Alias.GetName(), &iface)).To(Succeed())
 		vmi.Spec.Domain.Devices.Interfaces = append(
 			vmi.Spec.Domain.Devices.Interfaces,
 			v1.Interface{
@@ -2222,7 +2225,7 @@ var _ = Describe("Manager", func() {
 		mockDomain.EXPECT().GetXMLDesc(libvirt.DomainXMLFlags(0)).MaxTimes(1).Return(string(xmlDomain), nil)
 		mockDomain.EXPECT().UpdateDeviceFlags(`<interface type="ethernet"><source></source><model type="virtio-non-transitional"></model><mac address="de:ad:00:00:be:af"></mac><alias name="ua-default"></alias><rom enabled="no"></rom></interface>`, libvirt.DomainDeviceModifyFlags(3)).Return(nil)
 		mockDomain.EXPECT().UpdateDeviceFlags(`<interface type="ethernet"><source></source><model type="virtio-non-transitional"></model><mac address="de:ad:00:00:be:af"></mac><link state="down"></link><alias name="ua-default"></alias><rom enabled="no"></rom></interface>`, libvirt.DomainDeviceModifyFlags(3)).Return(nil)
-		Expect(libvirtmanager.reconnectGuestNics(vmi)).To(Succeed())
+		Expect(libvirtmanager.reconnectGuestNics(vmi, cacheCreator)).To(Succeed())
 	})
 
 	It("executes reconnectGuestNics with bridge and updated MAC address", func() {
@@ -2246,8 +2249,8 @@ var _ = Describe("Manager", func() {
 				Device:  "tap0",
 			},
 		}
-		Expect(cache.WriteDomainInterfaceCache(cache.CacheCreator{}, "1", iface.Alias.GetName(), &iface)).To(Succeed())
-		defer func() { os.Remove("/var/run/kubevirt-private/interface-cache-default.json") }()
+		cacheCreator := new(tempCacheCreator)
+		Expect(cache.WriteDomainInterfaceCache(cacheCreator, "1", iface.Alias.GetName(), &iface)).To(Succeed())
 		vmi.Spec.Domain.Devices.Interfaces = append(
 			vmi.Spec.Domain.Devices.Interfaces,
 			v1.Interface{
@@ -2273,7 +2276,7 @@ var _ = Describe("Manager", func() {
 		mockDomain.EXPECT().GetXMLDesc(libvirt.DomainXMLFlags(0)).MaxTimes(1).Return(string(xmlDomain), nil)
 		mockDomain.EXPECT().AttachDevice(`<interface type="ethernet"><source></source><model type="virtio-non-transitional"></model><mac address="de:ad:00:00:be:ab"></mac><alias name="ua-default"></alias><rom enabled="no"></rom></interface>`).Return(nil)
 		mockDomain.EXPECT().DetachDevice(`<interface type="ethernet"><source></source><model type="virtio-non-transitional"></model><mac address="de:ad:00:00:be:af"></mac><alias name="ua-default"></alias><rom enabled="no"></rom></interface>`).Return(nil)
-		Expect(libvirtmanager.reconnectGuestNics(vmi)).To(Succeed())
+		Expect(libvirtmanager.reconnectGuestNics(vmi, cacheCreator)).To(Succeed())
 	})
 
 	It("executes reconnectGuestNics with masquerade and bridged multus networks", func() {
@@ -2315,8 +2318,8 @@ var _ = Describe("Manager", func() {
 				Device:  "tap1",
 			},
 		}
-		Expect(cache.WriteDomainInterfaceCache(cache.CacheCreator{}, "1", iface.Alias.GetName(), &iface)).To(Succeed())
-		defer func() { os.Remove("/var/run/kubevirt-private/interface-cache-" + iface.Alias.GetName() + ".json") }()
+		cacheCreator := new(tempCacheCreator)
+		Expect(cache.WriteDomainInterfaceCache(cacheCreator, "1", iface.Alias.GetName(), &iface)).To(Succeed())
 		vmi.Spec.Domain.Devices.Interfaces = append(
 			vmi.Spec.Domain.Devices.Interfaces,
 			v1.Interface{
@@ -2344,8 +2347,7 @@ var _ = Describe("Manager", func() {
 				Device:  "tap2",
 			},
 		}
-		Expect(cache.WriteDomainInterfaceCache(cache.CacheCreator{}, "1", iface.Alias.GetName(), &iface)).To(Succeed())
-		defer func() { os.Remove("/var/run/kubevirt-private/interface-cache-" + iface.Alias.GetName() + ".json") }()
+		Expect(cache.WriteDomainInterfaceCache(cacheCreator, "1", iface.Alias.GetName(), &iface)).To(Succeed())
 		vmi.Spec.Domain.Devices.Interfaces = append(
 			vmi.Spec.Domain.Devices.Interfaces,
 			v1.Interface{
@@ -2373,7 +2375,7 @@ var _ = Describe("Manager", func() {
 		mockDomain.EXPECT().DetachDevice(`<interface type="ethernet"><source></source><model type="virtio-non-transitional"></model><mac address="de:ad:00:00:cc:aa"></mac><alias name="ua-test2"></alias><rom enabled="no"></rom></interface>`).Return(nil)
 		mockDomain.EXPECT().UpdateDeviceFlags(`<interface type="ethernet"><source></source><model type="virtio-non-transitional"></model><mac address="de:ad:00:00:aa:ff"></mac><alias name="ua-test1"></alias><rom enabled="no"></rom></interface>`, libvirt.DomainDeviceModifyFlags(3)).Return(nil)
 		mockDomain.EXPECT().UpdateDeviceFlags(`<interface type="ethernet"><source></source><model type="virtio-non-transitional"></model><mac address="de:ad:00:00:aa:ff"></mac><link state="down"></link><alias name="ua-test1"></alias><rom enabled="no"></rom></interface>`, libvirt.DomainDeviceModifyFlags(3)).Return(nil)
-		Expect(libvirtmanager.reconnectGuestNics(vmi)).To(Succeed())
+		Expect(libvirtmanager.reconnectGuestNics(vmi, cacheCreator)).To(Succeed())
 	})
 
 	// TODO: test error reporting on non successful VirtualMachineInstance syncs and kill attempts
@@ -2813,4 +2815,20 @@ func domainToMetadataXml(domain *api.DomainSpec) string {
 	xml, err := xml.MarshalIndent(domain.Metadata.KubeVirt, "", "\t")
 	Expect(err).To(BeNil())
 	return string(xml)
+}
+
+type tempCacheCreator struct {
+	once   sync.Once
+	tmpDir string
+}
+
+func (c *tempCacheCreator) New(filePath string) *cache.Cache {
+	c.once.Do(func() {
+		tmpDir, err := ioutil.TempDir("", "temp-cache")
+		if err != nil {
+			panic("Unable to create temp cache directory")
+		}
+		c.tmpDir = tmpDir
+	})
+	return cache.NewCustomCache(filePath, kfs.NewWithRootPath(c.tmpDir))
 }
