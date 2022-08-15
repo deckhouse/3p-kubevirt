@@ -275,7 +275,7 @@ func VerifyEnv() error {
 
 	// ensure that all or no shasums are given
 	missingImageNames := make([]string, 0)
-	for _, name := range []string{"OPERATOR_IMAGE", "VIRT_API_IMAGE", "VIRT_CONTROLLER_IMAGE", "VIRT_HANDLER_IMAGE", "VIRT_LAUNCHER_IMAGE", "VIRT_EXPORTPROXY_IMAGE", "VIRT_EXPORTSERVER_IMAGE"} {
+	for _, name := range []string{"KUBEVIRT_VERSION", "OPERATOR_IMAGE", "VIRT_API_IMAGE", "VIRT_CONTROLLER_IMAGE", "VIRT_HANDLER_IMAGE", "VIRT_LAUNCHER_IMAGE", "VIRT_EXPORTPROXY_IMAGE", "VIRT_EXPORTSERVER_IMAGE"} {
 		imageName := os.Getenv(name)
 		if imageName == "" {
 			missingImageNames = append(missingImageNames, name)

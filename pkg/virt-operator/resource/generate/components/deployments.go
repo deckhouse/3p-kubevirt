@@ -151,11 +151,6 @@ func NewExportProxyService(namespace string) *corev1.Service {
 
 func newPodTemplateSpec(podName string, imageName string, repository string, version string, productName string, productVersion string, productComponent string, pullPolicy corev1.PullPolicy, podAffinity *corev1.Affinity, envVars *[]corev1.EnvVar) (*corev1.PodTemplateSpec, error) {
 
-	var imagePullSecrets []corev1.LocalObjectReference
-	for _, secret := range strings.Split(os.Getenv("IMAGE_PULL_SECRETS"), ",") {
-		imagePullSecrets = append(imagePullSecrets, corev1.LocalObjectReference{Name: secret})
-	}
-
 	podTemplateSpec := &corev1.PodTemplateSpec{
 		ObjectMeta: metav1.ObjectMeta{
 			Labels: map[string]string{
@@ -168,7 +163,6 @@ func newPodTemplateSpec(podName string, imageName string, repository string, ver
 			PriorityClassName: "kubevirt-cluster-critical",
 			Affinity:          podAffinity,
 			Tolerations:       criticalAddonsToleration(),
-			ImagePullSecrets:  imagePullSecrets,
 			Containers: []corev1.Container{
 				{
 					Name:            podName,
@@ -406,12 +400,6 @@ func NewControllerDeployment(namespace string, repository string, imagePrefix st
 		"-v",
 		verbosity,
 	}
-	container.Env = []corev1.EnvVar{
-		{
-			Name:  "IMAGE_PULL_SECRETS",
-			Value: os.Getenv("IMAGE_PULL_SECRETS"),
-		},
-	}
 	container.Ports = []corev1.ContainerPort{
 		{
 			Name:          "metrics",
@@ -472,13 +460,6 @@ func NewOperatorDeployment(namespace string, repository string, imagePrefix stri
 	podAntiAffinity := newPodAntiAffinity(kubevirtLabelKey, kubernetesHostnameTopologyKey, metav1.LabelSelectorOpIn, []string{VirtOperatorName})
 	image := os.Getenv("OPERATOR_IMAGE")
 
-	var imagePullSecrets []corev1.LocalObjectReference
-	for _, secret := range strings.Split(os.Getenv("IMAGE_PULL_SECRETS"), ",") {
-		if secret != "" {
-			imagePullSecrets = append(imagePullSecrets, corev1.LocalObjectReference{Name: secret})
-		}
-	}
-
 	deployment := &appsv1.Deployment{
 		TypeMeta: metav1.TypeMeta{
 			APIVersion: "apps/v1",
@@ -515,7 +496,6 @@ func NewOperatorDeployment(namespace string, repository string, imagePrefix stri
 					Tolerations:        criticalAddonsToleration(),
 					Affinity:           podAntiAffinity,
 					ServiceAccountName: "kubevirt-operator",
-					ImagePullSecrets:   imagePullSecrets,
 					Containers: []corev1.Container{
 						{
 							Name:            VirtOperatorName,

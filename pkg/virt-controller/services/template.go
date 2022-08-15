@@ -23,7 +23,6 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
-	"os"
 	"strconv"
 	"strings"
 
@@ -461,12 +460,6 @@ func (t *templateService) renderLaunchManifest(vmi *v1.VirtualMachineInstance, i
 		imagePullSecrets = appendUniqueImagePullSecret(imagePullSecrets, k8sv1.LocalObjectReference{
 			Name: t.imagePullSecret,
 		})
-	}
-
-	for _, secret := range strings.Split(os.Getenv("IMAGE_PULL_SECRETS"), ",") {
-		if secret != "" {
-			imagePullSecrets = appendUniqueImagePullSecret(imagePullSecrets, k8sv1.LocalObjectReference{Name: secret})
-		}
 	}
 
 	// Pad the virt-launcher grace period.
@@ -1113,13 +1106,6 @@ func (t *templateService) RenderHotplugAttachmentPodTemplate(volumes []*v1.Volum
 	sharedMount := k8sv1.MountPropagationHostToContainer
 	command := []string{"/bin/sh", "-c", "/usr/bin/container-disk --copy-path /path/hp"}
 
-	var imagePullSecrets []k8sv1.LocalObjectReference
-	for _, secret := range strings.Split(os.Getenv("IMAGE_PULL_SECRETS"), ",") {
-		if secret != "" {
-			imagePullSecrets = append(imagePullSecrets, k8sv1.LocalObjectReference{Name: secret})
-		}
-	}
-
 	pod := &k8sv1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			GenerateName: "hp-volume-",
@@ -1135,7 +1121,6 @@ func (t *templateService) RenderHotplugAttachmentPodTemplate(volumes []*v1.Volum
 			},
 		},
 		Spec: k8sv1.PodSpec{
-			ImagePullSecrets: imagePullSecrets,
 			Containers: []k8sv1.Container{
 				{
 					Name:    hotplugDisk,
@@ -1253,13 +1238,6 @@ func (t *templateService) RenderHotplugAttachmentTriggerPodTemplate(volume *v1.V
 		annotationsList[v1.EphemeralProvisioningObject] = "true"
 	}
 
-	var imagePullSecrets []k8sv1.LocalObjectReference
-	for _, secret := range strings.Split(os.Getenv("IMAGE_PULL_SECRETS"), ",") {
-		if secret != "" {
-			imagePullSecrets = append(imagePullSecrets, k8sv1.LocalObjectReference{Name: secret})
-		}
-	}
-
 	pod := &k8sv1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			GenerateName: "hp-volume-",
@@ -1276,7 +1254,6 @@ func (t *templateService) RenderHotplugAttachmentTriggerPodTemplate(volume *v1.V
 			Annotations: annotationsList,
 		},
 		Spec: k8sv1.PodSpec{
-			ImagePullSecrets: imagePullSecrets,
 			Containers: []k8sv1.Container{
 				{
 					Name:    hotplugDisk,

@@ -24,7 +24,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"strings"
 	"sync"
 	"time"
 
@@ -711,13 +710,6 @@ func (c *KubeVirtController) generateInstallStrategyJob(config *operatorutil.Kub
 		return nil, err
 	}
 
-	var imagePullSecrets []k8sv1.LocalObjectReference
-	for _, secret := range strings.Split(os.Getenv("IMAGE_PULL_SECRETS"), ",") {
-		if secret != "" {
-			imagePullSecrets = append(imagePullSecrets, k8sv1.LocalObjectReference{Name: secret})
-		}
-	}
-
 	job := &batchv1.Job{
 		TypeMeta: metav1.TypeMeta{
 			APIVersion: "batch/v1",
@@ -750,7 +742,6 @@ func (c *KubeVirtController) generateInstallStrategyJob(config *operatorutil.Kub
 				Spec: k8sv1.PodSpec{
 					ServiceAccountName: "kubevirt-operator",
 					RestartPolicy:      k8sv1.RestartPolicyNever,
-					ImagePullSecrets:   imagePullSecrets,
 					Containers: []k8sv1.Container{
 						{
 							Name:            "install-strategy-upload",
@@ -762,8 +753,8 @@ func (c *KubeVirtController) generateInstallStrategyJob(config *operatorutil.Kub
 							},
 							Env: []k8sv1.EnvVar{
 								{
-									Name:  "IMAGE_PULL_SECRETS",
-									Value: os.Getenv("IMAGE_PULL_SECRETS"),
+									Name:  "KUBEVIRT_VERSION",
+									Value: os.Getenv("KUBEVIRT_VERSION"),
 								},
 								{
 									Name:  "VIRT_API_IMAGE",
