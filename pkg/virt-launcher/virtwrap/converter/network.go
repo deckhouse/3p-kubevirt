@@ -85,7 +85,7 @@ func createDomainInterfaces(vmi *v1.VirtualMachineInstance, domain *api.Domain, 
 			domainIface.Address = addr
 		}
 
-		if iface.Bridge != nil || iface.Masquerade != nil {
+		if iface.Bridge != nil || iface.Masquerade != nil || iface.Macvtap != nil {
 			// TODO:(ihar) consider abstracting interface type conversion /
 			// detection into drivers
 
@@ -109,21 +109,9 @@ func createDomainInterfaces(vmi *v1.VirtualMachineInstance, domain *api.Domain, 
 			if err != nil {
 				return nil, err
 			}
-		} else if iface.Macvtap != nil {
-			if net.Multus == nil {
-				return nil, fmt.Errorf("macvtap interface %s requires Multus meta-cni", iface.Name)
-			}
-
-			domainIface.Type = "ethernet"
-			if iface.BootOrder != nil {
-				domainIface.BootOrder = &api.BootOrder{Order: *iface.BootOrder}
-			} else {
-				domainIface.Rom = &api.Rom{Enabled: "no"}
-			}
 		} else if iface.Passt != nil {
 			domain.Spec.Devices.Emulator = "/usr/bin/qrap"
 		}
-
 		if c.UseLaunchSecurity {
 			// It's necessary to disable the iPXE option ROM as iPXE is not aware of SEV
 			domainIface.Rom = &api.Rom{Enabled: "no"}
