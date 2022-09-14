@@ -30,24 +30,26 @@ const (
 	IgnitionGate      = "ExperimentalIgnitionSupport"
 	LiveMigrationGate = "LiveMigration"
 	// SRIOVLiveMigrationGate enables Live Migration for VM's with network SR-IOV interfaces.
-	SRIOVLiveMigrationGate     = "SRIOVLiveMigration"
-	CPUNodeDiscoveryGate       = "CPUNodeDiscovery"
-	HypervStrictCheckGate      = "HypervStrictCheck"
-	SidecarGate                = "Sidecar"
-	GPUGate                    = "GPU"
-	HostDevicesGate            = "HostDevices"
-	SnapshotGate               = "Snapshot"
-	VMExportGate               = "VMExport"
-	HotplugVolumesGate         = "HotplugVolumes"
-	HostDiskGate               = "HostDisk"
-	VirtIOFSGate               = "ExperimentalVirtiofsSupport"
-	MacvtapGate                = "Macvtap"
-	PasstGate                  = "Passt"
-	DownwardMetricsFeatureGate = "DownwardMetrics"
-	NonRootDeprecated          = "NonRootExperimental"
-	NonRoot                    = "NonRoot"
-	ClusterProfiler            = "ClusterProfiler"
-	WorkloadEncryptionSEV      = "WorkloadEncryptionSEV"
+	SRIOVLiveMigrationGate = "SRIOVLiveMigration"
+	// NetworkAwareLiveMigrationGate enable's Live Migration for VM's with bridged pod network
+	NetworkAwareLiveMigrationGate = "NetworkAwareLiveMigration"
+	CPUNodeDiscoveryGate          = "CPUNodeDiscovery"
+	HypervStrictCheckGate         = "HypervStrictCheck"
+	SidecarGate                   = "Sidecar"
+	GPUGate                       = "GPU"
+	HostDevicesGate               = "HostDevices"
+	SnapshotGate                  = "Snapshot"
+	VMExportGate                  = "VMExport"
+	HotplugVolumesGate            = "HotplugVolumes"
+	HostDiskGate                  = "HostDisk"
+	VirtIOFSGate                  = "ExperimentalVirtiofsSupport"
+	MacvtapGate                   = "Macvtap"
+	PasstGate                     = "Passt"
+	DownwardMetricsFeatureGate    = "DownwardMetrics"
+	NonRootDeprecated             = "NonRootExperimental"
+	NonRoot                       = "NonRoot"
+	ClusterProfiler               = "ClusterProfiler"
+	WorkloadEncryptionSEV         = "WorkloadEncryptionSEV"
 	// DockerSELinuxMCSWorkaround sets the SELinux level of all the non-compute virt-launcher containers to "s0".
 	DockerSELinuxMCSWorkaround = "DockerSELinuxMCSWorkaround"
 	PSA                        = "PSA"
@@ -109,6 +111,10 @@ func (config *ClusterConfig) LiveMigrationEnabled() bool {
 
 func (config *ClusterConfig) SRIOVLiveMigrationEnabled() bool {
 	return config.isFeatureGateEnabled(SRIOVLiveMigrationGate)
+}
+
+func (config *ClusterConfig) NetworkAwareLiveMigrationEnabled() bool {
+	return config.isFeatureGateEnabled(NetworkAwareLiveMigrationGate)
 }
 
 func (config *ClusterConfig) HypervStrictCheckEnabled() bool {
