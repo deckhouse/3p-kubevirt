@@ -30,7 +30,9 @@ const (
 	IgnitionGate      = "ExperimentalIgnitionSupport"
 	LiveMigrationGate = "LiveMigration"
 	// SRIOVLiveMigrationGate enables Live Migration for VM's with network SR-IOV interfaces.
-	SRIOVLiveMigrationGate     = "SRIOVLiveMigration"
+	SRIOVLiveMigrationGate = "SRIOVLiveMigration"
+	// ImmutableVMNetworking forces VM to immutable network configuration, and enable's Live Migration for VM's with bridged pod network
+	ImmutableVMNetworkingGate  = "ImmutableVMNetworking"
 	CPUNodeDiscoveryGate       = "CPUNodeDiscovery"
 	HypervStrictCheckGate      = "HypervStrictCheck"
 	SidecarGate                = "Sidecar"
@@ -106,6 +108,10 @@ func (config *ClusterConfig) LiveMigrationEnabled() bool {
 
 func (config *ClusterConfig) SRIOVLiveMigrationEnabled() bool {
 	return config.isFeatureGateEnabled(SRIOVLiveMigrationGate)
+}
+
+func (config *ClusterConfig) ImmutableVMNetworkingEnabled() bool {
+	return config.isFeatureGateEnabled(ImmutableVMNetworkingGate)
 }
 
 func (config *ClusterConfig) HypervStrictCheckEnabled() bool {
