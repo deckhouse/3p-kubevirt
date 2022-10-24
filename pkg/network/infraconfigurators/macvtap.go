@@ -186,15 +186,14 @@ func (b *MacvtapPodNetworkConfigurator) GenerateNonRecoverableDomainIfaceSpec() 
 }
 
 func (b *MacvtapPodNetworkConfigurator) learnInterfaceRoutes() error {
-	routes, err := b.handler.RouteList(b.podNicLink, netlink.FAMILY_V4)
-	if err != nil {
-		log.Log.Reason(err).Errorf("failed to get routes for %s", b.podNicLink.Attrs().Name)
-		return err
-	}
-	if len(routes) == 0 {
-		return fmt.Errorf("no gateway address found in routes for %s", b.podNicLink.Attrs().Name)
-	}
-	b.podIfaceRoutes = routes
+	b.podIfaceRoutes = []netlink.Route{{
+		LinkIndex: b.podNicLink.Attrs().Index,
+		Dst: &net.IPNet{
+			IP:   net.IPv4(0, 0, 0, 0),
+			Mask: net.CIDRMask(0, 32),
+		},
+		Scope: b.podNicLink.RT_SCOPE_LINK,
+	}}
 	return nil
 }
 
