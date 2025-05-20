@@ -609,7 +609,7 @@ func (app *virtAPIApp) composeSubresources() {
 			Returns(http.StatusOK, "OK", "").
 			Returns(http.StatusBadRequest, httpStatusBadRequestMessage, ""))
 
-		subws.Route(subws.PUT(definitions.NamespacedResourcePath(subresourcesvmGVR)+definitions.SubResourcePath("evacuate/cancel")).
+		subws.Route(subws.PUT(definitions.NamespacedResourcePath(subresourcesvmGVR)+definitions.SubResourcePath("evacuatecancel")).
 			To(subresourceApp.EvacuateCancelHandler(subresourceApp.FetchVirtualMachineInstanceForVM)).
 			Consumes(mime.MIME_ANY).
 			Reads(v1.EvacuateCancelOptions{}).
@@ -621,7 +621,7 @@ func (app *virtAPIApp) composeSubresources() {
 			Returns(http.StatusBadRequest, httpStatusBadRequestMessage, "").
 			Returns(http.StatusInternalServerError, httpStatusInternalServerError, ""))
 
-		subws.Route(subws.PUT(definitions.NamespacedResourcePath(subresourcesvmiGVR)+definitions.SubResourcePath("evacuate/cancel")).
+		subws.Route(subws.PUT(definitions.NamespacedResourcePath(subresourcesvmiGVR)+definitions.SubResourcePath("evacuatecancel")).
 			To(subresourceApp.EvacuateCancelHandler(subresourceApp.FetchVirtualMachineInstance)).
 			Consumes(mime.MIME_ANY).
 			Reads(v1.EvacuateCancelOptions{}).
@@ -742,11 +742,11 @@ func (app *virtAPIApp) composeSubresources() {
 						Namespaced: true,
 					},
 					{
-						Name:       "virtualmachines/objectgraph",
+						Name:       "virtualmachines/evacuatecancel",
 						Namespaced: true,
 					},
 					{
-						Name:       "virtualmachines/evacuate/cancel",
+						Name:       "virtualmachines/objectgraph",
 						Namespaced: true,
 					},
 					{
@@ -790,7 +790,7 @@ func (app *virtAPIApp) composeSubresources() {
 						Namespaced: true,
 					},
 					{
-						Name:       "virtualmachineinstances/evacuate/cancel",
+						Name:       "virtualmachineinstances/evacuatecancel",
 						Namespaced: true,
 					},
 				}

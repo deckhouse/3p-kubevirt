@@ -194,8 +194,24 @@ var _ = Describe("EvacuateCancel Subresource API", func() {
 			vmi.SetOwnerReferences([]metav1.OwnerReference{{UID: vm.UID}})
 			vmi = createVMI(vmi)
 
+			request.Request.Body = newEvacuateCancelBody(&v1.EvacuateCancelOptions{EvacuationNodeName: workerNodeWithTaint})
 			app.EvacuateCancelHandler(app.FetchVirtualMachineInstanceForVM)(request, response)
 			Expect(response.StatusCode()).To(Equal(http.StatusBadRequest))
+		})
+
+		It("should cancel the evacuation of a drained node when the node is not named", func() {
+			vmi := newVMI(true, workerNodeWithTaint)
+			vm := createVM(newVM(vmi))
+			vmi.SetOwnerReferences([]metav1.OwnerReference{{UID: vm.UID}})
+			vmi = createVMI(vmi)
+
+			request.Request.Body = newEvacuateCancelBody(&v1.EvacuateCancelOptions{})
+			app.EvacuateCancelHandler(app.FetchVirtualMachineInstanceForVM)(request, response)
+			Expect(response.StatusCode()).To(Equal(http.StatusOK))
+
+			vmi, err := virtClient.VirtualMachineInstance(vmi.Namespace).Get(context.Background(), vmi.Name, metav1.GetOptions{})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(vmi.Status.EvacuationNodeName).To(BeEmpty())
 		})
 
 		It("Should fail because opts is invalid", func() {
@@ -243,8 +259,19 @@ var _ = Describe("EvacuateCancel Subresource API", func() {
 
 		It("should fail because the node has taint", func() {
 			createVMI(newVMI(false, workerNodeWithTaint))
+			request.Request.Body = newEvacuateCancelBody(&v1.EvacuateCancelOptions{EvacuationNodeName: workerNodeWithTaint})
 			app.EvacuateCancelHandler(app.FetchVirtualMachineInstance)(request, response)
 			Expect(response.StatusCode()).To(Equal(http.StatusBadRequest))
+		})
+
+		It("should cancel the evacuation without a body", func() {
+			vmi := createVMI(newVMI(true, workerNode))
+			app.EvacuateCancelHandler(app.FetchVirtualMachineInstance)(request, response)
+			Expect(response.StatusCode()).To(Equal(http.StatusOK))
+
+			vmi, err := virtClient.VirtualMachineInstance(vmi.Namespace).Get(context.Background(), vmi.Name, metav1.GetOptions{})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(vmi.Status.EvacuationNodeName).To(BeEmpty())
 		})
 
 		It("Should fail because opts is invalid", func() {

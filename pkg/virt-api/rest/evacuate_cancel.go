@@ -50,26 +50,33 @@ func (app *SubresourceAPIApp) EvacuateCancelHandler(fetcher vmiFetcher) restful.
 
 		ctx := request.Request.Context()
 
-		if statusErr = app.validateEvacuationNode(ctx, vmi); statusErr != nil {
-			writeError(statusErr, response)
-			return
+		// The body is optional: the virtualization platform cancels an evacuation
+		// with dryRun only, without naming the node.
+		opts := &v1.EvacuateCancelOptions{}
+		if request.Request.Body != nil {
+			defer request.Request.Body.Close()
+			if err := decodeBody(request, opts); err != nil {
+				writeError(err, response)
+				return
+			}
+		}
+
+		// A caller naming the node gets the upstream contract, including the rejection
+		// while that node is drained. Without a node the current evacuation is canceled
+		// unconditionally, as the virtualization platform expects.
+		if opts.EvacuationNodeName != "" {
+			if statusErr = app.validateEvacuationNode(ctx, vmi); statusErr != nil {
+				writeError(statusErr, response)
+				return
+			}
 		}
 
 		if vmi.Status.EvacuationNodeName == "" {
 			response.WriteHeader(http.StatusOK)
 			return
 		}
-
-		if request.Request.Body == nil {
-			writeError(errors.NewBadRequest("No body"), response)
-			return
-		}
-
-		opts := &v1.EvacuateCancelOptions{}
-		defer request.Request.Body.Close()
-		if err := decodeBody(request, opts); err != nil {
-			writeError(err, response)
-			return
+		if opts.EvacuationNodeName == "" {
+			opts.EvacuationNodeName = vmi.Status.EvacuationNodeName
 		}
 
 		const path = "/status/evacuationNodeName"
