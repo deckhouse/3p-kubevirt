@@ -82,7 +82,8 @@ const (
 	virtExporter            = "virt-exporter"
 )
 
-const K8sDevicePrefix = "devices.kubevirt.io"
+const K8sDevicePrefix = "devices.virtualization.deckhouse.io"
+const KvmDevice = K8sDevicePrefix + "/kvm"
 const TunDevice = K8sDevicePrefix + "/tun"
 const VhostNetDevice = K8sDevicePrefix + "/vhost-net"
 const VhostVsockDevice = K8sDevicePrefix + "/vhost-vsock"

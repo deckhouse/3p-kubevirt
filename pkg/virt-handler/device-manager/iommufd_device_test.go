@@ -71,7 +71,7 @@ var _ = Describe("IOMMUFD Device Plugin", func() {
 
 		It("should set the correct resource name", func() {
 			dp := NewIOMMUFDDevicePlugin(10)
-			Expect(dp.resourceName).To(Equal("devices.kubevirt.io/iommufd"))
+			Expect(dp.resourceName).To(Equal(DeviceNamespace + "/iommufd"))
 		})
 
 		It("should set the correct socket path", func() {

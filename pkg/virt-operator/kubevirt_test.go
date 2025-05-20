@@ -1366,7 +1366,6 @@ func (k *KubeVirtTestData) addAllWithExclusionMap(config *util.KubeVirtDeploymen
 		all = append(all, containerPathWebhook)
 	}
 
-
 	validatingWebhook = components.NewOpertorValidatingWebhookConfiguration(NAMESPACE)
 	for i := range validatingWebhook.Webhooks {
 		validatingWebhook.Webhooks[i].ClientConfig.CABundle = caBundle
