@@ -306,7 +306,7 @@ var _ = Describe("Validating MigrationCreate Admitter", func() {
 			}
 		},
 			Entry("reject the external requests", "system:serviceaccount:external-user", BeFalse()),
-			Entry("allow the virt-controller requests", "system:serviceaccount:kubevirt:kubevirt-controller", BeTrue()),
+			Entry("allow the virt-controller requests", "system:serviceaccount:kubevirt:kubevirt-internal-virtualization-controller", BeTrue()),
 		)
 	})
 })

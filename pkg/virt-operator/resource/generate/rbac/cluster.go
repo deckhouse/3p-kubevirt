@@ -39,14 +39,14 @@ import (
 
 const (
 	// ClusterRoleAdmin is the name of the ClusterRole that aggregates to the default admin role
-	ClusterRoleAdmin = "kubevirt.io:admin"
+	ClusterRoleAdmin = "kubevirt.internal.virtualization.deckhouse.io:admin"
 	// ClusterRoleEdit is the name of the ClusterRole that aggregates to the default edit role
-	ClusterRoleEdit = "kubevirt.io:edit"
+	ClusterRoleEdit = "kubevirt.internal.virtualization.deckhouse.io:edit"
 	// ClusterRoleView is the name of the ClusterRole that aggregates to the default view role
-	ClusterRoleView = "kubevirt.io:view"
+	ClusterRoleView = "kubevirt.internal.virtualization.deckhouse.io:view"
 
-	defaultClusterRoleName          = "kubevirt.io:default"
-	instancetypeViewClusterRoleName = "instancetype.kubevirt.io:view"
+	defaultClusterRoleName          = "kubevirt.internal.virtualization.deckhouse.io:default"
+	instancetypeViewClusterRoleName = "instancetype.kubevirt.internal.virtualization.deckhouse.io:view"
 
 	apiVersion            = "version"
 	apiGuestFs            = "guestfs"

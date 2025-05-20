@@ -1639,7 +1639,7 @@ func VolumeSnapshotClassInformer(clientSet kubecli.KubevirtClient, resyncPeriod 
 
 func (f *kubeInformerFactory) VirtualizationCA() cache.SharedIndexInformer {
 	return f.getInformer("extensionsVirtualizationCAConfigMapInformer", func() cache.SharedIndexInformer {
-		restClient := f.clientSet.CoreV1().RESTClient()
+		restClient := f.k8sClient.CoreV1().RESTClient()
 		fieldSelector := fields.OneTermEqualSelector("metadata.name", "virtualization-ca")
 		lw := cache.NewListWatchFromClient(restClient, "configmaps", f.kubevirtNamespace, fieldSelector)
 		return cache.NewSharedIndexInformer(lw, &k8sv1.ConfigMap{}, f.defaultResync, cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc})

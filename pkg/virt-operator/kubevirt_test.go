@@ -2767,7 +2767,6 @@ var _ = Describe("KubeVirt Operator", func() {
 			Expect(kvTestData.controller.stores.ServiceMonitorCache.List()).To(HaveLen(1))
 			Expect(kvTestData.controller.stores.PrometheusRuleCache.List()).To(HaveLen(1))
 			Expect(kvTestData.controller.stores.MutatingWebhookCache.List()).To(HaveLen(2))
-			Expect(kvTestData.controller.stores.APIServiceCache.List()).To(HaveLen(4))
 
 			Expect(kvTestData.resourceChanges["poddisruptionbudgets"][Added]).To(Equal(1))
 

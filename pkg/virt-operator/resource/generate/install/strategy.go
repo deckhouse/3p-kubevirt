@@ -664,7 +664,6 @@ func GenerateCurrentInstallStrategy(config *operatorutil.KubeVirtDeploymentConfi
 		strategy.validatingAdmissionPolicies = append(strategy.validatingAdmissionPolicies, resources.ValidatingAdmissionPolicies...)
 		strategy.validatingAdmissionPolicyBindings = append(strategy.validatingAdmissionPolicyBindings, resources.ValidatingAdmissionPolicyBindings...)
 		strategy.validatingWebhookConfigurations = append(strategy.validatingWebhookConfigurations, resources.ValidatingWebhookConfigurations...)
-		strategy.apiServices = append(strategy.apiServices, resources.APIServices...)
 		strategy.certificateSecrets = append(strategy.certificateSecrets, components.NewVirtTemplateCertSecrets(config.GetNamespace())...)
 	}
 

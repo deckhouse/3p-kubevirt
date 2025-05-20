@@ -31,9 +31,9 @@ import (
 )
 
 const (
-	validatingAdmissionPolicyBindingName = "kubevirt-node-restriction-binding"
-	validatingAdmissionPolicyName        = "kubevirt-node-restriction-policy"
-	nodeRestrictionAppLabelValue         = "kubevirt-node-restriction"
+	validatingAdmissionPolicyBindingName = "kubevirt-internal-virtualization-node-restriction-binding"
+	validatingAdmissionPolicyName        = "kubevirt-internal-virtualization-node-restriction-policy"
+	nodeRestrictionAppLabelValue         = "kubevirt-internal-virtualization-node-restriction"
 
 	NodeRestrictionErrModifyAnother        = "this user cannot modify this node"
 	NodeRestrictionErrModifySpec           = "this user cannot modify spec of node"
