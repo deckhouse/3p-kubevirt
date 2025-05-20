@@ -696,13 +696,14 @@ func convertVolumeWithCBT(volumeName, cbtPath string, isBlock bool, disk *api.Di
 }
 
 func convertVolumeWithoutCBT(volumeName string, isBlock bool, disk *api.Disk, volumesDiscardIgnore []string) error {
-	setDiskDriver(disk, "raw", !slices.Contains(volumesDiscardIgnore, volumeName))
-
 	if isBlock {
+		setDiskDriver(disk, "raw", !slices.Contains(volumesDiscardIgnore, volumeName))
 		disk.Type = "block"
 		disk.Source.Name = volumeName
 		disk.Source.Dev = volumepath.BlockDevice(volumeName)
 	} else {
+		// Images on filesystem volumes are always qcow2.
+		setDiskDriver(disk, "qcow2", !slices.Contains(volumesDiscardIgnore, volumeName))
 		disk.Type = "file"
 		disk.Source.File = volumepath.Filesystem(volumeName)
 	}
@@ -736,12 +737,13 @@ func convertHotplugVolumeWithCBT(volumeName, cbtPath string, isBlock bool, disk 
 }
 
 func convertHotplugVolumeWithoutCBT(volumeName string, isBlock bool, disk *api.Disk, volumesDiscardIgnore []string) error {
-	setDiskDriver(disk, "raw", !slices.Contains(volumesDiscardIgnore, volumeName))
-
 	if isBlock {
+		setDiskDriver(disk, "raw", !slices.Contains(volumesDiscardIgnore, volumeName))
 		disk.Type = "block"
 		disk.Source.Dev = volumepath.HotplugBlockDevice(volumeName)
 	} else {
+		// Images on filesystem volumes are always qcow2.
+		setDiskDriver(disk, "qcow2", !slices.Contains(volumesDiscardIgnore, volumeName))
 		disk.Type = "file"
 		disk.Source.File = volumepath.HotplugFilesystem(volumeName)
 	}
@@ -783,7 +785,7 @@ func Convert_v1_Hotplug_DataVolume_To_api_Disk(name string, disk *api.Disk, c *c
 // Convert_v1_FilesystemVolumeSource_To_api_Disk takes a FS source and builds the domain Disk representation
 func Convert_v1_FilesystemVolumeSource_To_api_Disk(volumeName string, disk *api.Disk, volumesDiscardIgnore []string) error {
 	disk.Type = "file"
-	setDiskDriver(disk, "raw", false)
+	setDiskDriver(disk, "qcow2", false)
 	disk.Source.File = volumepath.Filesystem(volumeName)
 	if !slices.Contains(volumesDiscardIgnore, volumeName) {
 		disk.Driver.Discard = "unmap"
@@ -794,7 +796,7 @@ func Convert_v1_FilesystemVolumeSource_To_api_Disk(volumeName string, disk *api.
 // Convert_v1_Hotplug_FilesystemVolumeSource_To_api_Disk takes a FS source and builds the KVM Disk representation
 func Convert_v1_Hotplug_FilesystemVolumeSource_To_api_Disk(volumeName string, disk *api.Disk, volumesDiscardIgnore []string) error {
 	disk.Type = "file"
-	setDiskDriver(disk, "raw", !slices.Contains(volumesDiscardIgnore, volumeName))
+	setDiskDriver(disk, "qcow2", !slices.Contains(volumesDiscardIgnore, volumeName))
 	disk.Source.File = volumepath.HotplugFilesystem(volumeName)
 	return nil
 }
@@ -830,11 +832,41 @@ func Convert_v1_HostDisk_To_api_Disk(volumeName string, path string, disk *api.D
 			},
 		}
 	} else {
-		disk.Driver.Type = "raw"
 		disk.Source.File = hostdisk.GetMountedHostDiskPath(volumeName, path)
+		disk.Driver.ErrorPolicy = v1.DiskErrorPolicyStop
+		// The image may be either raw or qcow2, so the format is detected from the file itself.
+		return overrideDiskTypeForFile(disk)
 	}
 	disk.Driver.ErrorPolicy = v1.DiskErrorPolicyStop
 	return nil
+}
+
+func overrideDiskTypeForFile(disk *api.Disk) error {
+	diskType, err := getDiskTypeFromPath(disk.Source.File)
+	if err != nil {
+		return err
+	}
+	disk.Driver.Type = diskType
+	return nil
+}
+
+func getDiskTypeFromPath(path string) (string, error) {
+	const (
+		formatQcow2 = "qcow2"
+		formatRaw   = "raw"
+	)
+	info, err := os.Stat(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return formatQcow2, nil
+		}
+		return "", err
+	}
+	mode := info.Mode()
+	if mode&os.ModeDevice != 0 {
+		return formatRaw, nil
+	}
+	return formatQcow2, nil
 }
 
 func Convert_v1_SysprepSource_To_api_Disk(volumeName string, disk *api.Disk) error {

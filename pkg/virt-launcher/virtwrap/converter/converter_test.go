@@ -4017,12 +4017,13 @@ var _ = Describe("Converter", func() {
 				func(converterFunc ConverterFunc, volumeName string, isBlockMode bool, ignoreDiscard bool) {
 					expectedDisk := &api.Disk{}
 					expectedDisk.Driver = &api.DiskDriver{}
-					expectedDisk.Driver.Type = "raw"
 					expectedDisk.Driver.ErrorPolicy = "stop"
 					if isBlockMode {
+						expectedDisk.Driver.Type = "raw"
 						expectedDisk.Type = "block"
 						expectedDisk.Source.Dev = filepath.Join(v1.HotplugDiskDir, volumeName)
 					} else {
+						expectedDisk.Driver.Type = "qcow2"
 						expectedDisk.Type = "file"
 						expectedDisk.Source.File = fmt.Sprintf("%s.img", filepath.Join(v1.HotplugDiskDir, volumeName))
 					}
