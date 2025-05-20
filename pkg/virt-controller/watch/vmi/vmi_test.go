@@ -5435,7 +5435,7 @@ func setDataVolumeCondition(dv *cdiv1.DataVolume, cond cdiv1.DataVolumeCondition
 func NewNodeForPod(pod *k8sv1.Pod) *k8sv1.Node {
 	return &k8sv1.Node{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      pod.Spec.NodeName,
+			Name: pod.Spec.NodeName,
 		},
 	}
 }

@@ -54,6 +54,9 @@ import (
 	virtconfig "kubevirt.io/kubevirt/pkg/virt-config"
 
 	backupv1 "kubevirt.io/api/backup/v1alpha1"
+
+	"kubevirt.io/kubevirt/pkg/util/migrations"
+
 	virtv1 "kubevirt.io/api/core/v1"
 	"kubevirt.io/api/migrations/v1alpha1"
 	"kubevirt.io/client-go/kubecli"
@@ -145,6 +148,8 @@ type Controller struct {
 	handOffLock sync.Mutex
 	handOffMap  map[string]struct{}
 
+	nam *migrations.NetworkAccessibilityManager
+
 	unschedulablePendingTimeoutSeconds int64
 	catchAllPendingTimeoutSeconds      int64
 }
@@ -190,6 +195,8 @@ func NewController(templateService templateService,
 		clusterConfig:           clusterConfig,
 		handOffMap:              make(map[string]struct{}),
 		netAnnotationsGenerator: netAnnotationsGenerator,
+
+		nam: migrations.NewNetworkAccessibilityManager(clientset),
 
 		unschedulablePendingTimeoutSeconds: defaultUnschedulablePendingTimeoutSeconds,
 		catchAllPendingTimeoutSeconds:      defaultCatchAllPendingTimeoutSeconds,
@@ -1024,6 +1031,9 @@ func (c *Controller) createTargetPod(migration *virtv1.VirtualMachineInstanceMig
 		}
 	}
 
+	// Create the new pod with the lowest network priority to prevent Cilium from directing traffic to it.
+	templatePod.Labels[virtv1.NetworkPriorityLabel] = migrations.NetworkPriorityDeferred
+
 	key := controller.MigrationKey(migration)
 	c.podExpectations.ExpectCreations(key, 1)
 	pod, err := c.clientset.CoreV1().Pods(vmi.GetNamespace()).Create(context.Background(), templatePod, v1.CreateOptions{})
@@ -1818,6 +1828,18 @@ func (c *Controller) sync(key string, migration *virtv1.VirtualMachineInstanceMi
 					// Once the VMI is in a final state or deleted the migration
 					// will be marked as failed too.
 					return nil
+				}
+
+				priority := sourcePod.Labels[virtv1.NetworkPriorityLabel]
+				if priority != migrations.NetworkPriorityDecreased {
+					err = c.nam.DecreaseNetworkPriority(context.Background(), types.NamespacedName{
+						Namespace: sourcePod.Namespace,
+						Name:      sourcePod.Name,
+					})
+					if err != nil {
+						log.Log.Reason(err).Error("Failed to decrease the network priority for the source pod, please report a bug")
+						return fmt.Errorf("decrease network priority: %w", err)
+					}
 				}
 			} else {
 				log.Log.Object(vmi).V(5).Info("decentralized migration creating target pod in vmi namespace, source pod based on target VMI")
