@@ -571,7 +571,7 @@ func migrationNeedsFinalization(migrationState *v1.VirtualMachineInstanceMigrati
 		!migrationState.Failed
 }
 
-func (c *MigrationTargetController) handleTargetMigrationProxy(vmi *v1.VirtualMachineInstance) error {
+func (c *MigrationTargetController) handleTargetMigrationProxy(vmi *v1.VirtualMachineInstance, client cmdclient.LauncherClient) error {
 	// handle starting/stopping target migration proxy
 	migrationTargetSockets := []string{}
 	res, err := c.podIsolationDetector.Detect(vmi)
@@ -596,6 +596,10 @@ func (c *MigrationTargetController) handleTargetMigrationProxy(vmi *v1.VirtualMa
 		// a proxy between the target direct qemu channel and the connector in the destination pod
 		destSocketFile := migrationproxy.SourceUnixFile(baseDir, key)
 		migrationTargetSockets = append(migrationTargetSockets, destSocketFile)
+	}
+	err = c.StartMigrationProxyInVirtLauncher(client)
+	if err != nil {
+		return err
 	}
 	err = c.migrationProxy.StartTargetListener(vmiUID, migrationTargetSockets)
 	if err != nil {
@@ -748,6 +752,10 @@ func (c *MigrationTargetController) processVMI(vmi *v1.VirtualMachineInstance) e
 		return goerror.New(fmt.Sprintf("Can not update a VirtualMachineInstance with unresponsive command server."))
 	}
 
+	if err = c.handlePostMigrationProxyCleanup(vmi); err != nil {
+		return err
+	}
+
 	if migrations.IsMigrating(vmi) {
 		// If the migration has already started,
 		// then there's nothing left to prepare on the target side
@@ -789,13 +797,30 @@ func (c *MigrationTargetController) processVMI(vmi *v1.VirtualMachineInstance) e
 		return fmt.Errorf("syncing migration target failed: %v", err)
 	}
 
-	err = c.handleTargetMigrationProxy(vmi)
+	err = c.handleTargetMigrationProxy(vmi, client)
 	if err != nil {
 		return fmt.Errorf("failed to handle post sync migration proxy: %v", err)
 	}
 
 	c.recorder.Event(vmi, k8sv1.EventTypeNormal, v1.PreparingTarget.String(), VMIMigrationTargetPrepared)
 
+	return nil
+}
+
+func (c *MigrationTargetController) handlePostMigrationProxyCleanup(vmi *v1.VirtualMachineInstance) error {
+	if vmi.Status.MigrationState == nil || vmi.Status.MigrationState.Completed || vmi.Status.MigrationState.Failed {
+		if !c.isMigrationSource(vmi) {
+			client, err := c.launcherClients.GetLauncherClient(vmi)
+			if err != nil {
+				return fmt.Errorf("failed to get virt-launcher client")
+			}
+			if err = c.StopMigrationProxyInVirtLauncher(client); err != nil {
+				return fmt.Errorf("failed to stop migration proxy in virt launcher")
+			}
+		}
+		c.migrationProxy.StopTargetListener(string(vmi.UID))
+		c.migrationProxy.StopSourceListener(string(vmi.UID))
+	}
 	return nil
 }
 
@@ -1044,4 +1069,12 @@ func (c *MigrationTargetController) finalizeMigration(vmi *v1.VirtualMachineInst
 
 func finalizeNodePlacement(vmi *v1.VirtualMachineInstance) {
 	controller.NewVirtualMachineInstanceConditionManager().RemoveCondition(vmi, v1.VirtualMachineInstanceNodePlacementNotMatched)
+}
+
+func (c *MigrationTargetController) StartMigrationProxyInVirtLauncher(client cmdclient.LauncherClient) error {
+	return client.MigrationProxy(cmdclient.MigrationProxyActionStart)
+}
+
+func (c *MigrationTargetController) StopMigrationProxyInVirtLauncher(client cmdclient.LauncherClient) error {
+	return client.MigrationProxy(cmdclient.MigrationProxyActionStop)
 }
