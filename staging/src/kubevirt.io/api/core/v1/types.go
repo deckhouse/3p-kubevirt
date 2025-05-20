@@ -658,7 +658,10 @@ func (v *VirtualMachineInstance) IsTargetPreparing(migration *VirtualMachineInst
 			v.Status.MigrationState.TargetState.Pod != "" &&
 			v.Status.MigrationState.TargetState.Node != ""
 	} else {
-		return v.Status.MigrationState != nil && v.Status.MigrationState.MigrationUID == migration.UID &&
+		// External migration configuration: switch to MigrationPreparingTarget on MigrationConfiguration presence.
+		return v.Status.MigrationState != nil &&
+			v.Status.MigrationState.MigrationConfiguration != nil &&
+			v.Status.MigrationState.MigrationUID == migration.UID &&
 			v.Status.MigrationState.TargetNode != ""
 	}
 }
