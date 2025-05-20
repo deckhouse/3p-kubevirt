@@ -180,7 +180,7 @@ func verifyHotplugVolumes(newHotplugVolumeMap, oldHotplugVolumeMap map[string]v1
 						},
 					})
 				}
-				if !equality.Semantic.DeepEqual(newDisks[k], oldDisks[k]) {
+				if !equalDiskIgnoreSerial(newDisks[k], oldDisks[k]) {
 					return webhookutils.ToAdmissionResponse([]metav1.StatusCause{
 						{
 							Type:    metav1.CauseTypeFieldValueInvalid,
@@ -264,7 +264,7 @@ func verifyPermanentVolumes(newPermanentVolumeMap, oldPermanentVolumeMap map[str
 				},
 			})
 		}
-		if !equality.Semantic.DeepEqual(newDisks[k], oldDisks[k]) {
+		if !equalDiskIgnoreSerial(newDisks[k], oldDisks[k]) {
 			return webhookutils.ToAdmissionResponse([]metav1.StatusCause{
 				{
 					Type:    metav1.CauseTypeFieldValueInvalid,
