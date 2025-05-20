@@ -35,6 +35,9 @@ import (
 	"time"
 
 	"github.com/opencontainers/cgroups"
+
+	cmdv1 "kubevirt.io/kubevirt/pkg/handler-launcher-com/cmd/v1"
+	checksum_controller "kubevirt.io/kubevirt/pkg/virt-handler/checksum-controller"
 	"libvirt.org/go/libvirtxml"
 
 	k8sv1 "k8s.io/api/core/v1"
@@ -126,6 +129,7 @@ type VirtualMachineController struct {
 
 	hotplugContainerDiskMounter containerdisk.HotplugMounter
 	nam                         *migrations.NetworkAccessibilityManager
+	checksumCtrl                *checksum_controller.Controller
 }
 
 var getCgroupManager = func(vmi *v1.VirtualMachineInstance, host string, hypervisorNodeInfo hypervisor.HypervisorNodeInformation, allowEmulation bool) (cgroup.Manager, error) {
@@ -270,6 +274,7 @@ func NewVirtualMachineController(
 		nodeStore)
 	c.heartBeat = heartbeat.NewHeartBeat(clientset.CoreV1(), c.deviceManagerController, clusterConfig, host)
 
+	c.checksumCtrl = checksum_controller.NewController(vmiInformer, c.clientset)
 	return c, nil
 }
 
@@ -309,6 +314,8 @@ func (c *VirtualMachineController) Run(threadiness int, stopCh chan struct{}) {
 	for i := 0; i < threadiness; i++ {
 		go wait.Until(c.runWorker, time.Second, stopCh)
 	}
+
+	go c.checksumCtrl.Run(stopCh)
 
 	<-heartBeatDone
 	<-stopCh
@@ -2190,7 +2197,7 @@ func (c *VirtualMachineController) syncVirtualMachine(client cmdclient.LauncherC
 	}
 	options.PluginsJson = pluginsJSON
 
-	err = client.SyncVirtualMachine(vmi, options)
+	err = c.SyncVirtualMachine(client, vmi, options)
 	if err != nil {
 		if strings.Contains(err.Error(), "EFI OVMF rom missing") {
 			return &virtLauncherCriticalSecurebootError{fmt.Sprintf("mismatch of Secure Boot setting and bootloaders: %v", err)}
@@ -2249,8 +2256,8 @@ func (c *VirtualMachineController) hotplugSriovInterfacesCommand(vmi *v1.Virtual
 		return fmt.Errorf("%s: %v", errMsgPrefix, err)
 	}
 
-	c.logger.V(3).Object(vmi).Info("sending hot-plug host-devices command")
-	if err := client.HotplugHostDevices(vmi); err != nil {
+	log.Log.V(3).Object(vmi).Info("sending hot-plug host-devices command")
+	if err := c.HotplugHostDevices(client, vmi); err != nil {
 		return fmt.Errorf("%s: %v", errMsgPrefix, err)
 	}
 
@@ -2621,4 +2628,28 @@ func (d *VirtualMachineController) updateNetworkPriorityFunc(_, new interface{})
 		log.Log.Object(newDomain).Reason(err).With("key", key).Error("Failed to set network priority high for the target pod")
 		return
 	}
+}
+
+func (d *VirtualMachineController) SyncVirtualMachine(client cmdclient.LauncherClient, vmi *v1.VirtualMachineInstance, options *cmdv1.VirtualMachineOptions) error {
+	control, err := checksum_controller.NewVMIControl(vmi, client)
+	if err != nil {
+		return err
+	}
+	if err = client.SyncVirtualMachine(vmi, options); err != nil {
+		return err
+	}
+	d.checksumCtrl.Set(control)
+	return nil
+}
+
+func (d *VirtualMachineController) HotplugHostDevices(client cmdclient.LauncherClient, vmi *v1.VirtualMachineInstance) error {
+	control, err := checksum_controller.NewVMIControl(vmi, client)
+	if err != nil {
+		return err
+	}
+	if err = client.HotplugHostDevices(vmi); err != nil {
+		return err
+	}
+	d.checksumCtrl.Set(control)
+	return nil
 }

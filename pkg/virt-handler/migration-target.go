@@ -47,6 +47,7 @@ import (
 	"kubevirt.io/client-go/kubecli"
 	"kubevirt.io/client-go/log"
 	hotplugdisk "kubevirt.io/kubevirt/pkg/hotplug-disk"
+	checksum_controller "kubevirt.io/kubevirt/pkg/virt-handler/checksum-controller"
 
 	pluginv1alpha1 "kubevirt.io/api/plugin/v1alpha1"
 
@@ -97,6 +98,7 @@ type MigrationTargetController struct {
 	pluginExecutor                   plugins.NodeHookExecutor
 	vmiExpectations                  *controller.UIDTrackingControllerExpectations
 	hotplugContainerDiskMounter      containerdisk.HotplugMounter
+	checksumCtrl                     *checksum_controller.Controller
 }
 
 func NewMigrationTargetController(
@@ -199,6 +201,7 @@ func NewMigrationTargetController(
 		return nil, err
 	}
 
+	c.checksumCtrl = checksum_controller.NewController(vmiInformer, c.clientset)
 	return c, nil
 }
 
@@ -480,6 +483,8 @@ func (c *MigrationTargetController) Run(threadiness int, stopCh chan struct{}) {
 	for i := 0; i < threadiness; i++ {
 		go wait.Until(c.runWorker, time.Second, stopCh)
 	}
+
+	go c.checksumCtrl.Run(stopCh)
 
 	<-stopCh
 	c.logger.Info("Stopping virt-handler target controller.")
@@ -1183,7 +1188,7 @@ func (c *MigrationTargetController) hotplugCPU(vmi *v1.VirtualMachineInstance, c
 		c.capabilities,
 		c.clusterConfig)
 
-	if err := client.SyncVirtualMachineCPUs(vmi, options); err != nil {
+	if err := c.SyncVirtualMachineCPUs(client, vmi, options); err != nil {
 		return err
 	}
 
@@ -1195,6 +1200,18 @@ func (c *MigrationTargetController) hotplugCPU(vmi *v1.VirtualMachineInstance, c
 	vmi.Status.CurrentCPUTopology.Cores = vmi.Spec.Domain.CPU.Cores
 	vmi.Status.CurrentCPUTopology.Threads = vmi.Spec.Domain.CPU.Threads
 
+	return nil
+}
+
+func (c *MigrationTargetController) SyncVirtualMachineCPUs(client cmdclient.LauncherClient, vmi *v1.VirtualMachineInstance, options *cmdv1.VirtualMachineOptions) error {
+	control, err := checksum_controller.NewVMIControl(vmi, client)
+	if err != nil {
+		return err
+	}
+	if err = client.SyncVirtualMachineCPUs(vmi, options); err != nil {
+		return err
+	}
+	c.checksumCtrl.Set(control)
 	return nil
 }
 
@@ -1240,7 +1257,7 @@ func (c *MigrationTargetController) hotplugMemory(vmi *v1.VirtualMachineInstance
 
 	options := virtualMachineOptions(vmi, nil, 0, nil, c.capabilities, c.clusterConfig)
 
-	if err := client.SyncVirtualMachineMemory(vmi, options); err != nil {
+	if err := c.SyncVirtualMachineMemory(client, vmi, options); err != nil {
 		// mark hotplug as failed
 		vmiConditions.UpdateCondition(vmi, &v1.VirtualMachineInstanceCondition{
 			Type:    v1.VirtualMachineInstanceMemoryChange,
@@ -1253,6 +1270,18 @@ func (c *MigrationTargetController) hotplugMemory(vmi *v1.VirtualMachineInstance
 
 	vmiConditions.RemoveCondition(vmi, v1.VirtualMachineInstanceMemoryChange)
 	vmi.Status.Memory.GuestRequested = vmi.Spec.Domain.Memory.Guest
+	return nil
+}
+
+func (c *MigrationTargetController) SyncVirtualMachineMemory(client cmdclient.LauncherClient, vmi *v1.VirtualMachineInstance, options *cmdv1.VirtualMachineOptions) error {
+	control, err := checksum_controller.NewVMIControl(vmi, client)
+	if err != nil {
+		return err
+	}
+	if err = client.SyncVirtualMachineMemory(vmi, options); err != nil {
+		return err
+	}
+	c.checksumCtrl.Set(control)
 	return nil
 }
 

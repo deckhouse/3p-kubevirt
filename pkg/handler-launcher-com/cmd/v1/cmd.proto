@@ -40,6 +40,7 @@ service Cmd {
   rpc BackupVirtualMachine(BackupRequest) returns (Response) {}
   rpc RedefineCheckpoint(RedefineCheckpointRequest) returns (RedefineCheckpointResponse) {}
   rpc GetVMStats(VMStatsRequest) returns (VMStatsResponse) {}
+  rpc GetAppliedVMIChecksum(EmptyRequest) returns (VMIChecksumResponse) {}
 }
 
 message QemuVersionResponse {
@@ -300,4 +301,9 @@ message VMStatsResponse {
   Response guestNetworkGetRoute = 16;
   Response guestNetworkGetInterfaces = 17;
   Response guestGetMemoryBlocks = 18;
+}
+
+message VMIChecksumResponse {
+  Response response = 1;
+  string checksum = 2;
 }
