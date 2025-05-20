@@ -27,8 +27,10 @@ import (
 	"kubevirt.io/api/core"
 )
 
-const SubresourceGroupName = "subresources.kubevirt.io"
-const KubeVirtClientGoSchemeRegistrationVersionEnvVar = "KUBEVIRT_CLIENT_GO_SCHEME_REGISTRATION_VERSION"
+const (
+	SubresourceGroupName                            = "subresources.kubevirt.io"
+	KubeVirtClientGoSchemeRegistrationVersionEnvVar = "KUBEVIRT_CLIENT_GO_SCHEME_REGISTRATION_VERSION"
+)
 
 var (
 	ApiLatestVersion            = "v1"
@@ -86,10 +88,8 @@ var (
 )
 
 func AddKnownTypesGenerator(groupVersions []schema.GroupVersion) func(scheme *runtime.Scheme) error {
-
 	// Adds the list of known types to api.Scheme.
 	return func(scheme *runtime.Scheme) error {
-
 		for _, groupVersion := range groupVersions {
 			scheme.AddKnownTypes(groupVersion,
 				&VirtualMachineInstance{},

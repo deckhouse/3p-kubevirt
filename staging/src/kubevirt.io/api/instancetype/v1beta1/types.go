@@ -132,7 +132,6 @@ type VirtualMachineInstancetypeSpec struct {
 //
 // Guest is a required attribute and defines the number of vCPUs to be exposed to the guest by the instancetype.
 type CPUInstancetype struct {
-
 	// Required number of vCPUs to expose to the guest.
 	//
 	// The resulting CPU topology being derived from the optional PreferredCPUTopology attribute of CPUPreferences that itself defaults to PreferSockets.
@@ -173,7 +172,6 @@ type CPUInstancetype struct {
 //
 // Guest is a required attribute and defines the amount of RAM to be exposed to the guest by the instancetype.
 type MemoryInstancetype struct {
-
 	// Required amount of memory which is visible inside the guest OS.
 	Guest resource.Quantity `json:"guest"`
 
@@ -243,7 +241,6 @@ type VirtualMachineClusterPreferenceList struct {
 
 // VirtualMachinePreferenceSpec is a description of the VirtualMachinePreference or VirtualMachineClusterPreference.
 type VirtualMachinePreferenceSpec struct {
-
 	// Clock optionally defines preferences associated with the Clock attribute of a VirtualMachineInstance DomainSpec
 	//
 	//+optional
@@ -284,7 +281,7 @@ type VirtualMachinePreferenceSpec struct {
 	//+optional
 	PreferredSubdomain *string `json:"preferredSubdomain,omitempty"`
 
-	// Grace period observed after signalling a VirtualMachineInstance to stop after which the VirtualMachineInstance is force terminated.
+	// Grace period observed after signaling a VirtualMachineInstance to stop after which the VirtualMachineInstance is force terminated.
 	//
 	//+optional
 	PreferredTerminationGracePeriodSeconds *int64 `json:"preferredTerminationGracePeriodSeconds,omitempty"`
@@ -316,7 +313,6 @@ type VirtualMachinePreferenceSpec struct {
 }
 
 type VolumePreferences struct {
-
 	// PreffereedStorageClassName optionally defines the preferred storageClass
 	//
 	//+optional
@@ -364,7 +360,6 @@ const (
 
 // CPUPreferences contains various optional CPU preferences.
 type CPUPreferences struct {
-
 	// PreferredCPUTopology optionally defines the preferred guest visible CPU topology, defaults to PreferSockets.
 	//
 	//+optional
@@ -414,7 +409,6 @@ type SpreadOptions struct {
 
 // DevicePreferences contains various optional Device preferences.
 type DevicePreferences struct {
-
 	// PreferredAutoattachGraphicsDevice optionally defines the preferred value of AutoattachGraphicsDevice
 	//
 	// +optional
@@ -548,7 +542,6 @@ type DevicePreferences struct {
 
 // FeaturePreferences contains various optional defaults for Features.
 type FeaturePreferences struct {
-
 	// PreferredAcpi optionally enables the ACPI feature
 	//
 	// +optional
@@ -582,7 +575,6 @@ type FeaturePreferences struct {
 
 // FirmwarePreferences contains various optional defaults for Firmware.
 type FirmwarePreferences struct {
-
 	// PreferredUseBios optionally enables BIOS
 	//
 	// +optional
@@ -617,7 +609,6 @@ type FirmwarePreferences struct {
 
 // MachinePreferences contains various optional defaults for Machine.
 type MachinePreferences struct {
-
 	// PreferredMachineType optionally defines the preferred machine type to use.
 	//
 	// +optional
@@ -626,7 +617,6 @@ type MachinePreferences struct {
 
 // ClockPreferences contains various optional defaults for Clock.
 type ClockPreferences struct {
-
 	// ClockOffset allows specifying the UTC offset or the timezone of the guest clock.
 	//
 	// +optional
@@ -639,7 +629,6 @@ type ClockPreferences struct {
 }
 
 type PreferenceRequirements struct {
-
 	// Required CPU related attributes of the instancetype.
 	//
 	//+optional
@@ -657,13 +646,11 @@ type PreferenceRequirements struct {
 }
 
 type CPUPreferenceRequirement struct {
-
 	// Minimal number of vCPUs required by the preference.
 	Guest uint32 `json:"guest"`
 }
 
 type MemoryPreferenceRequirement struct {
-
 	// Minimal amount of memory required by the preference.
 	Guest resource.Quantity `json:"guest"`
 }

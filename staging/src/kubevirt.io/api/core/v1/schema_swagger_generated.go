@@ -152,7 +152,7 @@ func (KernelBoot) SwaggerDoc() map[string]string {
 	return map[string]string{
 		"":           "Represents the firmware blob used to assist in the kernel boot process.\nUsed for setting the kernel, initrd and command line arguments",
 		"kernelArgs": "Arguments to be passed to the kernel at boot time",
-		"container":  "Container defines the container that containes kernel artifacts",
+		"container":  "Container defines the container that contains kernel artifacts",
 	}
 }
 
@@ -310,7 +310,7 @@ func (SoundDevice) SwaggerDoc() map[string]string {
 func (TPMDevice) SwaggerDoc() map[string]string {
 	return map[string]string{
 		"enabled":    "Enabled allows a user to explicitly disable the vTPM even when one is enabled by a preference referenced by the VirtualMachine\nDefaults to True",
-		"persistent": "Persistent indicates the state of the TPM device should be kept accross reboots\nDefaults to false",
+		"persistent": "Persistent indicates the state of the TPM device should be kept across reboots\nDefaults to false",
 	}
 }
 
@@ -869,7 +869,7 @@ func (NoCloudSSHPublicKeyAccessCredentialPropagation) SwaggerDoc() map[string]st
 func (AuthorizedKeysFile) SwaggerDoc() map[string]string {
 	return map[string]string{
 		"":         "AuthorizedKeysFile represents a path within the guest\nthat ssh public keys should be propagated to",
-		"filePath": "FilePath represents the place on the guest that the authorized_keys\nfile should be writen to. This is expected to be a full path including\nboth the base directory and file name.",
+		"filePath": "FilePath represents the place on the guest that the authorized_keys\nfile should be written to. This is expected to be a full path including\nboth the base directory and file name.",
 	}
 }
 

@@ -265,12 +265,10 @@ type VirtualMachinePoolUpdateStrategy struct {
 }
 
 // +k8s:openapi-gen=true
-type VirtualMachinePoolUnmanagedStrategy struct {
-}
+type VirtualMachinePoolUnmanagedStrategy struct{}
 
 // +k8s:openapi-gen=true
-type VirtualMachineOpportunisticUpdateStrategy struct {
-}
+type VirtualMachineOpportunisticUpdateStrategy struct{}
 
 // VirtualMachinePoolProactiveUpdateStrategy represents proactive update strategy
 // +k8s:openapi-gen=true

@@ -181,7 +181,7 @@ type VirtualMachineBackupSpec struct {
 	Source corev1.TypedLocalObjectReference `json:"source"`
 	// +optional
 	// +kubebuilder:validation:Enum=Push;Pull
-	// Mode specifies the way the backup output will be recieved
+	// Mode specifies the way the backup output will be received
 	Mode *BackupMode `json:"mode,omitempty"`
 	// +optional
 	// PvcName required in push mode. Specifies the name of the PVC

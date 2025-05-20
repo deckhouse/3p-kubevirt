@@ -58,7 +58,6 @@ func cleanupContainerDiskDirectory(ephemeralDiskDir string) {
 }
 
 func main() {
-
 	containerDiskDir := pflag.String("container-disk-dir", "/var/run/kubevirt/container-disks", "Base directory for container disk data")
 	keepAfterFailure := pflag.Bool("keep-after-failure", false, "virt-launcher will be kept alive after failure for debugging if set to true")
 	uid := pflag.String("uid", "", "UID of the VirtualMachineInstance")
@@ -154,7 +153,7 @@ func RunAndMonitor(containerDiskDir, uid string) (int, error) {
 					log.Log.Infof("Reaped %d processes on %s signal", len(wpids), sig.String())
 				}
 			default:
-				log.Log.Infof("signalling virt-launcher to shut down")
+				log.Log.Infof("signaling virt-launcher to shut down")
 				err := cmd.Process.Signal(syscall.SIGTERM)
 				sig.Signal()
 				if err != nil {
@@ -245,8 +244,10 @@ func RemoveContents(dir string) error {
 	return nil
 }
 
-type isRetriable func(error) bool
-type function func() error
+type (
+	isRetriable func(error) bool
+	function    func() error
+)
 
 func retryOnError(shouldRetry isRetriable, f function) error {
 	var lastErr error
@@ -286,7 +287,6 @@ func terminateIstioProxy() {
 				return errno == syscall.ECONNRESET || errno == syscall.ECONNREFUSED
 			}
 			return serviceUnavailable == err
-
 		}
 		err := retryOnError(isRetriable, func() error {
 			resp, err := httpClient.Post(fmt.Sprintf("http://localhost:%d/quitquitquit", envoyMergedPrometheusTelemetryPort), "", nil)

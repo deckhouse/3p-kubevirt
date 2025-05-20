@@ -80,7 +80,6 @@ const (
 
 // VirtualMachineInstanceSpec is a description of a VirtualMachineInstance.
 type VirtualMachineInstanceSpec struct {
-
 	// If specified, indicates the pod's priority.
 	// If not specified, the pod priority will be default or zero if there is no
 	// default.
@@ -129,7 +128,7 @@ type VirtualMachineInstanceSpec struct {
 	//
 	// +optional
 	StartStrategy *StartStrategy `json:"startStrategy,omitempty"`
-	// Grace period observed after signalling a VirtualMachineInstance to stop after which the VirtualMachineInstance is force terminated.
+	// Grace period observed after signaling a VirtualMachineInstance to stop after which the VirtualMachineInstance is force terminated.
 	TerminationGracePeriodSeconds *int64 `json:"terminationGracePeriodSeconds,omitempty"`
 	// List of volumes that can be mounted by disks belonging to the vmi.
 	// +kubebuilder:validation:MaxItems:=256
@@ -323,7 +322,7 @@ type VirtualMachineInstanceStatus struct {
 	// +optional
 	TopologyHints *TopologyHints `json:"topologyHints,omitempty"`
 
-	//VirtualMachineRevisionName is used to get the vm revision of the vmi when doing
+	// VirtualMachineRevisionName is used to get the vm revision of the vmi when doing
 	// an online vm snapshot
 	// +optional
 	VirtualMachineRevisionName string `json:"virtualMachineRevisionName,omitempty"`
@@ -651,7 +650,6 @@ func (v *VirtualMachineInstance) IsMigrationCompleted() bool {
 // happen when both sides have synchronized at least once. For 'local' migrations this returns true if the
 // migration state is not nil. Essentially this happens after the migration resource is created.
 func (v *VirtualMachineInstance) IsMigrationSynchronized(migration *VirtualMachineInstanceMigration) bool {
-
 	if migration.IsDecentralized() {
 		return v.Status.MigrationState != nil && v.Status.MigrationState.SourceState != nil &&
 			v.Status.MigrationState.TargetState != nil &&
@@ -777,7 +775,7 @@ const (
 	VirtualMachineInstanceReasonAllDVsReady = "AllDVsReady"
 	// Indicates a generic reason that the VMI isn't migratable and more details are specified in the condition message.
 	VirtualMachineInstanceReasonNotMigratable = "NotMigratable"
-	// Reason means that the volume update change was cancelled
+	// Reason means that the volume update change was canceled
 	VirtualMachineInstanceReasonVolumesChangeCancellation = "VolumesChangeCancellation"
 
 	// Indicates that automatic migration is required due to a change made to a running VM
@@ -1102,7 +1100,7 @@ type VirtualMachineInstancePhase string
 
 // These are the valid statuses of pods.
 const (
-	//When a VirtualMachineInstance Object is first initialized and no phase, or Pending is present.
+	// When a VirtualMachineInstance Object is first initialized and no phase, or Pending is present.
 	VmPhaseUnset VirtualMachineInstancePhase = ""
 	// Pending means the VirtualMachineInstance has been accepted by the system.
 	Pending VirtualMachineInstancePhase = "Pending"
@@ -1130,6 +1128,7 @@ const (
 	// VGADisplayForEFIGuestsX86Annotation when set, x86 EFI guests will be started with VGA display instead of Bochs
 	VGADisplayForEFIGuestsX86Annotation string = "kubevirt.io/vga-display-efi-x86"
 )
+
 const (
 	// AppLabel and AppName labels marks resources that belong to KubeVirt. An optional value
 	// may indicate which specific KubeVirt component a resource belongs to.
@@ -1228,7 +1227,7 @@ const (
 	InstallStrategyRegistryAnnotation = "install.internal.virtualization.deckhouse.io/install-strategy-registry"
 	// This annotation represents the kubevirt deployment identifier used for an install strategy configmap.
 	InstallStrategyIdentifierAnnotation = "install.internal.virtualization.deckhouse.io/install-strategy-identifier"
-	// This annotation shows the enconding used for the manifests in the Install Strategy ConfigMap.
+	// This annotation shows the encoding used for the manifests in the Install Strategy ConfigMap.
 	InstallStrategyConfigMapEncoding = "install.internal.virtualization.deckhouse.io/install-strategy-cm-encoding"
 	// This annotation is a hash of all customizations that live under spec.CustomizeComponents
 	KubeVirtCustomizeComponentAnnotationHash = "kubevirt.io/customizer-identifier"
@@ -1568,7 +1567,7 @@ func NewVMIReferenceFromName(name string) *VirtualMachineInstance {
 	return NewVMIReferenceFromNameWithNS(k8sv1.NamespaceDefault, name)
 }
 
-func NewVMIReferenceFromNameWithNS(namespace string, name string) *VirtualMachineInstance {
+func NewVMIReferenceFromNameWithNS(namespace, name string) *VirtualMachineInstance {
 	vmi := &VirtualMachineInstance{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
@@ -1580,7 +1579,7 @@ func NewVMIReferenceFromNameWithNS(namespace string, name string) *VirtualMachin
 	return vmi
 }
 
-func NewVMIReferenceWithUUID(namespace string, name string, uuid types.UID) *VirtualMachineInstance {
+func NewVMIReferenceWithUUID(namespace, name string, uuid types.UID) *VirtualMachineInstance {
 	vmi := NewVMIReferenceFromNameWithNS(namespace, name)
 	vmi.UID = uuid
 	return vmi
@@ -1591,7 +1590,7 @@ type VMISelector struct {
 	Name string `json:"name" valid:"required"`
 }
 
-func NewVMReferenceFromNameWithNS(namespace string, name string) *VirtualMachine {
+func NewVMReferenceFromNameWithNS(namespace, name string) *VirtualMachine {
 	vm := &VirtualMachine{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
@@ -1971,7 +1970,7 @@ func (vm *VirtualMachine) RunStrategy() (VirtualMachineRunStrategy, error) {
 	}
 	RunStrategy := RunStrategyHalted
 	if vm.Spec.Running != nil {
-		if (*vm.Spec.Running) == true {
+		if *vm.Spec.Running {
 			RunStrategy = RunStrategyAlways
 		}
 	} else if vm.Spec.RunStrategy != nil {
@@ -2390,7 +2389,7 @@ const (
 	CacheWriteBack DriverCache = "writeback"
 
 	// IOThreads - User mode based threads with a shared lock that perform I/O tasks. Can impact performance but offers
-	// more predictable behaviour. This method is also takes fewer CPU cycles to submit I/O requests.
+	// more predictable behavior. This method is also takes fewer CPU cycles to submit I/O requests.
 	IOThreads DriverIO = "threads"
 	// IONative - Kernel native I/O tasks (AIO) offer a better performance but can block the VM if the file is not fully
 	// allocated so this method recommended only when the backing file/disk/etc is fully preallocated.
@@ -3076,14 +3075,14 @@ type RateLimiter struct {
 
 // RESTClientConfiguration allows configuring certain aspects of the k8s rest client.
 type RESTClientConfiguration struct {
-	//RateLimiter allows selecting and configuring different rate limiters for the k8s client.
+	// RateLimiter allows selecting and configuring different rate limiters for the k8s client.
 	RateLimiter *RateLimiter `json:"rateLimiter,omitempty"`
 }
 
 // ReloadableComponentConfiguration holds all generic k8s configuration options which can
 // be reloaded by components without requiring a restart.
 type ReloadableComponentConfiguration struct {
-	//RestClient can be used to tune certain aspects of the k8s client in use.
+	// RestClient can be used to tune certain aspects of the k8s client in use.
 	RestClient *RESTClientConfiguration `json:"restClient,omitempty"`
 }
 
@@ -3506,7 +3505,7 @@ type VMIMConfigurationOptions struct {
 	BandwidthPerMigration *resource.Quantity `json:"bandwidthPerMigration,omitempty"`
 	// CompletionTimeoutPerGiB is the maximum number of seconds per GiB a migration is allowed to take.
 	// If the timeout is reached, the migration will be either paused, switched
-	// to post-copy or cancelled depending on other settings. Defaults to 150
+	// to post-copy or canceled depending on other settings. Defaults to 150
 	CompletionTimeoutPerGiB *int64 `json:"completionTimeoutPerGiB,omitempty"`
 	// MaxDowntimeMs specifies the maximum tolerable downtime (in milliseconds) during switchover.
 	// Defaults to 900
@@ -3515,7 +3514,7 @@ type VMIMConfigurationOptions struct {
 	MaxDowntimeMs *uint64 `json:"maxDowntimeMs,omitempty"`
 	// ProgressTimeout is the maximum number of seconds a live migration is allowed to make no progress.
 	// Hitting this timeout means a migration transferred 0 data for that many seconds. The migration is
-	// then considered stuck and therefore cancelled. Defaults to 150
+	// then considered stuck and therefore canceled. Defaults to 150
 	ProgressTimeout *int64 `json:"progressTimeout,omitempty"`
 	// UtilityVolumesTimeout is the maximum number of seconds a migration can wait in Pending state
 	// for utility volumes to be detached. If utility volumes are still present after this timeout,
@@ -3571,7 +3570,7 @@ type MigrationConfiguration struct {
 	BandwidthPerMigration *resource.Quantity `json:"bandwidthPerMigration,omitempty"`
 	// CompletionTimeoutPerGiB is the maximum number of seconds per GiB a migration is allowed to take.
 	// If the timeout is reached, the migration will be either paused, switched
-	// to post-copy or cancelled depending on other settings. Defaults to 150
+	// to post-copy or canceled depending on other settings. Defaults to 150
 	CompletionTimeoutPerGiB *int64 `json:"completionTimeoutPerGiB,omitempty"`
 	// MaxDowntimeMs specifies the maximum tolerable downtime (in milliseconds) during switchover.
 	// Defaults to 900
@@ -3580,7 +3579,7 @@ type MigrationConfiguration struct {
 	MaxDowntimeMs *uint64 `json:"maxDowntimeMs,omitempty"`
 	// ProgressTimeout is the maximum number of seconds a live migration is allowed to make no progress.
 	// Hitting this timeout means a migration transferred 0 data for that many seconds. The migration is
-	// then considered stuck and therefore cancelled. Defaults to 150
+	// then considered stuck and therefore canceled. Defaults to 150
 	ProgressTimeout *int64 `json:"progressTimeout,omitempty"`
 	// UtilityVolumesTimeout is the maximum number of seconds a migration can wait in Pending state
 	// for utility volumes to be detached. If utility volumes are still present after this timeout,
@@ -3864,8 +3863,7 @@ const (
 )
 
 // GuestAgentPing configures the guest-agent based ping probe
-type GuestAgentPing struct {
-}
+type GuestAgentPing struct{}
 
 type ProfilerResult struct {
 	PprofData map[string][]byte `json:"pprofData,omitempty"`

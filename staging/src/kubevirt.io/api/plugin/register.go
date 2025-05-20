@@ -28,6 +28,4 @@ const (
 	ResourcePluginPlural   = "plugins"
 )
 
-var (
-	ApiSupportedWebhookVersions = []string{LatestVersion}
-)
+var ApiSupportedWebhookVersions = []string{LatestVersion}
