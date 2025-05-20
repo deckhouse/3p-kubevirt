@@ -27,6 +27,7 @@ import (
 	"maps"
 	"math"
 	"math/rand"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -130,6 +131,16 @@ const (
 )
 
 const defaultMaxCrashLoopBackoffDelaySeconds = 300
+
+const (
+	libvirtAnn = "versions.virtualization.deckhouse.io/libvirt-version"
+	qemuAnn    = "versions.virtualization.deckhouse.io/qemu-version"
+)
+
+var (
+	libvirtVersion = os.Getenv("LIBVIRT_VERSION")
+	qemuVersion    = os.Getenv("QEMU_VERSION")
+)
 
 func NewController(vmiInformer cache.SharedIndexInformer,
 	vmInformer cache.SharedIndexInformer,
@@ -1892,6 +1903,18 @@ func SetupVMIFromVM(vm *virtv1.VirtualMachine) *virtv1.VirtualMachineInstance {
 	}
 
 	util.SetDefaultVolumeDisk(&vmi.Spec)
+
+	if vmi.Annotations == nil {
+		vmi.Annotations = make(map[string]string)
+	}
+
+	if libvirtVersion != "" {
+		vmi.Annotations[libvirtAnn] = libvirtVersion
+	}
+
+	if qemuVersion != "" {
+		vmi.Annotations[qemuAnn] = qemuVersion
+	}
 
 	return vmi
 }
