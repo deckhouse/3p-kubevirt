@@ -123,7 +123,7 @@ func (c *KubeVirtController) generateInstallStrategyJob(infraPlacement *v1.Compo
 		},
 	}
 
-	placement.InjectPlacementMetadata(infraPlacement, &job.Spec.Template.Spec, placement.RequireControlPlanePreferNonWorker)
+	placement.InjectPlacementMetadata(infraPlacement, &job.Spec.Template.Spec, placement.AnyNode)
 	env := job.Spec.Template.Spec.Containers[0].Env
 	extraEnv := util.NewEnvVarMap(config.GetExtraEnv())
 	job.Spec.Template.Spec.Containers[0].Env = append(env, extraEnv...)
