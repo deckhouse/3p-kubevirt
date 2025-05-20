@@ -723,6 +723,9 @@ func (vca *VirtControllerApp) initCommon() {
 			return netadmitter.ValidateCreation(field, vmiSpec, clusterCfg)
 		},
 		netmigration.NewEvaluator(),
+		vca.allPodInformer,
+		vca.namespaceInformer,
+		vca.nodeInformer,
 	)
 	if err != nil {
 		panic(err)
