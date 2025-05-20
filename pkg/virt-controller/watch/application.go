@@ -106,10 +106,10 @@ import (
 )
 
 const (
-	defaultPort = 8182
+	defaultPort        = 8182
 	defaultMetricsPort = 8080
 
-	defaultHost = "0.0.0.0"
+	defaultHost        = "0.0.0.0"
 	defaultMetricsHost = defaultHost
 
 	launcherImage       = "virt-launcher"
@@ -763,14 +763,11 @@ func (vca *VirtControllerApp) initCommon() {
 			return netadmitter.ValidateCreation(field, vmiSpec, clusterCfg)
 		},
 		netmigration.NewEvaluator(),
-<<<<<<< HEAD
 		vca.additionalLauncherAnnotationsSync,
 		vca.additionalLauncherLabelsSync,
-=======
 		vca.allPodInformer,
 		vca.namespaceInformer,
 		vca.nodeInformer,
->>>>>>> dede36a4f4 (Apply patch 027-auto-migrate-if-nodeplacement-changed.patch)
 	)
 	if err != nil {
 		panic(err)
@@ -840,7 +837,7 @@ func (vca *VirtControllerApp) initVirtualMachines() {
 	var err error
 	recorder := vca.newRecorder(k8sv1.NamespaceAll, "virtualmachine-controller")
 
-	vca.vmController, err = vm.NewVMController(
+	vca.vmController, err = vm.NewController(
 		vca.vmiInformer,
 		vca.vmInformer,
 		vca.dataVolumeInformer,

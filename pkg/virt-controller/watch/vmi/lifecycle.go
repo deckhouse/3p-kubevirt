@@ -272,7 +272,7 @@ func (c *Controller) deleteErrorPods(ctx context.Context, vmi *virtv1.VirtualMac
 	}
 	var errorPods []*k8sv1.Pod
 	for _, pod := range pods {
-		if !controller.IsControlledBy(pod, vmi) {
+		if !v1.IsControlledBy(pod, vmi) {
 			continue
 		}
 		if pod.Status.Phase != k8sv1.PodFailed {
@@ -558,15 +558,11 @@ func (c *Controller) updateStatus(vmi *virtv1.VirtualMachineInstance, pod *k8sv1
 			c.syncVolumesUpdate(vmiCopy)
 		}
 
-<<<<<<< HEAD
-		c.syncMigrationRequiredCondition(vmiCopy, pod)
-=======
 		if err := c.syncNodePlacementCondition(vmiCopy, pod); err != nil {
 			return fmt.Errorf("failed to update condition %s", virtv1.VirtualMachineInstanceNodePlacementNotMatched)
 		}
 
-		c.syncMigrationRequiredCondition(vmiCopy)
->>>>>>> dede36a4f4 (Apply patch 027-auto-migrate-if-nodeplacement-changed.patch)
+		c.syncMigrationRequiredCondition(vmiCopy, pod)
 
 	case vmi.IsScheduled():
 		if !vmiPodExists || (vmiCopy.IsMigrationTarget() && controller.PodIsDown(pod)) || migrationTargetFailed {
@@ -667,7 +663,6 @@ func (c *Controller) updateStatus(vmi *virtv1.VirtualMachineInstance, pod *k8sv1
 	return nil
 }
 
-<<<<<<< HEAD
 func (c *Controller) addTopologyHints(vmi *virtv1.VirtualMachineInstance, vmiCopy *virtv1.VirtualMachineInstance) error {
 	if vmi.Status.TopologyHints == nil {
 		if topologyHints, tscRequirement, err := c.topologyHinter.TopologyHintsForVMI(vmi); err != nil && tscRequirement == topology.RequiredForBoot {
@@ -680,7 +675,6 @@ func (c *Controller) addTopologyHints(vmi *virtv1.VirtualMachineInstance, vmiCop
 	return nil
 }
 
-=======
 func (c *Controller) syncNodePlacementCondition(vmi *virtv1.VirtualMachineInstance, pod *k8sv1.Pod) error {
 	status := k8sv1.ConditionFalse
 	templatePod, err := c.templateService.RenderLaunchManifest(vmi)
@@ -847,7 +841,6 @@ func (c *Controller) syncNodePlacementNotMatchedCondition(vmi *virtv1.VirtualMac
 	vmiConditions.UpdateCondition(vmi, &condition)
 }
 
->>>>>>> dede36a4f4 (Apply patch 027-auto-migrate-if-nodeplacement-changed.patch)
 // prepareVMIPatch generates a patch set for updating the VMI status.
 func prepareVMIPatch(oldVMI, newVMI *virtv1.VirtualMachineInstance) *patch.PatchSet {
 	patchSet := patch.New()

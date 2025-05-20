@@ -80,11 +80,11 @@ import (
 
 const (
 	// Default port that virt-api listens on.
-	defaultPort = 443
+	defaultPort        = 443
 	defaultMetricsPort = 8080
 
 	// Default address that virt-api listens on.
-	defaultHost = "0.0.0.0"
+	defaultHost        = "0.0.0.0"
 	defaultMetricsHost = defaultHost
 
 	DefaultConsoleServerPort = 8186

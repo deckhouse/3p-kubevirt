@@ -798,7 +798,8 @@
               "image": "imageValue",
               "imagePullSecret": "imagePullSecretValue",
               "path": "pathValue",
-              "imagePullPolicy": "imagePullPolicyValue"
+              "imagePullPolicy": "imagePullPolicyValue",
+              "hotpluggable": true
             },
             "ephemeral": {
               "persistentVolumeClaim": {
@@ -1277,6 +1278,13 @@
             },
             "dataVolume": {
               "name": "nameValue",
+              "hotpluggable": true
+            },
+            "containerDisk": {
+              "image": "imageValue",
+              "imagePullSecret": "imagePullSecretValue",
+              "path": "pathValue",
+              "imagePullPolicy": "imagePullPolicyValue",
               "hotpluggable": true
             }
           },

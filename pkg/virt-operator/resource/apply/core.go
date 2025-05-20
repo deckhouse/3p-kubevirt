@@ -474,7 +474,6 @@ func (r *Reconciler) createOrUpdateComponentsWithCertificates(queue workqueue.Ty
 		return err
 	}
 
-
 	// create/update Routes
 	err = r.createOrUpdateRoutes(caBundle)
 	if err != nil {

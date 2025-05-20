@@ -74,14 +74,11 @@ func NewController(templateService templateService,
 	netStatusUpdater statusUpdater,
 	netSpecValidator specValidator,
 	netMigrationEvaluator migrationEvaluator,
-<<<<<<< HEAD
 	additionalLauncherAnnotationsSync []string,
 	additionalLauncherLabelsSync []string,
-=======
 	allPodInformer cache.SharedIndexInformer,
 	namespaceInformer cache.SharedIndexInformer,
 	nodeInformer cache.SharedIndexInformer,
->>>>>>> dede36a4f4 (Apply patch 027-auto-migrate-if-nodeplacement-changed.patch)
 ) (*Controller, error) {
 
 	c := &Controller{
@@ -90,7 +87,6 @@ func NewController(templateService templateService,
 			workqueue.DefaultTypedControllerRateLimiter[string](),
 			workqueue.TypedRateLimitingQueueConfig[string]{Name: "virt-controller-vmi"},
 		),
-<<<<<<< HEAD
 		vmiIndexer:                        vmiInformer.GetIndexer(),
 		vmStore:                           vmInformer.GetStore(),
 		podIndexer:                        podInformer.GetIndexer(),
@@ -115,44 +111,18 @@ func NewController(templateService templateService,
 		netMigrationEvaluator:             netMigrationEvaluator,
 		additionalLauncherAnnotationsSync: additionalLauncherAnnotationsSync,
 		additionalLauncherLabelsSync:      additionalLauncherLabelsSync,
-=======
-		vmiIndexer:              vmiInformer.GetIndexer(),
-		vmStore:                 vmInformer.GetStore(),
-		podIndexer:              podInformer.GetIndexer(),
-		pvcIndexer:              pvcInformer.GetIndexer(),
-		migrationIndexer:        migrationInformer.GetIndexer(),
-		recorder:                recorder,
-		clientset:               clientset,
-		podExpectations:         controller.NewUIDTrackingControllerExpectations(controller.NewControllerExpectations()),
-		vmiExpectations:         controller.NewUIDTrackingControllerExpectations(controller.NewControllerExpectations()),
-		pvcExpectations:         controller.NewUIDTrackingControllerExpectations(controller.NewControllerExpectations()),
-		dataVolumeIndexer:       dataVolumeInformer.GetIndexer(),
-		cdiStore:                cdiInformer.GetStore(),
-		cdiConfigStore:          cdiConfigInformer.GetStore(),
-		clusterConfig:           clusterConfig,
-		topologyHinter:          topologyHinter,
-		cidsMap:                 vsock.NewCIDsMap(),
-		backendStorage:          backendstorage.NewBackendStorage(clientset, clusterConfig, storageClassInformer.GetStore(), storageProfileInformer.GetStore(), pvcInformer.GetIndexer()),
-		netAnnotationsGenerator: netAnnotationsGenerator,
-		updateNetworkStatus:     netStatusUpdater,
-		validateNetworkSpec:     netSpecValidator,
-		netMigrationEvaluator:   netMigrationEvaluator,
 
 		allPodIndexer:    allPodInformer.GetIndexer(),
 		namespaceIndexer: namespaceInformer.GetIndexer(),
 		nodeIndexer:      nodeInformer.GetIndexer(),
->>>>>>> dede36a4f4 (Apply patch 027-auto-migrate-if-nodeplacement-changed.patch)
 	}
 
 	c.hasSynced = func() bool {
 		return vmInformer.HasSynced() && vmiInformer.HasSynced() && podInformer.HasSynced() &&
 			dataVolumeInformer.HasSynced() && cdiConfigInformer.HasSynced() && cdiInformer.HasSynced() &&
 			pvcInformer.HasSynced() && storageClassInformer.HasSynced() && storageProfileInformer.HasSynced() &&
-<<<<<<< HEAD
-			kubeVirtInformer.HasSynced()
-=======
+			kubeVirtInformer.HasSynced() &&
 			allPodInformer.HasSynced() && namespaceInformer.HasSynced() && nodeInformer.HasSynced()
->>>>>>> dede36a4f4 (Apply patch 027-auto-migrate-if-nodeplacement-changed.patch)
 	}
 
 	_, err := vmiInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
@@ -249,7 +219,6 @@ type migrationEvaluator interface {
 }
 
 type Controller struct {
-<<<<<<< HEAD
 	templateService                   templateService
 	clientset                         kubecli.KubevirtClient
 	Queue                             workqueue.TypedRateLimitingInterface[string]
@@ -277,36 +246,10 @@ type Controller struct {
 	netMigrationEvaluator             migrationEvaluator
 	additionalLauncherAnnotationsSync []string
 	additionalLauncherLabelsSync      []string
-=======
-	templateService         services.TemplateService
-	clientset               kubecli.KubevirtClient
-	Queue                   workqueue.TypedRateLimitingInterface[string]
-	vmiIndexer              cache.Indexer
-	vmStore                 cache.Store
-	podIndexer              cache.Indexer
-	pvcIndexer              cache.Indexer
-	migrationIndexer        cache.Indexer
-	topologyHinter          topology.Hinter
-	recorder                record.EventRecorder
-	podExpectations         *controller.UIDTrackingControllerExpectations
-	vmiExpectations         *controller.UIDTrackingControllerExpectations
-	pvcExpectations         *controller.UIDTrackingControllerExpectations
-	dataVolumeIndexer       cache.Indexer
-	cdiStore                cache.Store
-	cdiConfigStore          cache.Store
-	clusterConfig           *virtconfig.ClusterConfig
-	cidsMap                 vsock.Allocator
-	backendStorage          *backendstorage.BackendStorage
-	hasSynced               func() bool
-	netAnnotationsGenerator annotationsGenerator
-	updateNetworkStatus     statusUpdater
-	validateNetworkSpec     specValidator
-	netMigrationEvaluator   migrationEvaluator
 
 	allPodIndexer    cache.Indexer
 	namespaceIndexer cache.Indexer
 	nodeIndexer      cache.Indexer
->>>>>>> dede36a4f4 (Apply patch 027-auto-migrate-if-nodeplacement-changed.patch)
 }
 
 func (c *Controller) Run(threadiness int, stopCh <-chan struct{}) {

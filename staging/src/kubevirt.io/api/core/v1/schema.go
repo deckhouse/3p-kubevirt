@@ -1017,6 +1017,8 @@ type HotplugVolumeSource struct {
 	// the process of populating that PVC with a disk image.
 	// +optional
 	DataVolume *DataVolumeSource `json:"dataVolume,omitempty"`
+
+	ContainerDisk *ContainerDiskSource `json:"containerDisk,omitempty"`
 }
 
 type DataVolumeSource struct {
@@ -1073,6 +1075,8 @@ type ContainerDiskSource struct {
 	// More info: https://kubernetes.io/docs/concepts/containers/images#updating-images
 	// +optional
 	ImagePullPolicy v1.PullPolicy `json:"imagePullPolicy,omitempty"`
+
+	Hotpluggable bool `json:"hotpluggable,omitempty"`
 }
 
 type UtilityVolumeType string

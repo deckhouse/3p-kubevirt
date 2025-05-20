@@ -40,6 +40,10 @@ func HotplugBlockDevice(volumeName string) string {
 	return filepath.Join(string(filepath.Separator), "var", "run", "kubevirt", "hotplug-disks", volumeName)
 }
 
+func HotplugContainerDisk(volumeName string) string {
+	return filepath.Join(string(filepath.Separator), "var", "run", "kubevirt", "hotplug-disks", fmt.Sprintf("%s.img", volumeName))
+}
+
 func Image(volumeName string, isBlock, isHotplug bool) string {
 	if isBlock {
 		if isHotplug {

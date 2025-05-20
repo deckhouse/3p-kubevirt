@@ -91,7 +91,11 @@ func (s *socketBasedIsolationDetector) getPid(socket string) (int, error) {
 	if err != nil {
 		return -1, err
 	}
-	defer sock.Close()
+	//sock, err := net.DialTimeout("unix", socket, time.Duration(isolationDialTimeout)*time.Second)
+	//if err != nil {
+	//	return -1, err
+	//}
+	//defer sock.Close()
 
 	ufile, err := sock.(*net.UnixConn).File()
 	if err != nil {

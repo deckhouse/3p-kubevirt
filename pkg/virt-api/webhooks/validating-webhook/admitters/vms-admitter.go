@@ -386,6 +386,8 @@ func (admitter *VMsAdmitter) validateVolumeRequests(ctx context.Context, vm *v1.
 				newVolume.VolumeSource.PersistentVolumeClaim = volumeRequest.AddVolumeOptions.VolumeSource.PersistentVolumeClaim
 			} else if volumeRequest.AddVolumeOptions.VolumeSource.DataVolume != nil {
 				newVolume.VolumeSource.DataVolume = volumeRequest.AddVolumeOptions.VolumeSource.DataVolume
+			} else if volumeRequest.AddVolumeOptions.VolumeSource.ContainerDisk != nil {
+				newVolume.VolumeSource.ContainerDisk = volumeRequest.AddVolumeOptions.VolumeSource.ContainerDisk
 			}
 
 			vmVolume, ok := vmVolumeMap[name]

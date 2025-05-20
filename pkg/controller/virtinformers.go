@@ -1611,11 +1611,7 @@ func (f *kubeInformerFactory) StorageClass() cache.SharedIndexInformer {
 
 func (f *kubeInformerFactory) Pod() cache.SharedIndexInformer {
 	return f.getInformer("podInformer", func() cache.SharedIndexInformer {
-<<<<<<< HEAD
 		lw := cache.NewListWatchFromClient(f.k8sClient.CoreV1().RESTClient(), "pods", k8sv1.NamespaceAll, fields.Everything())
-		return cache.NewSharedIndexInformer(lw, &k8sv1.Pod{}, f.defaultResync, cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc})
-=======
-		lw := cache.NewListWatchFromClient(f.clientSet.CoreV1().RESTClient(), "pods", k8sv1.NamespaceAll, fields.Everything())
 		return cache.NewSharedIndexInformer(lw, &k8sv1.Pod{}, f.defaultResync, cache.Indexers{
 			cache.NamespaceIndex: cache.MetaNamespaceIndexFunc,
 			"node": func(obj interface{}) ([]string, error) {
@@ -1629,7 +1625,6 @@ func (f *kubeInformerFactory) Pod() cache.SharedIndexInformer {
 				return []string{pod.Spec.NodeName}, nil
 			},
 		})
->>>>>>> dede36a4f4 (Apply patch 027-auto-migrate-if-nodeplacement-changed.patch)
 	})
 }
 

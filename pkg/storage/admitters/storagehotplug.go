@@ -92,6 +92,14 @@ func ValidateHotplugDiskConfiguration(disk *v1.Disk, name, messagePrefix, field 
 				Field:   field,
 			}}
 		}
+	case disk.DiskDevice.CDRom != nil:
+		if bus != v1.DiskBusSCSI {
+			return []metav1.StatusCause{{
+				Type:    metav1.CauseTypeFieldValueInvalid,
+				Message: fmt.Sprintf("%s for CDRom [%s] requires bus to be 'scsi'. [%s] is not permitted.", messagePrefix, name, bus),
+				Field:   field,
+			}}
+		}
 	default:
 		return []metav1.StatusCause{{
 			Type:    metav1.CauseTypeFieldValueInvalid,
@@ -182,12 +190,12 @@ func verifyHotplugVolumes(newHotplugVolumeMap, oldHotplugVolumeMap map[string]v1
 				}
 			}
 		} else {
-			// This is a new volume, ensure that the volume is either DV, PVC or memoryDumpVolume
-			if v.DataVolume == nil && v.PersistentVolumeClaim == nil && v.MemoryDump == nil {
+			// This is a new volume, ensure that the volume is either DV, PVC, memoryDumpVolume or containerDisk
+			if v.DataVolume == nil && v.PersistentVolumeClaim == nil && v.MemoryDump == nil && v.ContainerDisk == nil {
 				return webhookutils.ToAdmissionResponse([]metav1.StatusCause{
 					{
 						Type:    metav1.CauseTypeFieldValueInvalid,
-						Message: fmt.Sprintf("volume %s is not a PVC or DataVolume", k),
+						Message: fmt.Sprintf("volume %s is not a PVC,DataVolume,MemoryDumpVolume or ContainerDisk", k),
 					},
 				})
 			}

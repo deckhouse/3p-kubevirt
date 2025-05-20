@@ -284,6 +284,10 @@ func ApplyVolumeRequestOnVMISpec(vmiSpec *v1.VirtualMachineInstanceSpec, request
 				dvSource := request.AddVolumeOptions.VolumeSource.DataVolume.DeepCopy()
 				dvSource.Hotpluggable = true
 				newVolume.VolumeSource.DataVolume = dvSource
+			} else if request.AddVolumeOptions.VolumeSource.ContainerDisk != nil {
+				containerDiskSource := request.AddVolumeOptions.VolumeSource.ContainerDisk.DeepCopy()
+				containerDiskSource.Hotpluggable = true
+				newVolume.VolumeSource.ContainerDisk = containerDiskSource
 			}
 
 			vmiSpec.Volumes = append(vmiSpec.Volumes, newVolume)
@@ -450,6 +454,9 @@ func VMIHasHotplugVolumes(vmi *v1.VirtualMachineInstance) bool {
 		if volume.PersistentVolumeClaim != nil && volume.PersistentVolumeClaim.Hotpluggable {
 			return true
 		}
+		if volume.ContainerDisk != nil && volume.ContainerDisk.Hotpluggable {
+			return true
+		}
 	}
 	return false
 }
@@ -555,23 +562,6 @@ func isPodFailed(pod *k8sv1.Pod) bool {
 func PodExists(pod *k8sv1.Pod) bool {
 	return pod != nil
 }
-func GetHotplugVolumes(vmi *v1.VirtualMachineInstance, virtlauncherPod *k8sv1.Pod) []*v1.Volume {
-	hotplugVolumes := make([]*v1.Volume, 0)
-	podVolumes := virtlauncherPod.Spec.Volumes
-	vmiVolumes := vmi.Spec.Volumes
-
-	podVolumeMap := make(map[string]k8sv1.Volume)
-	for _, podVolume := range podVolumes {
-		podVolumeMap[podVolume.Name] = podVolume
-	}
-	for _, vmiVolume := range vmiVolumes {
-		if _, ok := podVolumeMap[vmiVolume.Name]; !ok && (vmiVolume.DataVolume != nil || vmiVolume.PersistentVolumeClaim != nil || vmiVolume.MemoryDump != nil) {
-			hotplugVolumes = append(hotplugVolumes, vmiVolume.DeepCopy())
-		}
-	}
-	return hotplugVolumes
-}
-
 func SyncPodAnnotations(clientset kubecli.KubevirtClient, pod *k8sv1.Pod, newAnnotations map[string]string) (*k8sv1.Pod, error) {
 	patchSet := patch.New()
 	for key, newValue := range newAnnotations {

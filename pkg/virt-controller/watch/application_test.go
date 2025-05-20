@@ -41,12 +41,9 @@ import (
 	k8sfield "k8s.io/apimachinery/pkg/util/validation/field"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
-<<<<<<< HEAD
 	backupv1 "kubevirt.io/api/backup/v1alpha1"
-=======
 	cdiv1 "kubevirt.io/containerized-data-importer-api/pkg/apis/core/v1beta1"
 
->>>>>>> dede36a4f4 (Apply patch 027-auto-migrate-if-nodeplacement-changed.patch)
 	clone "kubevirt.io/api/clone/v1beta1"
 	v1 "kubevirt.io/api/core/v1"
 	exportv1 "kubevirt.io/api/export/v1"
@@ -168,14 +165,11 @@ var _ = Describe("Application", func() {
 				return nil
 			},
 			stubMigrationEvaluator{},
-<<<<<<< HEAD
 			[]string{},
 			[]string{},
-=======
 			podInformer,
 			nsInformer,
 			nodeInformer,
->>>>>>> dede36a4f4 (Apply patch 027-auto-migrate-if-nodeplacement-changed.patch)
 		)
 		app.rsController, _ = replicaset.NewController(vmiInformer, rsInformer, recorder, virtClient, uint(10))
 		app.vmController, _ = vm.NewVMController(vmiInformer,

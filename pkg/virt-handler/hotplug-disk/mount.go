@@ -348,7 +348,7 @@ func (m *volumeMounter) mountFromPod(vmi *v1.VirtualMachineInstance, sourceUID t
 	}
 
 	for _, volumeStatus := range vmi.Status.VolumeStatus {
-		if volumeStatus.HotplugVolume == nil {
+		if volumeStatus.HotplugVolume == nil || volumeStatus.ContainerDiskVolume != nil {
 			// Skip non hotplug volumes
 			continue
 		}

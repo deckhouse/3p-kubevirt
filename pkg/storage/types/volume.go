@@ -24,6 +24,8 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	v1 "kubevirt.io/api/core/v1"
+
+	containerdisk "kubevirt.io/kubevirt/pkg/container-disk"
 )
 
 func IsStorageVolume(volume *v1.Volume) bool {
@@ -61,6 +63,9 @@ func IsHotplugVolume(vol *v1.Volume) bool {
 	if volSrc.MemoryDump != nil && volSrc.MemoryDump.PersistentVolumeClaimVolumeSource.Hotpluggable {
 		return true
 	}
+	if volSrc.ContainerDisk != nil && volSrc.ContainerDisk.Hotpluggable {
+		return true
+	}
 
 	return false
 }
@@ -84,7 +89,7 @@ func GetHotplugVolumes(vmi *v1.VirtualMachineInstance, virtlauncherPod *k8sv1.Po
 		podVolumeMap[podVolume.Name] = podVolume
 	}
 	for _, vmiVolume := range vmiVolumes {
-		if _, ok := podVolumeMap[vmiVolume.Name]; !ok && IsHotpluggableVolumeSource(&vmiVolume) {
+		if _, ok := podVolumeMap[vmiVolume.Name]; !ok && (IsHotpluggableVolumeSource(&vmiVolume) || containerdisk.IsHotplugContainerDisk(&vmiVolume)) {
 			hotplugVolumes = append(hotplugVolumes, vmiVolume.DeepCopy())
 		}
 	}

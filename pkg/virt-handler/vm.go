@@ -122,6 +122,8 @@ type VirtualMachineController struct {
 	vmiGlobalStore           cache.Store
 	multipathSocketMonitor   *multipathmonitor.MultipathSocketMonitor
 	cbtHandler               *CBTHandler
+
+	hotplugContainerDiskMounter containerdisk.HotplugMounter
 }
 
 var getCgroupManager = func(vmi *v1.VirtualMachineInstance, host string, hypervisorNodeInfo hypervisor.HypervisorNodeInformation, allowEmulation bool) (cgroup.Manager, error) {
@@ -210,6 +212,13 @@ func NewVirtualMachineController(
 		multipathSocketMonitor:   multipathmonitor.NewMultipathSocketMonitor(),
 		cbtHandler:               cbtHandler,
 		pluginExecutor:           pluginExecutor,
+
+		hotplugContainerDiskMounter: containerdisk.NewHotplugMounter(
+			podIsolationDetector,
+			filepath.Join(virtPrivateDir, "hotplug-container-disk-mount-state"),
+			clusterConfig,
+			hotplugdisk.NewHotplugDiskManager(kubeletPodsDir),
+		),
 	}
 
 	_, err = vmiInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
@@ -499,7 +508,16 @@ func (c *VirtualMachineController) updateHotplugVolumeStatus(vmi *v1.VirtualMach
 	needsRefresh := false
 	if volumeStatus.Target == "" {
 		needsRefresh = true
-		mounted, err := c.hotplugVolumeMounter.IsMounted(vmi, volumeStatus.Name, volumeStatus.HotplugVolume.AttachPodUID)
+
+		var (
+			mounted bool
+			err     error
+		)
+		if volumeStatus.ContainerDiskVolume != nil {
+			mounted, err = c.hotplugContainerDiskMounter.IsMounted(vmi, volumeStatus.Name)
+		} else {
+			mounted, err = c.hotplugVolumeMounter.IsMounted(vmi, volumeStatus.Name, volumeStatus.HotplugVolume.AttachPodUID)
+		}
 		if err != nil {
 			c.logger.Object(vmi).Errorf("error occurred while checking if volume is mounted: %v", err)
 		}
@@ -595,17 +613,28 @@ func (c *VirtualMachineController) updateChecksumInfo(vmi *v1.VirtualMachineInst
 	if err != nil {
 		return err
 	}
+	hotplugDiskChecksums, err := c.hotplugContainerDiskMounter.ComputeChecksums(vmi, "")
+	if goerror.Is(err, containerdisk.ErrDiskContainerGone) {
+		log.Log.Errorf("cannot compute checksums as hotplug containerdisk containers seem to have been terminated")
+		return nil
+	}
+	if err != nil {
+		return err
+	}
 
 	// containerdisks
 	for i := range vmi.Status.VolumeStatus {
 		checksum, exists := diskChecksums.ContainerDiskChecksums[vmi.Status.VolumeStatus[i].Name]
-		if !exists {
-			// not a containerdisk
-			continue
+		if exists {
+			vmi.Status.VolumeStatus[i].ContainerDiskVolume = &v1.ContainerDiskInfo{
+				Checksum: checksum,
+			}
 		}
-
-		vmi.Status.VolumeStatus[i].ContainerDiskVolume = &v1.ContainerDiskInfo{
-			Checksum: checksum,
+		hotplugChecksum, hotplugExists := hotplugDiskChecksums.ContainerDiskChecksums[vmi.Status.VolumeStatus[i].Name]
+		if hotplugExists {
+			vmi.Status.VolumeStatus[i].ContainerDiskVolume = &v1.ContainerDiskInfo{
+				Checksum: hotplugChecksum,
+			}
 		}
 	}
 
@@ -1616,6 +1645,11 @@ func (c *VirtualMachineController) processVmCleanup(vmi *v1.VirtualMachineInstan
 		return err
 	}
 
+	err := c.hotplugContainerDiskMounter.UmountAll(vmi)
+	if err != nil {
+		return err
+	}
+
 	// UnmountAll does the cleanup on the "best effort" basis: it is
 	// safe to pass a nil cgroupManager.
 	cgroupManager, _ := getCgroupManager(vmi, c.host, c.hypervisorNodeInfo, c.clusterConfig.AllowEmulation())
@@ -1982,6 +2016,9 @@ func (c *VirtualMachineController) vmUpdateHelperDefault(vmi *v1.VirtualMachineI
 
 	if vmi.IsRunning() {
 		// Umount any disks no longer mounted
+		if err := c.hotplugContainerDiskMounter.Umount(vmi); err != nil {
+			return err
+		}
 		if err := c.hotplugVolumeMounter.Unmount(vmi, cgroupManager); err != nil {
 			return err
 		}
@@ -2004,6 +2041,11 @@ func (c *VirtualMachineController) handleVMIState(vmi *v1.VirtualMachineInstance
 func (c *VirtualMachineController) handleRunningVMI(vmi *v1.VirtualMachineInstance, cgroupManager cgroup.Manager, errorTolerantFeaturesError *[]error) error {
 	if err := c.hotplugSriovInterfaces(vmi); err != nil {
 		c.logger.Object(vmi).Error(err.Error())
+	}
+
+	_, err := c.hotplugContainerDiskMounter.MountAndVerify(vmi)
+	if err != nil {
+		return err
 	}
 
 	if err := c.hotplugVolumeMounter.Mount(vmi, cgroupManager); err != nil {
@@ -2064,6 +2106,12 @@ func (c *VirtualMachineController) handleStartingVMI(
 	err = c.containerDiskMounter.MountAndVerify(vmi)
 	if err != nil {
 		return false, err
+	}
+
+	if ready, err := c.hotplugContainerDiskMounter.ContainerDisksReady(vmi, info.NotInitializedSince, ""); ready && err == nil {
+		if _, err := c.hotplugContainerDiskMounter.MountAndVerify(vmi); err != nil {
+			return false, err
+		}
 	}
 
 	if err := c.hotplugVolumeMounter.Mount(vmi, cgroupManager); err != nil {
