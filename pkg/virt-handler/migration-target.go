@@ -51,6 +51,7 @@ import (
 	"kubevirt.io/kubevirt/pkg/controller"
 	cmdv1 "kubevirt.io/kubevirt/pkg/handler-launcher-com/cmd/v1"
 	hostdisk "kubevirt.io/kubevirt/pkg/host-disk"
+	hotplugdisk "kubevirt.io/kubevirt/pkg/hotplug-disk"
 	"kubevirt.io/kubevirt/pkg/network/domainspec"
 	netsetup "kubevirt.io/kubevirt/pkg/network/setup"
 	"kubevirt.io/kubevirt/pkg/pointer"
@@ -65,6 +66,11 @@ import (
 	launcher_clients "kubevirt.io/kubevirt/pkg/virt-handler/launcher-clients"
 	migrationproxy "kubevirt.io/kubevirt/pkg/virt-handler/migration-proxy"
 	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/api"
+)
+
+var (
+	ErrChecksumMissing  = goerror.New("missing checksum")
+	ErrChecksumMismatch = goerror.New("checksum mismatch")
 )
 
 type netBindingPluginMemoryCalculator interface {
@@ -92,6 +98,7 @@ type MigrationTargetController struct {
 	podIsolationDetector             isolation.PodIsolationDetector
 	recorder                         record.EventRecorder
 	virtLauncherFSRunDirPattern      string
+	hotplugContainerDiskMounter      container_disk.HotplugMounter
 }
 
 func NewMigrationTargetController(
@@ -157,6 +164,13 @@ func NewMigrationTargetController(
 		podIsolationDetector:             podIsolationDetector,
 		recorder:                         recorder,
 		virtLauncherFSRunDirPattern:      "/proc/%d/root/var/run",
+
+		hotplugContainerDiskMounter: container_disk.NewHotplugMounter(
+			podIsolationDetector,
+			filepath.Join(virtPrivateDir, "hotplug-container-disk-mount-state"),
+			clusterConfig,
+			hotplugdisk.NewHotplugDiskManager(kubeletPodsDir),
+		),
 	}
 
 	_, err = vmiInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
@@ -625,11 +639,45 @@ func (c *MigrationTargetController) syncVolumes(vmi *v1.VirtualMachineInstance) 
 		c.queue.AddAfter(controller.VirtualMachineInstanceKey(vmi), time.Second*1)
 		return container_disk.ErrWaitingForDisks
 	}
+	client, err := c.launcherClients.GetLauncherClient(vmi)
+	if err != nil {
+		return err
+	}
+
+	if uid, found := container_disk.GetMigrationAttachmentPodUID(vmi); found {
+		if ready, err := c.hotplugContainerDiskMounter.ContainerDisksReady(vmi, info.NotInitializedSince, uid); !ready {
+			if err != nil {
+				return err
+			}
+			c.queue.AddAfter(controller.VirtualMachineInstanceKey(vmi), time.Second*1)
+			return nil
+		}
+		// Verify hotplug container disks checksum
+		err = container_disk.VerifyHotplugChecksums(c.hotplugContainerDiskMounter, vmi, uid)
+		switch {
+		case goerror.Is(err, ErrChecksumMissing):
+			// wait for checksum to be computed by the source virt-handler
+			return err
+		case goerror.Is(err, ErrChecksumMismatch):
+			log.Log.Object(vmi).Infof("HotplugContainerdisk checksum mismatch, terminating target pod: %s", err)
+			c.recorder.Event(vmi, k8sv1.EventTypeNormal, "HotplugContainerDiskFailedChecksum", "Aborting migration as the source and target containerdisks do not match")
+			return client.SignalTargetPodCleanup(vmi)
+		case err != nil:
+			return err
+		}
+	}
 
 	// Mount container disks
 	err = c.containerDiskMounter.MountAndVerify(vmi)
 	if err != nil {
 		return err
+	}
+
+	if uid, found := container_disk.GetMigrationAttachmentPodUID(vmi); found {
+		_, err := c.hotplugContainerDiskMounter.MoundAndVerifyFromPod(vmi, uid)
+		if err != nil {
+			return err
+		}
 	}
 
 	// Mount hotplug disks

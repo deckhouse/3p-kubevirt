@@ -35,12 +35,12 @@ import (
 	"github.com/mitchellh/go-ps"
 	"github.com/opencontainers/runc/libcontainer/cgroups"
 	"golang.org/x/sys/unix"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/types"
 	"libvirt.org/go/libvirtxml"
 
 	k8sv1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
-	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -51,6 +51,7 @@ import (
 	v1 "kubevirt.io/api/core/v1"
 	"kubevirt.io/client-go/kubecli"
 	"kubevirt.io/client-go/log"
+	"kubevirt.io/kubevirt/pkg/network/domainspec"
 
 	"kubevirt.io/kubevirt/pkg/config"
 	"kubevirt.io/kubevirt/pkg/controller"
@@ -58,7 +59,6 @@ import (
 	"kubevirt.io/kubevirt/pkg/executor"
 	hostdisk "kubevirt.io/kubevirt/pkg/host-disk"
 	hotplugdisk "kubevirt.io/kubevirt/pkg/hotplug-disk"
-	"kubevirt.io/kubevirt/pkg/network/domainspec"
 	neterrors "kubevirt.io/kubevirt/pkg/network/errors"
 	netsetup "kubevirt.io/kubevirt/pkg/network/setup"
 	netvmispec "kubevirt.io/kubevirt/pkg/network/vmispec"
@@ -99,28 +99,29 @@ type downwardMetricsManager interface {
 
 type VirtualMachineController struct {
 	*BaseController
-	launcherClients          launcher_clients.LauncherClientsManager
-	capabilities             *libvirtxml.Caps
-	clientset                kubecli.KubevirtClient
-	containerDiskMounter     container_disk.Mounter
-	downwardMetricsManager   downwardMetricsManager
-	hotplugVolumeMounter     hotplug_volume.VolumeMounter
-	hostCpuModel             string
-	ioErrorRetryManager      *FailRetryManager
-	queue                    workqueue.TypedRateLimitingInterface[string]
-	deviceManagerController  *device_manager.DeviceController
-	heartBeat                *heartbeat.HeartBeat
-	heartBeatInterval        time.Duration
-	migrationProxy           migrationproxy.ProxyManager
-	netConf                  netconf
-	netStat                  netstat
-	podIsolationDetector     isolation.PodIsolationDetector
-	recorder                 record.EventRecorder
-	sriovHotplugExecutorPool *executor.RateLimitedExecutorPool
-	vmiExpectations          *controller.UIDTrackingControllerExpectations
-	vmiGlobalStore           cache.Store
-	multipathSocketMonitor   *multipath_monitor.MultipathSocketMonitor
-	nam                      *migrations.NetworkAccessibilityManager
+	launcherClients             launcher_clients.LauncherClientsManager
+	capabilities                *libvirtxml.Caps
+	clientset                   kubecli.KubevirtClient
+	containerDiskMounter        container_disk.Mounter
+	downwardMetricsManager      downwardMetricsManager
+	hotplugVolumeMounter        hotplug_volume.VolumeMounter
+	hostCpuModel                string
+	ioErrorRetryManager         *FailRetryManager
+	queue                       workqueue.TypedRateLimitingInterface[string]
+	deviceManagerController     *device_manager.DeviceController
+	heartBeat                   *heartbeat.HeartBeat
+	heartBeatInterval           time.Duration
+	migrationProxy              migrationproxy.ProxyManager
+	netConf                     netconf
+	netStat                     netstat
+	podIsolationDetector        isolation.PodIsolationDetector
+	recorder                    record.EventRecorder
+	sriovHotplugExecutorPool    *executor.RateLimitedExecutorPool
+	vmiExpectations             *controller.UIDTrackingControllerExpectations
+	vmiGlobalStore              cache.Store
+	multipathSocketMonitor      *multipath_monitor.MultipathSocketMonitor
+	hotplugContainerDiskMounter container_disk.HotplugMounter
+	nam                         *migrations.NetworkAccessibilityManager
 }
 
 var getCgroupManager = func(vmi *v1.VirtualMachineInstance, host string) (cgroup.Manager, error) {
@@ -195,10 +196,17 @@ func NewVirtualMachineController(
 		vmiGlobalStore:           vmiGlobalStore,
 		multipathSocketMonitor:   multipath_monitor.NewMultipathSocketMonitor(),
 
+		hotplugContainerDiskMounter: container_disk.NewHotplugMounter(
+			podIsolationDetector,
+			filepath.Join(virtPrivateDir, "hotplug-container-disk-mount-state"),
+			clusterConfig,
+			hotplugdisk.NewHotplugDiskManager(kubeletPodsDir),
+		),
+
 		nam: migrations.NewNetworkAccessibilityManager(clientset),
 	}
 
-	c.hotplugVolumeMounter = hotplug_volume.NewVolumeMounterWithCreator(filepath.Join(virtPrivateDir, "hotplug-volume-mount-state"), kubeletPodsDir,
+	c.hotplugVolumeMounter = hotplug_volume.NewVolumeMounterWithCreator(filepath.Join(virtPrivateDir, "hotplug-volume-mount-state"), kubeletPodsDir, "master",
 		func() hostdisk.PVCDiskImgCreator {
 			return hostdisk.NewPVCDiskImgCreator(recorder, c.clusterConfig.GetLessPVCSpaceToleration(), c.clusterConfig.GetMinimumReservePVCBytes())
 		})
@@ -492,7 +500,15 @@ func (c *VirtualMachineController) updateHotplugVolumeStatus(vmi *v1.VirtualMach
 	needsRefresh := false
 	if volumeStatus.Target == "" {
 		needsRefresh = true
-		mounted, err := c.hotplugVolumeMounter.IsMounted(vmi, volumeStatus.Name, volumeStatus.HotplugVolume.AttachPodUID)
+		var (
+			mounted bool
+			err     error
+		)
+		if volumeStatus.ContainerDiskVolume != nil {
+			mounted, err = c.hotplugContainerDiskMounter.IsMounted(vmi, volumeStatus.Name)
+		} else {
+			mounted, err = c.hotplugVolumeMounter.IsMounted(vmi, volumeStatus.Name, volumeStatus.HotplugVolume.AttachPodUID)
+		}
 		if err != nil {
 			log.Log.Object(vmi).Errorf("error occurred while checking if volume is mounted: %v", err)
 		}
@@ -588,17 +604,28 @@ func (c *VirtualMachineController) updateChecksumInfo(vmi *v1.VirtualMachineInst
 	if err != nil {
 		return err
 	}
+	hotplugDiskChecksums, err := c.hotplugContainerDiskMounter.ComputeChecksums(vmi, "")
+	if goerror.Is(err, container_disk.ErrDiskContainerGone) {
+		log.Log.Errorf("cannot compute checksums as hotplug containerdisk containers seem to have been terminated")
+		return nil
+	}
+	if err != nil {
+		return err
+	}
 
 	// containerdisks
 	for i := range vmi.Status.VolumeStatus {
 		checksum, exists := diskChecksums.ContainerDiskChecksums[vmi.Status.VolumeStatus[i].Name]
-		if !exists {
-			// not a containerdisk
-			continue
+		if exists {
+			vmi.Status.VolumeStatus[i].ContainerDiskVolume = &v1.ContainerDiskInfo{
+				Checksum: checksum,
+			}
 		}
-
-		vmi.Status.VolumeStatus[i].ContainerDiskVolume = &v1.ContainerDiskInfo{
-			Checksum: checksum,
+		hotplugChecksum, hotplugExists := hotplugDiskChecksums.ContainerDiskChecksums[vmi.Status.VolumeStatus[i].Name]
+		if hotplugExists {
+			vmi.Status.VolumeStatus[i].ContainerDiskVolume = &v1.ContainerDiskInfo{
+				Checksum: hotplugChecksum,
+			}
 		}
 	}
 
@@ -1527,6 +1554,11 @@ func (c *VirtualMachineController) processVmCleanup(vmi *v1.VirtualMachineInstan
 		return err
 	}
 
+	err := c.hotplugContainerDiskMounter.UmountAll(vmi)
+	if err != nil {
+		return err
+	}
+
 	// UnmountAll does the cleanup on the "best effort" basis: it is
 	// safe to pass a nil cgroupManager.
 	cgroupManager, _ := getCgroupManager(vmi, c.host)
@@ -1964,6 +1996,23 @@ func (c *VirtualMachineController) vmUpdateHelperDefault(vmi *v1.VirtualMachineI
 	if err != nil {
 		return err
 	}
+	err = c.containerDiskMounter.MountAndVerify(vmi)
+	if err != nil {
+		return err
+	}
+
+	info := c.launcherClients.GetLauncherClientInfo(vmi)
+	if ready, err := c.hotplugContainerDiskMounter.ContainerDisksReady(vmi, info.NotInitializedSince, ""); ready && err != nil {
+		_, err := c.hotplugContainerDiskMounter.MountAndVerify(vmi)
+		if err != nil {
+			return err
+		}
+	}
+
+	// Try to mount hotplug volume if there is any during startup.
+	if err := c.hotplugVolumeMounter.Mount(vmi, cgroupManager); err != nil {
+		return err
+	}
 
 	// Post-sync housekeeping
 	err = c.handleHousekeeping(vmi, cgroupManager, domainExists)
@@ -1988,6 +2037,10 @@ func (c *VirtualMachineController) handleVMIState(vmi *v1.VirtualMachineInstance
 func (c *VirtualMachineController) handleRunningVMI(vmi *v1.VirtualMachineInstance, cgroupManager cgroup.Manager, errorTolerantFeaturesError *[]error) error {
 	if err := c.hotplugSriovInterfaces(vmi); err != nil {
 		log.Log.Object(vmi).Error(err.Error())
+	}
+	_, err := c.hotplugContainerDiskMounter.MountAndVerify(vmi)
+	if err != nil {
+		return err
 	}
 
 	if err := c.hotplugVolumeMounter.Mount(vmi, cgroupManager); err != nil {
@@ -2139,6 +2192,9 @@ func (c *VirtualMachineController) handleHousekeeping(vmi *v1.VirtualMachineInst
 
 	if vmi.IsRunning() {
 		// Umount any disks no longer mounted
+		if err := c.hotplugContainerDiskMounter.Umount(vmi); err != nil {
+			return err
+		}
 		if err := c.hotplugVolumeMounter.Unmount(vmi, cgroupManager); err != nil {
 			return err
 		}
