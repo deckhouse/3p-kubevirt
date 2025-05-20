@@ -1652,6 +1652,16 @@ func (c *VirtualMachineController) processVmCleanup(vmi *v1.VirtualMachineInstan
 	c.logger.Object(vmi).Infof("Performing final local cleanup for vmi with uid %s", vmiId)
 	c.lastSeenPanicCount.Delete(vmiId)
 
+	if !c.isMigrationSource(vmi) {
+		client, err := c.launcherClients.GetLauncherClient(vmi)
+		if err != nil {
+			return fmt.Errorf("failed to get virt-launcher client")
+		}
+		if err = c.StopMigrationProxyInVirtLauncher(client); err != nil {
+			return fmt.Errorf("failed to stop migration proxy in virt launcher")
+		}
+	}
+
 	c.migrationProxy.StopTargetListener(vmiId)
 	c.migrationProxy.StopSourceListener(vmiId)
 
@@ -2652,4 +2662,8 @@ func (d *VirtualMachineController) HotplugHostDevices(client cmdclient.LauncherC
 	}
 	d.checksumCtrl.Set(control)
 	return nil
+}
+
+func (d *VirtualMachineController) StopMigrationProxyInVirtLauncher(client cmdclient.LauncherClient) error {
+	return client.MigrationProxy(cmdclient.MigrationProxyActionStop)
 }

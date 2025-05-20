@@ -880,6 +880,36 @@ func (l *Launcher) GetAppliedVMIChecksum(_ context.Context, _ *cmdv1.EmptyReques
 	return response, nil
 }
 
+func (l *Launcher) MigrationProxy(_ context.Context, req *cmdv1.MigrationProxyRequest) (*cmdv1.Response, error) {
+	response := &cmdv1.Response{
+		Success: true,
+	}
+	if req == nil {
+		response.Success = false
+		response.Message = getErrorMessage(fmt.Errorf("nil request"))
+		return response, nil
+	}
+
+	switch req.Action {
+	case cmdv1.MigrationProxyAction_START:
+		response.Message = "Migration proxy was started"
+	case cmdv1.MigrationProxyAction_STOP:
+		response.Message = "Migration proxy was stopped"
+	default:
+		response.Success = false
+		response.Message = getErrorMessage(fmt.Errorf("unsupported action %d", req.Action))
+		return response, nil
+	}
+
+	if err := l.domainManager.MigrationProxy(req.GetAction()); err != nil {
+		response.Success = false
+		response.Message = getErrorMessage(err)
+		return response, nil
+	}
+
+	return response, nil
+}
+
 func ReceivedEarlyExitSignal() bool {
 	_, earlyExit := os.LookupEnv(receivedEarlyExitSignalEnvVar)
 	return earlyExit
