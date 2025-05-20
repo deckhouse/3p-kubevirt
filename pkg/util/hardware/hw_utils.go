@@ -37,6 +37,8 @@ const (
 	PCI_ADDRESS_PATTERN = `^([\da-fA-F]{4}):([\da-fA-F]{2}):([\da-fA-F]{2})\.([0-7]{1})$`
 
 	MAX_CPU_LIMIT = 50000
+
+	MaxSCSISerialLen = 36
 )
 
 // Parse linux cpuset into an array of ints
@@ -409,4 +411,11 @@ func memNodeHostToGuestNUMAMap(numa *api.NUMA, numaTune *api.NUMATune) (map[uint
 	}
 
 	return results, warnings
+}
+
+func TruncateSCSIDiskSerial(serial string) string {
+	if len(serial) <= MaxSCSISerialLen {
+		return serial
+	}
+	return string([]byte(serial)[:MaxSCSISerialLen])
 }

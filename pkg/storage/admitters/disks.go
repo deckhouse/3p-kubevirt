@@ -244,6 +244,17 @@ func validateSerialNumValue(field *k8sfield.Path, idx int, disk v1.Disk) []metav
 
 func validateSerialNumLength(field *k8sfield.Path, idx int, disk v1.Disk) []metav1.StatusCause {
 	var causes []metav1.StatusCause
+
+	// A SCSI device reports its serial through a fixed-width field, so the limit
+	// there is tighter than the generic one.
+	if disk.Disk != nil && disk.Disk.Bus == v1.DiskBusSCSI && len(disk.Serial) > hwutil.MaxSCSISerialLen {
+		causes = append(causes, metav1.StatusCause{
+			Type:    metav1.CauseTypeFieldValueInvalid,
+			Message: fmt.Sprintf("SCSI device serial should not be more than %d symbols. Got %d (%s) for disk %s", hwutil.MaxSCSISerialLen, len(disk.Serial), disk.Serial, field.Index(idx).String()),
+			Field:   field.Index(idx).Child("serial").String(),
+		})
+	}
+
 	if disk.Serial != "" && len([]rune(disk.Serial)) > maxStrLen {
 		causes = append(causes, metav1.StatusCause{
 			Type:    metav1.CauseTypeFieldValueInvalid,
