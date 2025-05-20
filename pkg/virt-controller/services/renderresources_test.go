@@ -561,7 +561,11 @@ var _ = Describe("Resource pod spec renderer", func() {
 		})
 	})
 
+<<<<<<< HEAD
 	It("WithSEV option adds SEV device resource", func() {
+=======
+	PIt("WithSEV option adds ", func() {
+>>>>>>> 85ef848954 (Apply patch 032-fix-virt-controller-tests.patch)
 		sevResourceKey := kubev1.ResourceName("devices.kubevirt.io/sev")
 		rr = NewResourceRenderer(nil, nil, WithSEV())
 		Expect(rr.Requests()).To(Equal(kubev1.ResourceList{
