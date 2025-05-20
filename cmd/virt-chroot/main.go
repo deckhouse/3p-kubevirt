@@ -71,16 +71,39 @@ func main() {
 		Args:  cobra.MinimumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var mntOpts uint = 0
+			var dataOpts []string
 
 			fsType := cmd.Flag("type").Value.String()
 			mntOptions := cmd.Flag("options").Value.String()
+			var (
+				uid = -1
+				gid = -1
+			)
 			for _, opt := range strings.Split(mntOptions, ",") {
 				opt = strings.TrimSpace(opt)
-				switch opt {
-				case "ro":
+				switch {
+				case opt == "ro":
 					mntOpts = mntOpts | syscall.MS_RDONLY
-				case "bind":
+				case opt == "bind":
 					mntOpts = mntOpts | syscall.MS_BIND
+				case opt == "remount":
+					mntOpts = mntOpts | syscall.MS_REMOUNT
+				case strings.HasPrefix(opt, "uid="):
+					uidS := strings.TrimPrefix(opt, "uid=")
+					uidI, err := strconv.Atoi(uidS)
+					if err != nil {
+						return fmt.Errorf("failed to parse uid: %w", err)
+					}
+					uid = uidI
+					dataOpts = append(dataOpts, opt)
+				case strings.HasPrefix(opt, "gid="):
+					gidS := strings.TrimPrefix(opt, "gid=")
+					gidI, err := strconv.Atoi(gidS)
+					if err != nil {
+						return fmt.Errorf("failed to parse gid: %w", err)
+					}
+					gid = gidI
+					dataOpts = append(dataOpts, opt)
 				default:
 					return fmt.Errorf("mount option %s is not supported", opt)
 				}
@@ -103,8 +126,17 @@ func main() {
 				return fmt.Errorf("mount target invalid: %v", err)
 			}
 			defer targetFile.Close()
-
-			return syscall.Mount(sourceFile.SafePath(), targetFile.SafePath(), fsType, uintptr(mntOpts), "")
+			if uid >= 0 && gid >= 0 {
+				err = os.Chown(targetFile.SafePath(), uid, gid)
+				if err != nil {
+					return fmt.Errorf("chown target failed: %w", err)
+				}
+			}
+			var data string
+			if len(dataOpts) > 0 {
+				data = strings.Join(dataOpts, ",")
+			}
+			return syscall.Mount(sourceFile.SafePath(), targetFile.SafePath(), fsType, uintptr(mntOpts), data)
 		},
 	}
 	mntCmd.Flags().StringP("options", "o", "", "comma separated list of mount options")
