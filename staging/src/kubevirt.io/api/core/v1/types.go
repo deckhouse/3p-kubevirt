@@ -738,6 +738,9 @@ const (
 
 	// VirtualMachineInstanceSoftwareEmulation indicates the VM is running with software emulation
 	VirtualMachineInstanceSoftwareEmulation VirtualMachineInstanceConditionType = "SoftwareEmulation"
+
+	// Indicates that the VMI has affinity or nodeSelector changes
+	VirtualMachineInstanceNodePlacementNotMatched VirtualMachineInstanceConditionType = "NodePlacementNotMatched"
 )
 
 // These are valid reasons for VMI conditions.
