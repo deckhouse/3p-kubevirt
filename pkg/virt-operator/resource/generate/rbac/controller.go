@@ -424,6 +424,18 @@ func baseControllerClusterRole() *rbacv1.ClusterRole {
 			},
 			{
 				APIGroups: []string{
+					"subresources.virtualization.deckhouse.io",
+				},
+				Resources: []string{
+					"virtualmachines/addvolume",
+					"virtualmachines/removevolume",
+				},
+				Verbs: []string{
+					"update",
+				},
+			},
+			{
+				APIGroups: []string{
 					"subresources.kubevirt.io",
 				},
 				Resources: []string{
