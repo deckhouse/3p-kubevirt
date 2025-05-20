@@ -144,8 +144,7 @@ func NewHandlerDaemonSet(config *operatorutil.KubeVirtDeploymentConfig, productN
 	pod.InitContainers = []corev1.Container{
 		{
 			Command: []string{
-				"/bin/sh",
-				"-c",
+				"node-labeller",
 			},
 			Image: launcherImage,
 			Name:  "virt-launcher",
@@ -410,5 +409,4 @@ func NewHandlerDaemonSet(config *operatorutil.KubeVirtDeploymentConfig, productN
 		pod.Containers = append(pod.Containers, RenderPrHelperContainer(prHelperImage, config.GetImagePullPolicy()))
 	}
 	return daemonset
-
 }
