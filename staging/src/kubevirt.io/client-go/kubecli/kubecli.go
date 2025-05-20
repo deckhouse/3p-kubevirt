@@ -100,7 +100,7 @@ var k8sOnce sync.Once
 // the different controller generators which normally add these flags too.
 func Init() {
 	if flag.CommandLine.Lookup("kubeconfig") == nil {
-		flag.StringVar(&kubeconfig, "kubeconfig", "", "absolute path to the kubeconfig file")
+		flag.StringVar(&kubeconfig, "kubeconfig", os.Getenv("KUBECONFIG"), "absolute path to the kubeconfig file")
 	}
 	if flag.CommandLine.Lookup("master") == nil {
 		flag.StringVar(&master, "master", "", "master url")
