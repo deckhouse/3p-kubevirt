@@ -206,7 +206,8 @@ var _ = Describe("Application", func() {
 			CRDInformer:               crdInformer,
 			DVInformer:                dvInformer,
 			Recorder:                  recorder,
-			ResyncPeriod:              60 * time.Second,
+			// The specified resyncPeriod 1m0s is invalid because this shared informer doesn't support resyncing.
+			// ResyncPeriod:              60 * time.Second,
 		}
 		_ = app.snapshotController.Init()
 		app.restoreController = &snapshot.VMRestoreController{
