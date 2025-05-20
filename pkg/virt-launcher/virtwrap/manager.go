@@ -1206,6 +1206,9 @@ func (l *LibvirtDomainManager) generateConverterContext(vmi *v1.VirtualMachineIn
 
 	var efiConf *convertertypes.EFIConfiguration
 	if vmi.IsBootloaderEFI() {
+		const ann = "virtualization.deckhouse.io/os-type"
+		const windows = "Windows"
+
 		secureBoot := vmi.Spec.Domain.Firmware.Bootloader.EFI.SecureBoot == nil || *vmi.Spec.Domain.Firmware.Bootloader.EFI.SecureBoot
 		sev := kutil.IsSEVVMI(vmi) && !kutil.IsSEVSNPVMI(vmi)
 		snp := kutil.IsSEVSNPVMI(vmi)
@@ -1218,6 +1221,23 @@ func (l *LibvirtDomainManager) generateConverterContext(vmi *v1.VirtualMachineIn
 			vmType = efi.SNP
 		} else if tdx {
 			vmType = efi.TDX
+		}
+
+		/*
+			Kubevirt uses OVFM_CODE.secboot.fd in 2 combinations: OVFM_CODE.secboot.fd + OVFM_VARS.secboot.fd when secboot is enabled and OVFM_CODE.secboot.fd + OVFM_VARS.fd when secboot is disabled.
+			It works fine with original CentOS based virt-launcher in both secboot modes.
+			We use ALTLinux based virt-launcher, and it fails to start Linux VM with more than 12 CPUs in secboot disabled mode.
+
+			Kubevirt uses the vmType to detect firmware combinations in converter.
+			EFIConfiguration, so we can't set needed files directly.
+			But there is combination for SEV: OVFM_CODE.cc.fd + OVMF_VARS.fd that works for Linux, because OVFM_CODE.cc.fd is actually a symlink to OVFM_CODE.fd.
+			So, we force the SEV combination for non-Windows virtual machines without Secure Boot:
+			SEV firmware cannot boot with Secure Boot, which keeps using the secboot firmware.
+		*/
+		if vmType == efi.None && !secureBoot {
+			if a := vmi.GetAnnotations()[ann]; a != windows {
+				vmType = efi.SEV
+			}
 		}
 
 		if secureBoot && vmType == efi.None && l.firmwareAutoSelectionEnabled {

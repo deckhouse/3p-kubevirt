@@ -3507,6 +3507,40 @@ var _ = Describe("Manager", func() {
 		)
 	})
 
+	DescribeTable("should pick the EFI firmware for a non-Windows guest", func(secureBoot bool, efiCodeFile, efiVarsFile string) {
+		vmi := newVMI(testNamespace, testVmName)
+		vmi.Spec.Domain.Firmware = &v1.Firmware{
+			Bootloader: &v1.Bootloader{
+				EFI: &v1.EFI{
+					SecureBoot: virtpointer.P(secureBoot),
+				},
+			},
+		}
+
+		ovmfDir, err := os.MkdirTemp("", "ovmfdir")
+		Expect(err).ToNot(HaveOccurred())
+		DeferCleanup(os.RemoveAll, ovmfDir)
+		for _, f := range []string{efi.EFICodeSecureBoot, efi.EFIVarsSecureBoot, efi.EFICodeSEV, efi.EFIVars} {
+			Expect(os.WriteFile(filepath.Join(ovmfDir, f), []byte("data"), 0644)).To(Succeed())
+		}
+
+		manager, err := NewLibvirtDomainManager(mockLibvirt.VirtConnection, testVirtShareDir, testEphemeralDiskDir, nil, ovmfDir, ephemeralDiskCreatorMock, metadataCache, nil, virtconfig.DefaultDiskVerificationMemoryLimitBytes, fakeCpuSetGetter, false, false, nil, v1.KvmHypervisorName, nil, "", false, false, false)
+		Expect(err).ToNot(HaveOccurred())
+		libvirtManager := manager.(*LibvirtDomainManager)
+		libvirtManager.efiEnvironment = efi.DetectEFIEnvironment("amd64", ovmfDir)
+
+		converterContext, err := libvirtManager.generateConverterContext(vmi, true, &cmdv1.VirtualMachineOptions{VirtualMachineSMBios: &cmdv1.SMBios{}}, false)
+
+		Expect(err).ToNot(HaveOccurred())
+		Expect(converterContext.EFIConfiguration).ToNot(BeNil())
+		Expect(converterContext.EFIConfiguration.SecureLoader).To(Equal(secureBoot))
+		Expect(converterContext.EFIConfiguration.EFICode).To(Equal(filepath.Join(ovmfDir, efiCodeFile)))
+		Expect(converterContext.EFIConfiguration.EFIVars).To(Equal(filepath.Join(ovmfDir, efiVarsFile)))
+	},
+		Entry("forced SEV combination without secure boot", false, efi.EFICodeSEV, efi.EFIVars),
+		Entry("secboot firmware with secure boot", true, efi.EFICodeSecureBoot, efi.EFIVarsSecureBoot),
+	)
+
 	Context("FirmwareAutoSelection feature gate integration", func() {
 		var vmi *v1.VirtualMachineInstance
 
