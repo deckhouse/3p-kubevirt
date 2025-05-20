@@ -1266,8 +1266,9 @@ func (c *Controller) handleTargetPodHandoff(migration *virtv1.VirtualMachineInst
 		}
 	}
 
-	if err := c.matchMigrationPolicy(vmiCopy); err != nil {
-		return fmt.Errorf("failed to match migration policy: %v", err)
+	// External migration configuration: Do not set migrationConfiguration from MigrationPolicies, just preserve it for the running migration if was set externally.
+	if vmi.Status.MigrationState != nil && vmi.Status.MigrationState.VMIMConfigurationOptions != nil && vmi.Status.MigrationState.EndTimestamp == nil {
+		vmiCopy.Status.MigrationState.VMIMConfigurationOptions = vmi.Status.MigrationState.VMIMConfigurationOptions.DeepCopy()
 	}
 
 	if controller.VMIHasHotplugCPU(vmi) && vmi.IsCPUDedicated() {

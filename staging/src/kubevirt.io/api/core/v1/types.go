@@ -651,8 +651,8 @@ func (v *VirtualMachineInstance) IsMigrationCompleted() bool {
 // migration state is not nil. Essentially this happens after the migration resource is created.
 func (v *VirtualMachineInstance) IsMigrationSynchronized(migration *VirtualMachineInstanceMigration) bool {
 	if migration.IsDecentralized() {
-		return v.Status.MigrationState != nil && v.Status.MigrationState.SourceState != nil &&
-			v.Status.MigrationState.TargetState != nil &&
+		return v.Status.MigrationState != nil && v.Status.MigrationState.VMIMConfigurationOptions != nil &&
+			v.Status.MigrationState.SourceState != nil && v.Status.MigrationState.TargetState != nil &&
 			v.Status.MigrationState.SourceState.MigrationUID != "" &&
 			v.Status.MigrationState.TargetState.MigrationUID != ""
 	} else {
@@ -666,8 +666,8 @@ func (v *VirtualMachineInstance) IsTargetPreparing(migration *VirtualMachineInst
 			v.Status.MigrationState.TargetState.Pod != "" &&
 			v.Status.MigrationState.TargetState.Node != ""
 	} else {
-		return v.Status.MigrationState != nil && v.Status.MigrationState.MigrationUID == migration.UID &&
-			v.Status.MigrationState.TargetNode != ""
+		return v.Status.MigrationState != nil && v.Status.MigrationState.VMIMConfigurationOptions != nil &&
+			v.Status.MigrationState.MigrationUID == migration.UID && v.Status.MigrationState.TargetNode != ""
 	}
 }
 
