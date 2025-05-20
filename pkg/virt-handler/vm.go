@@ -2609,3 +2609,11 @@ func (d *VirtualMachineController) HotplugHostDevices(client cmdclient.LauncherC
 	d.checksumCtrl.Set(control)
 	return nil
 }
+
+func (d *VirtualMachineController) StartMigrationProxyInVirtLauncher(client cmdclient.LauncherClient) error {
+	return client.MigrationProxy(cmdclient.MigrationProxyActionStart)
+}
+
+func (d *VirtualMachineController) StopMigrationProxyInVirtLauncher(client cmdclient.LauncherClient) error {
+	return client.MigrationProxy(cmdclient.MigrationProxyActionStop)
+}
