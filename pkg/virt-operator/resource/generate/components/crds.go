@@ -47,8 +47,6 @@ import (
 	poolv1beta1 "kubevirt.io/api/pool/v1beta1"
 	snapshotv1alpha1 "kubevirt.io/api/snapshot/v1alpha1"
 	snapshotv1beta1 "kubevirt.io/api/snapshot/v1beta1"
-
-	"kubevirt.io/kubevirt/pkg/pointer"
 )
 
 const (
@@ -230,15 +228,15 @@ func NewPresetCrd() (*extv1.CustomResourceDefinition, error) {
 				Name:               "v1",
 				Served:             true,
 				Storage:            false,
-				Deprecated:         true,
-				DeprecationWarning: pointer.P("kubevirt.io/v1 VirtualMachineInstancePresets is now deprecated and will be removed in v2."),
+				Deprecated:         false,
+				DeprecationWarning: nil,
 			},
 			{
 				Name:               "v1alpha3",
 				Served:             true,
 				Storage:            true,
-				Deprecated:         true,
-				DeprecationWarning: pointer.P("kubevirt.io/v1alpha3 VirtualMachineInstancePresets is now deprecated and will be removed in v2."),
+				Deprecated:         false,
+				DeprecationWarning: nil,
 			},
 		},
 		Scope: "Namespaced",
