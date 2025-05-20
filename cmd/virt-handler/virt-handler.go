@@ -95,10 +95,12 @@ const (
 	defaultWatchdogTimeout = 30 * time.Second
 
 	// Default port that virt-handler listens on.
-	defaultPort = 8185
+	defaultPort        = 8185
+	defaultMetricsPort = 8080
 
 	// Default address that virt-handler listens on.
-	defaultHost = "0.0.0.0"
+	defaultHost        = "0.0.0.0"
+	defaultMetricsHost = defaultHost
 
 	hostOverride = ""
 
@@ -493,6 +495,8 @@ func (app *virtHandlerApp) Run() {
 
 	promErrCh := make(chan error)
 	go app.runPrometheusServer(promErrCh)
+	healErrCh := make(chan error)
+	go app.runHealthzServer(healErrCh)
 
 	vmStatsHandler := rest.NewVMStatsHandler(
 		vmiSourceInformer.GetStore(),
@@ -640,7 +644,6 @@ func (app *virtHandlerApp) runPrometheusServer(errCh chan error) {
 	mux := restful.NewContainer()
 	webService := new(restful.WebService)
 	webService.Path("/").Consumes(restful.MIME_JSON).Produces(restful.MIME_JSON)
-	webService.Route(webService.GET("/healthz").To(healthz.KubeConnectionHealthzFuncFactory(app.clusterConfig, apiHealthVersion)).Doc("Health endpoint"))
 
 	componentProfiler := profiler.NewProfileManager(app.clusterConfig)
 	webService.Route(webService.GET("/start-profiler").To(componentProfiler.HandleStartProfiler).Doc("start profiler endpoint"))
@@ -651,14 +654,23 @@ func (app *virtHandlerApp) runPrometheusServer(errCh chan error) {
 	log.Log.V(1).Infof("metrics: max concurrent requests=%d", app.MaxRequestsInFlight)
 	mux.Handle("/metrics", metricshandler.Handler(app.MaxRequestsInFlight))
 	server := http.Server{
-		Addr:      app.ServiceListen.Address(),
+		Addr:      app.ServiceListen.MetricsAddress(),
 		Handler:   mux,
-		TLSConfig: app.promTLSConfig,
-		// Disable HTTP/2
-		// See CVE-2023-44487
-		TLSNextProto: map[string]func(*http.Server, *tls.Conn, http.Handler){},
 	}
-	errCh <- server.ListenAndServeTLS("", "")
+	errCh <- server.ListenAndServe()
+}
+
+func (app *virtHandlerApp) runHealthzServer(errCh chan error) {
+	mux := restful.NewContainer()
+	webService := new(restful.WebService)
+	webService.Path("/").Consumes(restful.MIME_JSON).Produces(restful.MIME_JSON)
+	webService.Route(webService.GET("/healthz").To(healthz.KubeConnectionHealthzFuncFactory(app.clusterConfig, apiHealthVersion)).Doc("Health endpoint"))
+	mux.Add(webService)
+	server := http.Server{
+		Addr:    app.ServiceListen.Address(),
+		Handler: mux,
+	}
+	errCh <- server.ListenAndServe()
 }
 
 func (app *virtHandlerApp) runVMStatsServer(vmStatsHandler *rest.VMStatsHandler) {
@@ -720,7 +732,9 @@ func (app *virtHandlerApp) AddFlags() {
 	app.InitFlags()
 
 	app.BindAddress = defaultHost
+	app.MetricsBindAddress = defaultMetricsHost
 	app.Port = defaultPort
+	app.MetricsPort = defaultMetricsPort
 
 	app.AddCommonFlags()
 
