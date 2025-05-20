@@ -1126,14 +1126,9 @@ func (c *Controller) handleTargetPodHandoff(migration *virtv1.VirtualMachineInst
 		}
 	}
 
-	clusterMigrationConfigs := c.clusterConfig.GetMigrationConfiguration().DeepCopy()
-	err := c.matchMigrationPolicy(vmiCopy, clusterMigrationConfigs)
-	if err != nil {
-		return fmt.Errorf("failed to match migration policy: %v", err)
-	}
-
-	if !c.isMigrationPolicyMatched(vmiCopy) {
-		vmiCopy.Status.MigrationState.MigrationConfiguration = clusterMigrationConfigs
+	// External migration configuration: Do not set migrationConfiguration from MigrationPolicies, just preserve it for the running migration if was set externally.
+	if vmi.Status.MigrationState != nil && vmi.Status.MigrationState.MigrationConfiguration != nil && vmi.Status.MigrationState.EndTimestamp == nil {
+		vmiCopy.Status.MigrationState.MigrationConfiguration = vmi.Status.MigrationState.MigrationConfiguration.DeepCopy()
 	}
 
 	if controller.VMIHasHotplugCPU(vmi) && vmi.IsCPUDedicated() {
@@ -1152,6 +1147,7 @@ func (c *Controller) handleTargetPodHandoff(migration *virtv1.VirtualMachineInst
 		vmiCopy.ObjectMeta.Labels[virtv1.VirtualMachinePodMemoryRequestsLabel] = memoryReq
 	}
 
+	err := c.patchVMI(vmi, vmiCopy)
 	if backendStoragePVC := backendstorage.PVCForMigrationTarget(c.pvcStore, migration); backendStoragePVC != nil {
 		bs := backendstorage.NewBackendStorage(c.clientset, c.clusterConfig, c.storageClassStore, c.storageProfileStore, c.pvcStore)
 		bs.UpdateVolumeStatus(vmiCopy, backendStoragePVC)
