@@ -45,6 +45,7 @@ import (
 	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/device/hostdevice/dra"
 	"kubevirt.io/kubevirt/pkg/util/checksum"
 	"kubevirt.io/kubevirt/pkg/util/syncobject"
+	migrationproxy "kubevirt.io/kubevirt/pkg/virt-handler/migration-proxy"
 	virtcache "kubevirt.io/kubevirt/tools/cache"
 
 	"k8s.io/utils/pointer"
@@ -164,6 +165,7 @@ type DomainManager interface {
 	UpdateGuestMemory(vmi *v1.VirtualMachineInstance) error
 	GetDomainDirtyRateStats(calculationDuration time.Duration) (*stats.DomainStatsDirtyRate, error)
 	GetAppliedVMIChecksum() string
+	MigrationProxy(action cmdv1.MigrationProxyAction) error
 }
 
 type LibvirtDomainManager struct {
@@ -204,6 +206,47 @@ type LibvirtDomainManager struct {
 	rebootShutdownPolicyWasSet bool
 
 	checksum syncobject.SyncObject[string]
+	migrationProxy             *migrationProxyManager
+}
+
+type migrationProxyManager struct {
+	started        bool
+	mu             sync.Mutex
+	migrationProxy migrationproxy.MigrationProxyListener
+}
+
+func (m *migrationProxyManager) Start() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.started {
+		return nil
+	}
+	m.migrationProxy = migrationproxy.NewVirtLauncherProxy()
+	err := m.migrationProxy.Start()
+	if err != nil {
+		m.migrationProxy.Stop()
+		m.reset()
+		return fmt.Errorf("failed to start migration proxy in virt-launcher")
+	}
+	m.started = true
+	return nil
+}
+
+func (m *migrationProxyManager) Stop() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if !m.started {
+		return
+	}
+	if m.migrationProxy != nil {
+		m.migrationProxy.Stop()
+	}
+	m.reset()
+}
+
+func (m *migrationProxyManager) reset() {
+	m.migrationProxy = nil
+	m.started = false
 }
 
 type pausedVMIs struct {
@@ -259,7 +302,8 @@ func newLibvirtDomainManager(connection cli.Connection, virtShareDir, ephemeralD
 		setTimeOnce:                   sync.Once{},
 		imageVolumeFeatureGateEnabled: imageVolumeEnabled,
 
-		checksum: syncobject.NewSyncObject[string](),
+		checksum:       syncobject.NewSyncObject[string](),
+		migrationProxy: &migrationProxyManager{},
 	}
 
 	manager.hotplugHostDevicesInProgress = make(chan struct{}, maxConcurrentHotplugHostDevices)
@@ -2799,4 +2843,16 @@ func (l *LibvirtDomainManager) setRebootShutdownPolicy(dom cli.VirDomain) error 
 
 func (l *LibvirtDomainManager) GetAppliedVMIChecksum() string {
 	return l.checksum.Get()
+}
+
+func (l *LibvirtDomainManager) MigrationProxy(action cmdv1.MigrationProxyAction) error {
+	switch action {
+	case cmdv1.MigrationProxyAction_START:
+		return l.migrationProxy.Start()
+	case cmdv1.MigrationProxyAction_STOP:
+		l.migrationProxy.Stop()
+		return nil
+	default:
+		return fmt.Errorf("unsupported action %d", action)
+	}
 }
