@@ -1173,6 +1173,10 @@ func isSerialConsoleLogEnabled(clusterSerialConsoleLogDisabled bool, vmi *v1.Vir
 }
 
 func (l *LibvirtDomainManager) SyncVMI(vmi *v1.VirtualMachineInstance, allowEmulation bool, options *cmdv1.VirtualMachineOptions) (*api.DomainSpec, error) {
+	if vmi == nil {
+		return nil, fmt.Errorf("VMI is nil")
+	}
+
 	l.domainModifyLock.Lock()
 	defer l.domainModifyLock.Unlock()
 
