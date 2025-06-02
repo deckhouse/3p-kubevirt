@@ -566,6 +566,10 @@ func (d *VirtualMachineController) hasTargetDetectedReadyDomain(vmi *v1.VirtualM
 		return true, 0
 	}
 
+	if vmi.Status.MigrationState == nil {
+		return false, 0
+	}
+
 	nowUnix := time.Now().UTC().Unix()
 	migrationEndUnix := vmi.Status.MigrationState.EndTimestamp.Time.UTC().Unix()
 
