@@ -648,6 +648,10 @@ func (l *LibvirtDomainManager) HotplugHostDevices(vmi *v1.VirtualMachineInstance
 }
 
 func (l *LibvirtDomainManager) hotPlugHostDevices(vmi *v1.VirtualMachineInstance) error {
+	if vmi == nil {
+		return fmt.Errorf("VMI is nil")
+	}
+
 	l.domainModifyLock.Lock()
 	defer l.domainModifyLock.Unlock()
 
