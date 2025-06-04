@@ -722,6 +722,9 @@ func (d *VirtualMachineController) migrationSourceUpdateVMIStatus(origVMI *v1.Vi
 	if migrationHost == "" {
 		// migrated to unknown host.
 		vmi.Status.Phase = v1.Failed
+		if vmi.Status.MigrationState == nil {
+			vmi.Status.MigrationState = &v1.VirtualMachineInstanceMigrationState{}
+		}
 		vmi.Status.MigrationState.Completed = true
 		vmi.Status.MigrationState.Failed = true
 
