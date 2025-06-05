@@ -48,6 +48,9 @@ func GetChrootMountNamespace() string {
 }
 
 func MountChroot(sourcePath, targetPath *safepath.Path, ro bool) *exec.Cmd {
+	if targetPath == nil {
+		return nil
+	}
 	return UnsafeMountChroot(trimProcPrefix(sourcePath), trimProcPrefix(targetPath), ro)
 }
 
