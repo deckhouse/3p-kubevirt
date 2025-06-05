@@ -491,9 +491,11 @@ func (n *Notifier) StartDomainNotifier(
 				interfaceStatuses = agentUpdate.DomainInfo.Interfaces
 				guestOsInfo = agentUpdate.DomainInfo.OSInfo
 				fsFreezeStatus = agentUpdate.DomainInfo.FSFreezeStatus
-
-				eventCaller.eventCallback(domainConn, domainCache, libvirtEvent{}, n, deleteNotificationSent,
-					interfaceStatuses, guestOsInfo, vmi, fsFreezeStatus, metadataCache, nonRoot)
+				if domainCache != nil {
+					cache := *domainCache
+					eventCaller.eventCallback(domainConn, &cache, libvirtEvent{}, n, deleteNotificationSent,
+						interfaceStatuses, guestOsInfo, vmi, fsFreezeStatus, metadataCache, nonRoot)
+				}
 			case <-reconnectChan:
 				log.Log.Infof("Libvirt reconnected, domain %s. Event callbacks re-registered, triggering immediate reconciliation.", domainName)
 				if domainCache != nil {
