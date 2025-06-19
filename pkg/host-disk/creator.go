@@ -3,6 +3,7 @@ package hostdisk
 import (
 	"fmt"
 
+	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/client-go/tools/record"
 	v1 "kubevirt.io/api/core/v1"
 	"kubevirt.io/client-go/log"
@@ -74,15 +75,11 @@ func (c diskImgCreator) shrinkRequestedSize(vmi *v1.VirtualMachineInstance, requ
 		return 0, fmt.Errorf("unable to create image on volume %s, not enough space, demanded size %d B is bigger than available space %d B, also after taking %v %% toleration into account",
 			volumeName, uint64(requestedSize), availableSize, c.lessPVCSpaceToleration)
 	}
-	requestedSizeMsg := fmt.Sprintf("%v B", requestedSize)
-	if requestedSize > 1*1024*1024 {
-		requestedSizeMsg = fmt.Sprintf("%v MiB", requestedSize/(1024*1024))
-	}
-	availableSizeMsg := fmt.Sprintf("%v B", availableSize)
-	if availableSize > 1*1024*1024 {
-		availableSizeMsg = fmt.Sprintf("%v MiB", availableSize/(1024*1024))
-	}
-	msg := fmt.Sprintf("PV size too small: expected %s, found %s. Using it anyway, it is within %v %% toleration", requestedSizeMsg, availableSizeMsg, c.lessPVCSpaceToleration)
+
+	requestedSizeQ := resource.NewQuantity(requestedSize, resource.BinarySI)
+	availableSizeQ := resource.NewQuantity(availableSize, resource.BinarySI)
+
+	msg := fmt.Sprintf("PV size too small: expected %s, found %s. Using it anyway, it is within %v %% toleration", requestedSizeQ.String(), availableSizeQ.String(), c.lessPVCSpaceToleration)
 	log.Log.Info(msg)
 	c.recorder.Event(vmi, EventTypeToleratedSmallPV, EventReasonToleratedSmallPV, msg)
 	return availableSize, nil
