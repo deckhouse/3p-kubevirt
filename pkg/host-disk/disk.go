@@ -48,7 +48,7 @@ func (c PVCDiskImgCreator) Create(vmi *v1.VirtualMachineInstance, volumeName, di
 		return fmt.Errorf("unable to determine capacity from PVC that provides no storage capacity or requests")
 	}
 	var requestedSize int64
-	if hasRequests && (capacity.Value() > requested.Value() || !hasCapacity) {
+	if hasRequests && (!hasCapacity || capacity.Value() > requested.Value()) {
 		requestedSize = util.AlignImageSizeTo1MiB(requested.Value(), log.Log)
 	} else {
 		requestedSize = util.AlignImageSizeTo1MiB(capacity.Value(), log.Log)
