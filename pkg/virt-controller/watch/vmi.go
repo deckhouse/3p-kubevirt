@@ -1902,8 +1902,8 @@ func (c *VMIController) podVolumesMatchesReadyVolumes(attachmentPod *k8sv1.Pod, 
 	)
 	containerDisksNames := make(map[string]struct{})
 	for _, ctr := range attachmentPod.Spec.Containers {
-		if strings.HasPrefix(ctr.Name, services.HotplugContainerDisk) {
-			containerDisksNames[strings.TrimPrefix(ctr.Name, services.HotplugContainerDisk)] = struct{}{}
+		if name, ok := attachmentPod.GetAnnotations()[ctr.Name]; ok {
+			containerDisksNames[name] = struct{}{}
 		}
 	}
 

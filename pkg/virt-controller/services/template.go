@@ -999,6 +999,14 @@ func (t *templateService) RenderHotplugAttachmentPodTemplate(volumes []*v1.Volum
 			continue
 		}
 		name := sidecarContainerHotplugContainerdDiskName(i)
+
+		annos := pod.GetAnnotations()
+		if annos == nil {
+			annos = make(map[string]string)
+		}
+		annos[name] = vol.Name
+
+		pod.SetAnnotations(annos)
 		pod.Spec.Containers = append(pod.Spec.Containers, t.containerForHotplugContainerDisk(name, vol.ContainerDisk, vmi))
 		if first {
 			first = false
