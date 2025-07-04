@@ -873,7 +873,7 @@ func sidecarContainerName(i int) string {
 }
 
 func sidecarContainerHotplugContainerdDiskName(id int) string {
-	return fmt.Sprintf("%s%s", HotplugContainerDisk, id)
+	return fmt.Sprintf("%s%d", HotplugContainerDisk, id)
 }
 
 func (t *templateService) containerForHotplugContainerDisk(name string, cd *v1.ContainerDiskSource, vmi *v1.VirtualMachineInstance) k8sv1.Container {
