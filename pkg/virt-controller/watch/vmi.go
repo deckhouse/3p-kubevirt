@@ -2224,8 +2224,7 @@ func (c *VMIController) updateVolumeStatus(vmi *virtv1.VirtualMachineInstance, v
 						isReady bool
 					)
 					for _, cs := range attachmentPod.Status.ContainerStatuses {
-						name := strings.TrimPrefix(cs.Name, "hotplug-container-disk-")
-						if volume.Name == name {
+						if volume.Name == attachmentPod.GetAnnotations()[cs.Name] {
 							uid = attachmentPod.UID
 							isReady = cs.Ready
 							break
