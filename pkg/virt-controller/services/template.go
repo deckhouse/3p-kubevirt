@@ -872,8 +872,8 @@ func sidecarContainerName(i int) string {
 	return fmt.Sprintf("hook-sidecar-%d", i)
 }
 
-func sidecarContainerHotplugContainerdDiskName(name string) string {
-	return fmt.Sprintf("%s%s", HotplugContainerDisk, name)
+func sidecarContainerHotplugContainerdDiskName(id int) string {
+	return fmt.Sprintf("%s%s", HotplugContainerDisk, id)
 }
 
 func (t *templateService) containerForHotplugContainerDisk(name string, cd *v1.ContainerDiskSource, vmi *v1.VirtualMachineInstance) k8sv1.Container {
@@ -994,11 +994,11 @@ func (t *templateService) RenderHotplugAttachmentPodTemplate(volumes []*v1.Volum
 		},
 	}
 	first := true
-	for _, vol := range vmi.Spec.Volumes {
+	for i, vol := range vmi.Spec.Volumes {
 		if vol.ContainerDisk == nil || !vol.ContainerDisk.Hotpluggable {
 			continue
 		}
-		name := sidecarContainerHotplugContainerdDiskName(vol.Name)
+		name := sidecarContainerHotplugContainerdDiskName(i)
 		pod.Spec.Containers = append(pod.Spec.Containers, t.containerForHotplugContainerDisk(name, vol.ContainerDisk, vmi))
 		if first {
 			first = false
