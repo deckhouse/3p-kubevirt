@@ -37,7 +37,6 @@ import (
 	"kubevirt.io/kubevirt/pkg/controller"
 	backendstorage "kubevirt.io/kubevirt/pkg/storage/backend-storage"
 	storagetypes "kubevirt.io/kubevirt/pkg/storage/types"
-	"kubevirt.io/kubevirt/pkg/virt-controller/services"
 	"kubevirt.io/kubevirt/pkg/virt-controller/watch/common"
 )
 
@@ -172,10 +171,11 @@ func (c *Controller) processHotplugVolumeStatus(
 		statusCopy.HotplugVolume.AttachPodName = attachmentPod.Name
 		if isContainerDisk {
 			// The attachment pod carries one container per hotplugged disk, so the
-			// readiness of this volume's own container is what counts.
+			// readiness of this volume's own container is what counts. Container names
+			// are mapped to volume names through the pod annotations.
 			statusCopy.HotplugVolume.AttachPodUID = ""
 			for _, cs := range attachmentPod.Status.ContainerStatuses {
-				if volumeName == strings.TrimPrefix(cs.Name, services.HotplugContainerDisk) {
+				if volumeName == attachmentPod.GetAnnotations()[cs.Name] {
 					if cs.Ready {
 						statusCopy.HotplugVolume.AttachPodUID = attachmentPod.UID
 					}
