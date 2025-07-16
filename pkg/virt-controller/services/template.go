@@ -894,9 +894,9 @@ func (t *templateService) containerForHotplugContainerDisk(ctrName, volName stri
 		Resources: hotplugContainerResourceRequirementsForVMI(vmi, t.clusterConfig),
 		SecurityContext: &k8sv1.SecurityContext{
 			AllowPrivilegeEscalation: pointer.Bool(false),
-			// ReadOnlyRootFilesystem:   pointer.Bool(true),
-			RunAsNonRoot: pointer.Bool(true),
-			RunAsUser:    &runUser,
+			ReadOnlyRootFilesystem:   pointer.Bool(true),
+			RunAsNonRoot:             pointer.Bool(true),
+			RunAsUser:                &runUser,
 			SeccompProfile: &k8sv1.SeccompProfile{
 				Type: k8sv1.SeccompProfileTypeRuntimeDefault,
 			},
