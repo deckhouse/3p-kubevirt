@@ -157,6 +157,10 @@ func NewHandlerDaemonSet(namespace, repository, imagePrefix, version, launcherVe
 
 	pod.Volumes = []corev1.Volume{
 		{
+			Name:         "tmp-dir",
+			VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
+		},
+		{
 			Name:         "var-run",
 			VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
 		},
@@ -353,6 +357,10 @@ func NewHandlerDaemonSet(namespace, repository, imagePrefix, version, launcherVe
 	container.VolumeMounts = append(container.VolumeMounts, corev1.VolumeMount{
 		Name:      "podinfo",
 		MountPath: "/etc/podinfo",
+	})
+	container.VolumeMounts = append(container.VolumeMounts, corev1.VolumeMount{
+		Name:      "tmp-dir",
+		MountPath: "/tmp",
 	})
 	pod.Volumes = append(pod.Volumes, corev1.Volume{
 		Name: "podinfo",
