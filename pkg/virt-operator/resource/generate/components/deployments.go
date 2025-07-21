@@ -325,6 +325,19 @@ func NewApiServerDeployment(config *operatorutil.KubeVirtDeploymentConfig, produ
 	attachCertificateSecret(&deployment.Spec.Template.Spec, VirtHandlerCertSecretName, "/etc/virt-handler/clientcertificates")
 	attachProfileVolume(&deployment.Spec.Template.Spec)
 
+	volume := corev1.Volume{
+		Name: "tmp",
+		VolumeSource: corev1.VolumeSource{
+			EmptyDir: &corev1.EmptyDirVolumeSource{},
+		},
+	}
+	volumeMount := corev1.VolumeMount{
+		Name:      "tmp",
+		MountPath: "/tmp",
+	}
+	deployment.Spec.Template.Spec.Volumes = append(deployment.Spec.Template.Spec.Volumes, volume)
+	deployment.Spec.Template.Spec.Containers[0].VolumeMounts = append(deployment.Spec.Template.Spec.Containers[0].VolumeMounts, volumeMount)
+
 	pod := &deployment.Spec.Template.Spec
 	pod.ServiceAccountName = ApiServiceAccountName
 	pod.SecurityContext = &corev1.PodSecurityContext{
@@ -381,6 +394,7 @@ func NewApiServerDeployment(config *operatorutil.KubeVirtDeploymentConfig, produ
 
 	container.SecurityContext = &corev1.SecurityContext{
 		AllowPrivilegeEscalation: pointer.P(false),
+		ReadOnlyRootFilesystem:   pointer.P(true),
 		Capabilities: &corev1.Capabilities{
 			Drop: []corev1.Capability{"ALL"},
 		},
@@ -483,6 +497,7 @@ func NewControllerDeployment(config *operatorutil.KubeVirtDeploymentConfig, prod
 
 	container.SecurityContext = &corev1.SecurityContext{
 		AllowPrivilegeEscalation: pointer.P(false),
+		ReadOnlyRootFilesystem:   pointer.P(true),
 		Capabilities: &corev1.Capabilities{
 			Drop: []corev1.Capability{"ALL"},
 		},
@@ -624,6 +639,7 @@ func NewOperatorDeployment(namespace, repository, imagePrefix, version, verbosit
 							},
 							SecurityContext: &corev1.SecurityContext{
 								AllowPrivilegeEscalation: pointer.P(false),
+								ReadOnlyRootFilesystem:   pointer.P(true),
 								Capabilities: &corev1.Capabilities{
 									Drop: []corev1.Capability{"ALL"},
 								},

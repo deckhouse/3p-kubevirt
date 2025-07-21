@@ -45,6 +45,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/client-go/tools/cache"
+
 	v1 "kubevirt.io/api/core/v1"
 	"kubevirt.io/client-go/api"
 	"kubevirt.io/client-go/kubecli"
@@ -4696,6 +4697,7 @@ var _ = Describe("Template", func() {
 			runUser := int64(util.NonRootUID)
 			Expect(*pod.Spec.Containers[0].SecurityContext).To(Equal(k8sv1.SecurityContext{
 				AllowPrivilegeEscalation: pointer.P(false),
+				ReadOnlyRootFilesystem:   pointer.P(true),
 				RunAsNonRoot:             pointer.P(true),
 				RunAsUser:                &runUser,
 				SeccompProfile: &k8sv1.SeccompProfile{
@@ -4871,6 +4873,7 @@ var _ = Describe("Template", func() {
 			runUser := int64(util.NonRootUID)
 			Expect(*pod.Spec.Containers[0].SecurityContext).To(Equal(k8sv1.SecurityContext{
 				AllowPrivilegeEscalation: pointer.P(false),
+				ReadOnlyRootFilesystem:   pointer.P(true),
 				RunAsNonRoot:             pointer.P(true),
 				RunAsUser:                &runUser,
 				SeccompProfile: &k8sv1.SeccompProfile{
