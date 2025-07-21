@@ -137,6 +137,11 @@ func (n *VMNetworkConfigurator) enrichTapDomainInterface(
 }
 
 func (n *VMNetworkConfigurator) ensureDHCP(iface *v1.Interface, network *v1.Network, podIfaceName string) error {
+	if network.Pod != nil && network.Name != "default" {
+		log.Log.Infof("Skipping DHCP configurator for network %q", network.Name)
+		return nil
+	}
+
 	var configurator dhcpconfigurator.Configurator
 	if n.dhcpConfiguratorFactory != nil {
 		configurator = n.dhcpConfiguratorFactory(iface, network, podIfaceName)
