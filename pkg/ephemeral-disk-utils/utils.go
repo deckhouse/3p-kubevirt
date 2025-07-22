@@ -87,7 +87,7 @@ func (om *OwnershipManager) UnsafeSetFileOwnership(file string) error {
 
 	stat, ok := fileInfo.Sys().(*syscall.Stat_t)
 	if ok {
-		if uid == int(stat.Uid) {
+		if uid == int(stat.Uid) && gid == int(stat.Gid) {
 			return nil
 		}
 	} else {
@@ -95,8 +95,16 @@ func (om *OwnershipManager) UnsafeSetFileOwnership(file string) error {
 	}
 
 	err = os.Chown(file, uid, gid)
-	if err != nil {
-		return fmt.Errorf("user %s, uid %d, gid %d, stat.uid %d, stat.gid %d, error %w", om.user, uid, gid, stat.Uid, stat.Gid, err)
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, syscall.EPERM):
+		err = os.Chmod(file, 0700)
+		if err != nil {
+			return fmt.Errorf("chmod: user %s, uid %d, gid %d, stat.uid %d, stat.gid %d, error %w", om.user, uid, gid, stat.Uid, stat.Gid, err)
+		}
+	default:
+		return fmt.Errorf("chown: user %s, uid %d, gid %d, stat.uid %d, stat.gid %d, error %w", om.user, uid, gid, stat.Uid, stat.Gid, err)
 	}
 
 	return nil
