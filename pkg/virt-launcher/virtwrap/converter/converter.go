@@ -83,9 +83,7 @@ const (
 	QEMUSeaBiosDebugPipe = "/var/run/kubevirt-private/QEMUSeaBiosDebugPipe"
 )
 
-var (
-	BootMenuTimeoutMS = uint(10000)
-)
+var BootMenuTimeoutMS = uint(10000)
 
 type deviceNamer struct {
 	existingNameMap map[string]string
@@ -589,7 +587,6 @@ func Add_Agent_To_api_Channel() (channel api.Channel) {
 }
 
 func Convert_v1_Volume_To_api_Disk(source *v1.Volume, disk *api.Disk, c *ConverterContext, diskIndex int) error {
-
 	if source.ContainerDisk != nil {
 		return Convert_v1_ContainerDiskSource_To_api_Disk(source.Name, source.ContainerDisk, disk, c, diskIndex)
 	}
@@ -804,9 +801,9 @@ func Convert_v1_Hotplug_ContainerDisk_To_api_Disk(volumeName string, disk *api.D
 		Source: &api.DiskSource{},
 	}
 
-	//disk.BackingStore.Format.Type = info.Format
-	//disk.BackingStore.Source.File = info.BackingFile
-	//disk.BackingStore.Type = "file"
+	// disk.BackingStore.Format.Type = info.Format
+	// disk.BackingStore.Source.File = info.BackingFile
+	// disk.BackingStore.Type = "file"
 
 	return nil
 }
@@ -974,7 +971,6 @@ func Convert_v1_Watchdog_To_api_Watchdog(source *v1.Watchdog, watchdog *api.Watc
 }
 
 func Convert_v1_Rng_To_api_Rng(_ *v1.Rng, rng *api.Rng, c *ConverterContext) error {
-
 	// default rng model for KVM/QEMU virtualization
 	rng.Model = InterpretTransitionalModelType(&c.UseVirtioTransitional, c.Architecture)
 
@@ -1486,7 +1482,7 @@ func Convert_v1_VirtualMachineInstance_To_api_Domain(vmi *v1.VirtualMachineInsta
 		return err
 	}
 
-	var isMemfdRequired = false
+	isMemfdRequired := false
 	if vmi.Spec.Domain.Memory != nil && vmi.Spec.Domain.Memory.Hugepages != nil {
 		domain.Spec.MemoryBacking = &api.MemoryBacking{
 			HugePages: &api.HugePages{},
@@ -1847,7 +1843,7 @@ func Convert_v1_VirtualMachineInstance_To_api_Domain(vmi *v1.VirtualMachineInsta
 		})
 
 		var serialPort uint = 0
-		var serialType string = "serial"
+		var serialType string = "virtio"
 		domain.Spec.Devices.Consoles = []api.Console{
 			{
 				Type: "pty",
@@ -1861,7 +1857,7 @@ func Convert_v1_VirtualMachineInstance_To_api_Domain(vmi *v1.VirtualMachineInsta
 		socketPath := fmt.Sprintf("%s/%s/virt-serial%d", util.VirtPrivateDir, vmi.ObjectMeta.UID, serialPort)
 		domain.Spec.Devices.Serials = []api.Serial{
 			{
-				Type: "unix",
+				Type: "pty",
 				Target: &api.SerialTarget{
 					Port: &serialPort,
 				},
@@ -1996,7 +1992,6 @@ func boolToString(value *bool, defaultPositive bool, positive string, negative s
 }
 
 func GetImageInfo(imagePath string) (*containerdisk.DiskInfo, error) {
-
 	// #nosec No risk for attacket injection. Only get information about an image
 	out, err := exec.Command(
 		"/usr/bin/qemu-img", "info", imagePath, "--output", "json",
