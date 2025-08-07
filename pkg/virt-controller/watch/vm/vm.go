@@ -3305,6 +3305,31 @@ func (c *Controller) sync(vm *virtv1.VirtualMachine, vmi *virtv1.VirtualMachineI
 		}
 	}
 
+	if cond := conditionManager.GetCondition(vmCopy, virtv1.VirtualMachineRestartRequired); cond != nil && cond.Status == k8score.ConditionTrue {
+		switch vmi.Status.Phase {
+		case virtv1.VmPhaseUnset, virtv1.Pending, virtv1.Scheduling:
+			startExist := false
+			for _, stateChange := range vmCopy.Status.StateChangeRequests {
+				switch stateChange.Action {
+				case virtv1.StartRequest:
+					startExist = true
+				case virtv1.StopRequest:
+					startExist = false
+				}
+			}
+			if !startExist {
+				if err = c.addStartRequest(vmCopy); err != nil {
+					return vm, vmi, common.NewSyncError(fmt.Errorf("Error encountered when trying to add start request: %v", err), failedUpdateErrorReason), nil
+				}
+			}
+			updatedVM, err := c.stopVMI(vmCopy, vmi)
+			if err != nil {
+				return vm, vmi, common.NewSyncError(fmt.Errorf("Error encountered when trying to stop vmi: %v", err), failedUpdateErrorReason), nil
+			}
+			vmCopy = updatedVM
+		}
+	}
+
 	if !equality.Semantic.DeepEqual(vm.Spec, vmCopy.Spec) || !equality.Semantic.DeepEqual(vm.ObjectMeta, vmCopy.ObjectMeta) {
 		updatedVm, err := c.clientset.VirtualMachine(vmCopy.Namespace).Update(context.Background(), vmCopy, metav1.UpdateOptions{})
 		if err != nil {
