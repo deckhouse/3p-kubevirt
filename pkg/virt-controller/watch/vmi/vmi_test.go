@@ -46,11 +46,12 @@ import (
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
 
+	cdiv1 "kubevirt.io/containerized-data-importer-api/pkg/apis/core/v1beta1"
+
 	virtv1 "kubevirt.io/api/core/v1"
 	"kubevirt.io/client-go/api"
 	"kubevirt.io/client-go/kubecli"
 	kubevirtfake "kubevirt.io/client-go/kubevirt/fake"
-	cdiv1 "kubevirt.io/containerized-data-importer-api/pkg/apis/core/v1beta1"
 
 	"kubevirt.io/kubevirt/pkg/libvmi"
 
@@ -208,6 +209,7 @@ var _ = Describe("VirtualMachineInstance watcher", func() {
 
 		config, _, kvStore = testutils.NewFakeClusterConfigUsingKVConfig(kubevirtFakeConfig)
 		pvcInformer, _ := testutils.NewFakeInformerFor(&k8sv1.PersistentVolumeClaim{})
+		resourceQuotaInformer, _ := testutils.NewFakeInformerFor(&k8sv1.ResourceQuota{})
 		migrationInformer, _ := testutils.NewFakeInformerWithIndexersFor(&virtv1.VirtualMachineInstanceMigration{}, kvcontroller.GetVirtualMachineInstanceMigrationInformerIndexers())
 		storageClassInformer, _ := testutils.NewFakeInformerFor(&storagev1.StorageClass{})
 		storageClassStore = storageClassInformer.GetStore()
@@ -245,6 +247,7 @@ var _ = Describe("VirtualMachineInstance watcher", func() {
 			podInformer,
 			nsInformer,
 			nodeInformer,
+			resourceQuotaInformer,
 		)
 		// Wrap our workqueue to have a way to detect when we are done processing updates
 		mockQueue = testutils.NewMockWorkQueue(controller.Queue)
@@ -4210,7 +4213,7 @@ func setDataVolumeCondition(dv *cdiv1.DataVolume, cond cdiv1.DataVolumeCondition
 func NewNodeForPod(pod *k8sv1.Pod) *k8sv1.Node {
 	return &k8sv1.Node{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      pod.Spec.NodeName,
+			Name: pod.Spec.NodeName,
 		},
 	}
 }
