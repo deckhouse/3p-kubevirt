@@ -368,8 +368,8 @@ func newControllerClusterRole() *rbacv1.ClusterRole {
 					"subresources.virtualization.deckhouse.io",
 				},
 				Resources: []string{
-					"virtualmachines/addvolume",
-					"virtualmachines/removevolume",
+					"apivirtualmachines/addvolume",
+					"apivirtualmachines/removevolume",
 				},
 				Verbs: []string{
 					"update",
