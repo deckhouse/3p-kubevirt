@@ -119,7 +119,7 @@ var _ = Describe("Migration watcher", func() {
 
 	expectAttachmentPodCreation := func(namespace, migrationUid string) {
 		pods, err := kubeClient.CoreV1().Pods(namespace).List(context.Background(), metav1.ListOptions{
-			LabelSelector: fmt.Sprintf("%s=%s,%s=%s", v1.MigrationJobLabel, migrationUid, v1.AppLabel, "hotplug-disk"),
+			LabelSelector: fmt.Sprintf("%s=%s,%s=%s", v1.MigrationJobLabel, migrationUid, v1.AppLabel, "d8v-hotplug-disk"),
 		})
 		Expect(err).ToNot(HaveOccurred())
 		Expect(pods.Items).To(HaveLen(1))
@@ -398,7 +398,7 @@ var _ = Describe("Migration watcher", func() {
 			migration.Status.Phase = v1.MigrationScheduled
 			targetPod.Spec.NodeName = "node01"
 			targetPod.Status.ContainerStatuses = []k8sv1.ContainerStatus{{
-				Name: "compute", State: k8sv1.ContainerState{Running: &k8sv1.ContainerStateRunning{}},
+				Name: "d8v-compute", State: k8sv1.ContainerState{Running: &k8sv1.ContainerStateRunning{}},
 			}}
 
 			addMigration(migration)
@@ -471,7 +471,7 @@ var _ = Describe("Migration watcher", func() {
 					})
 
 				targetPod.Spec.Containers = append(targetPod.Spec.Containers, k8sv1.Container{
-					Name: "compute",
+					Name: "d8v-compute",
 					Resources: k8sv1.ResourceRequirements{
 						Requests: k8sv1.ResourceList{
 							k8sv1.ResourceCPU: resource.MustParse("4"),
@@ -482,7 +482,7 @@ var _ = Describe("Migration watcher", func() {
 					},
 				})
 				targetPod.Status.ContainerStatuses = []k8sv1.ContainerStatus{{
-					Name: "compute", State: k8sv1.ContainerState{Running: &k8sv1.ContainerStateRunning{}},
+					Name: "d8v-compute", State: k8sv1.ContainerState{Running: &k8sv1.ContainerStateRunning{}},
 				}}
 
 				addMigration(migration)
@@ -521,7 +521,7 @@ var _ = Describe("Migration watcher", func() {
 					})
 
 				targetPod.Spec.Containers = append(targetPod.Spec.Containers, k8sv1.Container{
-					Name: "compute",
+					Name: "d8v-compute",
 					Resources: k8sv1.ResourceRequirements{
 						Requests: k8sv1.ResourceList{
 							k8sv1.ResourceMemory: resource.MustParse("150Mi"),
@@ -529,7 +529,7 @@ var _ = Describe("Migration watcher", func() {
 					},
 				})
 				targetPod.Status.ContainerStatuses = []k8sv1.ContainerStatus{{
-					Name: "compute", State: k8sv1.ContainerState{Running: &k8sv1.ContainerStateRunning{}},
+					Name: "d8v-compute", State: k8sv1.ContainerState{Running: &k8sv1.ContainerStateRunning{}},
 				}}
 
 				if hugepages != nil {
@@ -1690,12 +1690,12 @@ var _ = Describe("Migration watcher", func() {
 		},
 			Entry("with running compute container and no infra container",
 				[]k8sv1.ContainerStatus{{
-					Name: "compute", State: k8sv1.ContainerState{Running: &k8sv1.ContainerStateRunning{}},
+					Name: "d8v-compute", State: k8sv1.ContainerState{Running: &k8sv1.ContainerStateRunning{}},
 				}},
 			),
 			Entry("with running compute container and no ready istio-proxy container",
 				[]k8sv1.ContainerStatus{{
-					Name: "compute", State: k8sv1.ContainerState{Running: &k8sv1.ContainerStateRunning{}},
+					Name: "d8v-compute", State: k8sv1.ContainerState{Running: &k8sv1.ContainerStateRunning{}},
 				}, {Name: "istio-proxy", State: k8sv1.ContainerState{Running: &k8sv1.ContainerStateRunning{}}, Ready: false}},
 			),
 		)
@@ -1718,10 +1718,10 @@ var _ = Describe("Migration watcher", func() {
 			expectVirtualMachineInstanceMigrationState(vmi.Namespace, vmi.Name, BeNil())
 		},
 			Entry("with not ready infra container and not ready compute container",
-				[]k8sv1.ContainerStatus{{Name: "compute", Ready: false}, {Name: "kubevirt-infra", Ready: false}},
+				[]k8sv1.ContainerStatus{{Name: "d8v-compute", Ready: false}, {Name: "kubevirt-infra", Ready: false}},
 			),
 			Entry("with not ready compute container and no infra container",
-				[]k8sv1.ContainerStatus{{Name: "compute", Ready: false}},
+				[]k8sv1.ContainerStatus{{Name: "d8v-compute", Ready: false}},
 			),
 		)
 
@@ -1733,7 +1733,7 @@ var _ = Describe("Migration watcher", func() {
 			targetPod := newTargetPodForVirtualMachine(vmi, migration, k8sv1.PodRunning)
 			targetPod.Spec.NodeName = "node01"
 			targetPod.Status.ContainerStatuses = []k8sv1.ContainerStatus{{
-				Name: "compute", State: k8sv1.ContainerState{Running: &k8sv1.ContainerStateRunning{}},
+				Name: "d8v-compute", State: k8sv1.ContainerState{Running: &k8sv1.ContainerStateRunning{}},
 			}}
 
 			addMigration(migration)
@@ -1764,7 +1764,7 @@ var _ = Describe("Migration watcher", func() {
 			targetPod := newTargetPodForVirtualMachine(vmi, migration, k8sv1.PodRunning)
 			targetPod.Spec.NodeName = "node01"
 			targetPod.Status.ContainerStatuses = []k8sv1.ContainerStatus{{
-				Name: "compute", State: k8sv1.ContainerState{Running: &k8sv1.ContainerStateRunning{}},
+				Name: "d8v-compute", State: k8sv1.ContainerState{Running: &k8sv1.ContainerStateRunning{}},
 			}}
 
 			addMigration(migration)
@@ -2377,7 +2377,7 @@ var _ = Describe("Migration watcher", func() {
 			targetPod = newTargetPodForVirtualMachine(vmi, migration, k8sv1.PodRunning)
 			targetPod.Spec.NodeName = "node01"
 			targetPod.Status.ContainerStatuses = []k8sv1.ContainerStatus{{
-				Name: "compute", State: k8sv1.ContainerState{Running: &k8sv1.ContainerStateRunning{}},
+				Name: "d8v-compute", State: k8sv1.ContainerState{Running: &k8sv1.ContainerStateRunning{}},
 			}}
 
 			By("Defining migration policy, matching it to vmi to posting it into the cluster")
@@ -3379,7 +3379,7 @@ func newAttachmentPodForVirtualMachine(ownerPod *k8sv1.Pod, migration *v1.Virtua
 			Namespace: ownerPod.Namespace,
 			UID:       "test-uid",
 			Labels: map[string]string{
-				v1.AppLabel:          "hotplug-disk",
+				v1.AppLabel:          "d8v-hotplug-disk",
 				v1.MigrationJobLabel: string(migration.UID),
 			},
 			Annotations: map[string]string{

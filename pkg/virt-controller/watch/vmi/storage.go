@@ -142,6 +142,7 @@ func (c *Controller) processHotplugVolumeStatus(
 	status *virtv1.VolumeStatus,
 	attachmentPod *k8sv1.Pod,
 	isContainerDisk bool,
+	isPVC bool,
 ) {
 	statusCopy := status.DeepCopy()
 
@@ -184,6 +185,18 @@ func (c *Controller) processHotplugVolumeStatus(
 			}
 		} else if len(attachmentPod.Status.ContainerStatuses) == 1 && attachmentPod.Status.ContainerStatuses[0].Ready {
 			statusCopy.HotplugVolume.AttachPodUID = attachmentPod.UID
+		} else if isPVC {
+			// The attachment pod may also carry hotplugged container disks, so the PVC is
+			// ready once its own hotplug-disk container is.
+			statusCopy.HotplugVolume.AttachPodUID = ""
+			for _, cs := range attachmentPod.Status.ContainerStatuses {
+				if cs.Name == "d8v-hotplug-disk" {
+					if cs.Ready {
+						statusCopy.HotplugVolume.AttachPodUID = attachmentPod.UID
+					}
+					break
+				}
+			}
 		} else {
 			// Remove UID of old pod if a new one is available, but not yet ready
 			statusCopy.HotplugVolume.AttachPodUID = ""
@@ -309,7 +322,7 @@ func (c *Controller) updateVolumeStatus(vmi *virtv1.VirtualMachineInstance, virt
 		pvcName := storagetypes.PVCNameFromVirtVolume(&volume)
 
 		if _, ok := hotplugVolumesMap[volume.Name]; ok {
-			c.processHotplugVolumeStatus(vmi, volume.Name, pvcName, &status, attachmentPod, volume.ContainerDisk != nil)
+			c.processHotplugVolumeStatus(vmi, volume.Name, pvcName, &status, attachmentPod, volume.ContainerDisk != nil, volume.PersistentVolumeClaim != nil)
 		}
 		if volume.VolumeSource.PersistentVolumeClaim != nil || volume.VolumeSource.DataVolume != nil || volume.VolumeSource.MemoryDump != nil {
 			err = c.processPVCInfo(&status, pvcName, vmi.Namespace, false)
@@ -330,7 +343,7 @@ func (c *Controller) updateVolumeStatus(vmi *virtv1.VirtualMachineInstance, virt
 		}
 		// Remove from map so we can detect volumes removed from spec
 		delete(oldStatusMap, utilityVolume.Name)
-		c.processHotplugVolumeStatus(vmi, utilityVolume.Name, utilityVolume.ClaimName, &status, attachmentPod, false)
+		c.processHotplugVolumeStatus(vmi, utilityVolume.Name, utilityVolume.ClaimName, &status, attachmentPod, false, false)
 		err = c.processPVCInfo(&status, utilityVolume.ClaimName, vmi.Namespace, true)
 		if err != nil {
 			return err

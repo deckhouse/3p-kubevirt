@@ -54,7 +54,7 @@ var _ = Describe("Controller", func() {
 						Phase: k8sv1.PodRunning,
 						ContainerStatuses: []k8sv1.ContainerStatus{
 							{
-								Name: "compute",
+								Name: "d8v-compute",
 								State: k8sv1.ContainerState{
 									Running:    &k8sv1.ContainerStateRunning{},
 									Terminated: &k8sv1.ContainerStateTerminated{},
@@ -72,7 +72,7 @@ var _ = Describe("Controller", func() {
 						Phase: k8sv1.PodRunning,
 						ContainerStatuses: []k8sv1.ContainerStatus{
 							{
-								Name:  "compute",
+								Name:  "d8v-compute",
 								State: k8sv1.ContainerState{},
 							},
 						},
@@ -87,7 +87,7 @@ var _ = Describe("Controller", func() {
 						Phase: k8sv1.PodRunning,
 						ContainerStatuses: []k8sv1.ContainerStatus{
 							{
-								Name: "compute",
+								Name: "d8v-compute",
 								State: k8sv1.ContainerState{
 									Running: &k8sv1.ContainerStateRunning{},
 								},
@@ -108,7 +108,7 @@ var _ = Describe("Controller", func() {
 						Phase: k8sv1.PodRunning,
 						ContainerStatuses: []k8sv1.ContainerStatus{
 							{
-								Name: "compute",
+								Name: "d8v-compute",
 								State: k8sv1.ContainerState{
 									Running: &k8sv1.ContainerStateRunning{},
 								},
@@ -155,7 +155,7 @@ var _ = Describe("Controller", func() {
 						Phase: k8sv1.PodRunning,
 						ContainerStatuses: []k8sv1.ContainerStatus{
 							{
-								Name: "compute",
+								Name: "d8v-compute",
 								State: k8sv1.ContainerState{
 									Terminated: &k8sv1.ContainerStateTerminated{
 										ExitCode: int32(1),
