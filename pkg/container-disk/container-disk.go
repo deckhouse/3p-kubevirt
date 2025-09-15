@@ -323,7 +323,7 @@ func generateContainerFromVolume(vmi *v1.VirtualMachineInstance, config *virtcon
 		Name:            name,
 		Image:           diskContainerImage,
 		ImagePullPolicy: volume.ContainerDisk.ImagePullPolicy,
-		Command:         []string{"/usr/bin/container-disk"},
+		Command:         []string{"/var/run/container-disk"},
 		Args:            args,
 		VolumeMounts: []kubev1.VolumeMount{
 			{
@@ -332,7 +332,7 @@ func generateContainerFromVolume(vmi *v1.VirtualMachineInstance, config *virtcon
 			},
 			{
 				Name:      binVolumeName,
-				MountPath: "/usr/bin",
+				MountPath: "/var/run",
 			},
 		},
 		Resources: resources,
