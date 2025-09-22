@@ -58,7 +58,7 @@ func newVirtualMachineInstanceReport(vmi *k6tv1.VirtualMachineInstance, vmiStats
 	vmiReport.buildRuntimeLabels()
 
 	// Fill networkNames.
-	vmiReport.parseNetworkNames(vmi)
+	vmiReport.parseNetworkNames()
 
 	return vmiReport
 }
@@ -116,22 +116,21 @@ type d8NetworkSpec struct {
 // Annotation example:
 //
 //	network.deckhouse.io/networks-spec: '[{"type":"ClusterNetwork","name":"cnet1","ifName":"veth_cne8f3b5d3"},{"type":"ClusterNetwork","name":"cn-1003-for-e2e-test","ifName":"veth_cnce02ff17"}]'
-func (vmiReport *VirtualMachineInstanceReport) parseNetworkNames(vmi *k6tv1.VirtualMachineInstance) map[string]string {
-	networksSpecsRaw := vmi.GetAnnotations()["network.deckhouse.io/networks-spec"]
+func (vmiReport *VirtualMachineInstanceReport) parseNetworkNames() {
+	networksSpecsRaw := vmiReport.vmi.GetAnnotations()["network.deckhouse.io/networks-spec"]
 	if networksSpecsRaw == "" {
-		log.Log.Warningf("no d8 networks specs: annotations=%+v on VM %s: %v", vmi.GetAnnotations(), vmi.Name)
-		return nil
+		log.Log.Warningf("no d8 networks specs: annotations=%+v on VM %s", vmiReport.vmi.GetAnnotations(), vmiReport.vmi.Name)
+		return
 	}
 	var networksSpecs []d8NetworkSpec
 	err := json.Unmarshal([]byte(networksSpecsRaw), &networksSpecs)
 	if err != nil {
-		log.Log.Warningf("invalid d8 networks specs for network labels on VM %s: %v", vmi.Name, err)
-		return nil
+		log.Log.Warningf("invalid d8 networks specs for network labels on VM %s: %v", vmiReport.vmi.Name, err)
+		return
 	}
 
-	specs := make(map[string]string)
+	vmiReport.networkNames = make(map[string]string)
 	for _, n := range networksSpecs {
-		specs[n.IfName] = n.Name
+		vmiReport.networkNames[n.IfName] = n.Name
 	}
-	return specs
 }
