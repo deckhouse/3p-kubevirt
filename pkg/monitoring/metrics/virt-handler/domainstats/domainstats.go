@@ -119,6 +119,7 @@ type d8NetworkSpec struct {
 func (vmiReport *VirtualMachineInstanceReport) parseNetworkNames(vmi *k6tv1.VirtualMachineInstance) map[string]string {
 	networksSpecsRaw := vmi.GetAnnotations()["network.deckhouse.io/networks-spec"]
 	if networksSpecsRaw == "" {
+		log.Log.Warningf("no d8 networks specs: annotations=%+v on VM %s: %v", vmi.GetAnnotations(), vmi.Name)
 		return nil
 	}
 	var networksSpecs []d8NetworkSpec
