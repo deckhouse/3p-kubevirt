@@ -2999,8 +2999,8 @@ func validLiveUpdateDisks(oldVMSpec *virtv1.VirtualMachineSpec, vm *virtv1.Virtu
 	}
 	// Evaluate if any disks were removed and they were hotplugged volumes
 	for _, d := range oldDisks {
-		v := oldVols[d.Name]
-		if !storagetypes.IsHotplugVolume(v) {
+		v, ok := oldVols[d.Name]
+		if ok && !storagetypes.IsHotplugVolume(v) {
 			return false
 		}
 	}
