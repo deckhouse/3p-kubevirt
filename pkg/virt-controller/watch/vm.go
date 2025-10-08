@@ -2940,6 +2940,14 @@ func (c *VMController) trimDoneVolumeRequests(vm *virtv1.VirtualMachine) {
 	vm.Status.VolumeRequests = tmpVolRequests
 }
 
+// isCloudInitVolume checks if a volume is a cloud-init volume (NoCloud or ConfigDrive)
+func isCloudInitVolume(vol *virtv1.Volume) bool {
+	if vol == nil {
+		return false
+	}
+	return vol.VolumeSource.CloudInitNoCloud != nil || vol.VolumeSource.CloudInitConfigDrive != nil
+}
+
 func validLiveUpdateVolumes(oldVMSpec *virtv1.VirtualMachineSpec, vm *virtv1.VirtualMachine) bool {
 	oldVols := storagetypes.GetVolumesByName(&oldVMSpec.Template.Spec)
 	// Evaluate if any volume has changed or has been added
@@ -2958,6 +2966,9 @@ func validLiveUpdateVolumes(oldVMSpec *virtv1.VirtualMachineSpec, vm *virtv1.Vir
 			vm.Spec.UpdateVolumesStrategy != nil &&
 			*vm.Spec.UpdateVolumesStrategy == virtv1.UpdateVolumesStrategyMigration:
 			delete(oldVols, v.Name)
+		// CloudInitNoCloud volumes can be updated without restart
+		case isCloudInitVolume(&v) && isCloudInitVolume(oldVol):
+			delete(oldVols, v.Name)
 		// The volume has changed
 		case !equality.Semantic.DeepEqual(*oldVol, v):
 			return false
@@ -2965,9 +2976,9 @@ func validLiveUpdateVolumes(oldVMSpec *virtv1.VirtualMachineSpec, vm *virtv1.Vir
 			delete(oldVols, v.Name)
 		}
 	}
-	// Evaluate if any volumes were removed and they were hotplugged volumes
+	// Evaluate if any volumes were removed and they were hotplugged volumes or cloud-init volumes
 	for _, v := range oldVols {
-		if !storagetypes.IsHotplugVolume(v) {
+		if !storagetypes.IsHotplugVolume(v) && !isCloudInitVolume(v) {
 			return false
 		}
 	}
