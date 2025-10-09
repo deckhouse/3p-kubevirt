@@ -19,7 +19,7 @@ function prepare_repo() {
         "${API_REF_DIR}" >/dev/null 2>&1
     pushd ${API_REF_DIR}
     git checkout -B ${BRANCH_NAME}
-    git pull --rebase origin ${BRANCH_NAME}
+    git pull --rebase origin ${BRANCH_NAME} || echo "Branch $BRANCH_NAME does not exist on remote or pull failed."
     git rm -rf .
     git clean -fxd
     popd
