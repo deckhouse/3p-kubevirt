@@ -108,6 +108,7 @@ func (c *KubeVirtController) generateInstallStrategyJob(infraPlacement *v1.Compo
 							},
 							SecurityContext: &k8sv1.SecurityContext{
 								AllowPrivilegeEscalation: pointer.P(false),
+								ReadOnlyRootFilesystem:   pointer.P(true),
 								Capabilities: &k8sv1.Capabilities{
 									Drop: []k8sv1.Capability{"ALL"},
 								},
