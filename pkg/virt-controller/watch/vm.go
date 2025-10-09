@@ -966,7 +966,7 @@ func (c *VMController) handleVolumeUpdateRequest(vm *virtv1.VirtualMachine, vmi 
 	case vm.Spec.UpdateVolumesStrategy == nil ||
 		*vm.Spec.UpdateVolumesStrategy == virtv1.UpdateVolumesStrategyReplacement:
 		if !vmConditions.HasCondition(vm, virtv1.VirtualMachineRestartRequired) {
-			log.Log.Object(vm).Infof("Set restart required condition because of a volumes update")
+			log.Log.Object(vm).Infof("123Set restart required condition because of a volumes update")
 			// setRestartRequired(vm, "the volumes replacement is effective only after restart")
 		}
 	case *vm.Spec.UpdateVolumesStrategy == virtv1.UpdateVolumesStrategyMigration:
