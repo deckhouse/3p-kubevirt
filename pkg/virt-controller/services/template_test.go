@@ -4235,7 +4235,7 @@ var _ = Describe("Template", func() {
 				},
 				{
 					Name:      volumeName,
-					MountPath: "/" + volumeName,
+					MountPath: "/path/" + volumeName,
 				},
 			}))
 		})
