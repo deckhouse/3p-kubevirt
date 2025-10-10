@@ -7,7 +7,6 @@ GITHUB_USER="${GIT_AUTHOR_EMAIL:-deckhouse-BOaTswain@users.noreply.github.com}"
 GITHUB_USER_EMAIL="${GIT_AUTHOR_NAME:-deckhouse-BOaTswain}"
 THIRD_PARTY_REPO_NAME=$1
 KUBEVIRT_API_DIR_NAME=api
-KUBEVIRT_VERSION="v1.3.1"
 
 function prepare_repo() {
     NAME=$1
