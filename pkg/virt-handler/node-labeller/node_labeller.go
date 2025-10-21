@@ -196,6 +196,10 @@ func (n *NodeLabeller) run() error {
 		return err
 	}
 
+	if originalNode == nil {
+		return fmt.Errorf("got empty node %s without API errors: check kube-apiserver logs for problems", n.host)
+	}
+
 	if skipNodeLabelling(originalNode) {
 		return nil
 	}
