@@ -820,6 +820,19 @@ const (
 	VirtualMachineInstanceDecentralizedMigrationBlocked VirtualMachineInstanceMigrationConditionType = "decentralizedMigrationBlocked"
 	// VirtualMachineInstanceMigrationBlockedByBackup indicates that migration is waiting for backup to complete or abort
 	VirtualMachineInstanceMigrationBlockedByBackup VirtualMachineInstanceMigrationConditionType = "migrationBlockedByBackup"
+	VirtualMachineInstanceMigrationFailed          VirtualMachineInstanceMigrationConditionType = "migrationFailed"
+)
+
+const (
+	VirtualMachineInstanceMigrationFailedReasonVMIDoesNotExist                                    string = "VMIDoesNotExist"
+	VirtualMachineInstanceMigrationFailedReasonVMIIsShutdown                                      string = "VMIIsShutdown"
+	VirtualMachineInstanceMigrationFailedReasonTargetPodWasDeletedBecauseTimeoutExceeded          string = "TargetPodWasDeletedBecauseTimeoutExceeded"
+	VirtualMachineInstanceMigrationFailedReasonTargetPodShutdownDuringMigration                   string = "TargetPodShutdownDuringMigration"
+	VirtualMachineInstanceMigrationFailedReasonTargetPodDisappearedDuringMigration                string = "TargetPodDisappearedDuringMigration"
+	VirtualMachineInstanceMigrationFailedReasonMigrationStateClearedDuringMigration               string = "MigrationStateClearedDuringMigration"
+	VirtualMachineInstanceMigrationFailedReasonMigrationStateWasTakenOverByAnotherMigrationObject string = "MigrationStateWasTakenOverByAnotherMigrationObject"
+	VirtualMachineInstanceMigrationFailedReasonSourceNodeReportedMigrationFailed                  string = "SourceNodeReportedMigrationFailed"
+	VirtualMachineInstanceMigrationFailedReasonTargetAttachmentPodShutdownDuringMigration         string = "TargetAttachmentPodShutdownDuringMigration"
 )
 
 type VirtualMachineInstanceCondition struct {
