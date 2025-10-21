@@ -1009,8 +1009,6 @@ func (c *VMController) addStartRequest(vm *virtv1.VirtualMachine) error {
 	}
 	vm.Status.StateChangeRequests = append(vm.Status.StateChangeRequests, addRequest[0])
 
-	fmt.Println("BBBB")
-	fmt.Println(vm.Status.StateChangeRequests)
 	return nil
 }
 
