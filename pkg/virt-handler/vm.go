@@ -258,12 +258,10 @@ func NewController(
 		nam: migrations.NewNetworkAccessibilityManager(clientset),
 	}
 
-	pvcDiskImgCreator := func() hostdisk.PVCDiskImgCreator {
-		return hostdisk.NewPVCDiskImgCreator(recorder, c.clusterConfig.GetLessPVCSpaceToleration(), c.clusterConfig.GetMinimumReservePVCBytes())
-	}
-
-	c.pvcDiskImgCreator = pvcDiskImgCreator
-	c.hotplugVolumeMounter = hotplug_volume.NewVolumeMounterWithCreator(filepath.Join(virtPrivateDir, "hotplug-volume-mount-state"), kubeletPodsDir, pvcDiskImgCreator)
+	c.hotplugVolumeMounter = hotplug_volume.NewVolumeMounterWithCreator(filepath.Join(virtPrivateDir, "hotplug-volume-mount-state"), kubeletPodsDir,
+		func() hostdisk.PVCDiskImgCreator {
+			return hostdisk.NewPVCDiskImgCreator(recorder, c.clusterConfig.GetLessPVCSpaceToleration(), c.clusterConfig.GetMinimumReservePVCBytes())
+		})
 
 	_, err := vmiSourceInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc:    c.addFunc,
@@ -371,8 +369,7 @@ type VirtualMachineController struct {
 	hotplugContainerDiskMounter container_disk.HotplugMounter
 	nam                         *migrations.NetworkAccessibilityManager
 
-	checksumCtrl      *checksum_controller.Controller
-	pvcDiskImgCreator func() hostdisk.PVCDiskImgCreator
+	checksumCtrl *checksum_controller.Controller
 }
 
 type virtLauncherCriticalSecurebootError struct {
@@ -2855,52 +2852,6 @@ func replaceMigratedVolumesStatus(vmi *v1.VirtualMachineInstance) {
 
 }
 
-func (d *VirtualMachineController) prepareFilesystemDisksIfNotExists(vmi *v1.VirtualMachineInstance) error {
-	var socketFile string
-	info, found := d.launcherClients.Load(vmi.UID)
-	if found && info != nil {
-		socketFile = info.SocketFile
-	}
-	if socketFile == "" {
-		return fmt.Errorf("failed to find socketfile")
-	}
-
-	var launcherUID string
-	for uid, node := range vmi.Status.ActivePods {
-		if node == vmi.Status.MigrationState.TargetNode && strings.Contains(socketFile, string(uid)) {
-			launcherUID = string(uid)
-			break
-		}
-	}
-	if launcherUID == "" {
-		return fmt.Errorf("failed to find launcherUID")
-	}
-
-	for _, vol := range vmi.Status.MigratedVolumes {
-		isFilesystem := vol.DestinationPVCInfo.VolumeMode != nil && *vol.DestinationPVCInfo.VolumeMode == k8sv1.PersistentVolumeFilesystem
-		if !isFilesystem {
-			continue
-		}
-
-		volumeName := vol.VolumeName
-		diskPath := fmt.Sprintf("%s/%s/volumes/kubernetes.io~empty-dir/private/vmi-disks/%s/disk.img", util.KubeletPodsDir, launcherUID, volumeName)
-		exists, err := diskutils.FileExists(diskPath)
-		if err != nil {
-			return err
-		}
-		if exists {
-			continue
-		}
-
-		err = d.pvcDiskImgCreator().Create(vmi, volumeName, diskPath)
-		if err != nil {
-			return fmt.Errorf("failed to create PVC disk image: %v", err)
-		}
-
-	}
-	return nil
-}
-
 func (d *VirtualMachineController) vmUpdateHelperMigrationTarget(origVMI *v1.VirtualMachineInstance) error {
 	client, err := d.getLauncherClient(origVMI)
 	if err != nil {
@@ -2923,12 +2874,6 @@ func (d *VirtualMachineController) vmUpdateHelperMigrationTarget(origVMI *v1.Vir
 		// then there's nothing left to prepare on the target side
 		return nil
 	}
-
-	//err = d.prepareFilesystemDisksIfNotExists(vmi)
-	//if err != nil {
-	//	return err
-	//}
-
 	// The VolumeStatus is used to retrive additional information for the volume handling.
 	// For example, for filesystem PVC, the information are used to create a right size image.
 	// In the case of migrated volumes, we need to replace the original volume information with the
