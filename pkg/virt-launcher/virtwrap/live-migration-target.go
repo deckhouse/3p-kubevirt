@@ -158,7 +158,7 @@ func (l *LibvirtDomainManager) prepareMigrationTarget(
 		return fmt.Errorf("conversion failed: %v", err)
 	}
 
-	domainxml, err := xml.Marshal(domain)
+	domainxml, err := xml.Marshal(domain.Spec)
 	if err != nil {
 		return fmt.Errorf("marshalling domain failed: %v", err)
 	}
