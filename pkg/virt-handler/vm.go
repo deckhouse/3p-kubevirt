@@ -100,7 +100,6 @@ import (
 	hostdisk "kubevirt.io/kubevirt/pkg/host-disk"
 	neterrors "kubevirt.io/kubevirt/pkg/network/errors"
 	"kubevirt.io/kubevirt/pkg/storage/reservation"
-	storagetypes "kubevirt.io/kubevirt/pkg/storage/types"
 	virtutil "kubevirt.io/kubevirt/pkg/util"
 	virtconfig "kubevirt.io/kubevirt/pkg/virt-config"
 	virtcache "kubevirt.io/kubevirt/pkg/virt-handler/cache"
@@ -2877,18 +2876,15 @@ func (d *VirtualMachineController) prepareFilesystemDisksIfNotExists(vmi *v1.Vir
 		return fmt.Errorf("failed to find launcherUID")
 	}
 
-	for _, volumeStatus := range vmi.Status.VolumeStatus {
-		volumeName := volumeStatus.Name
-
-		if volumeStatus.PersistentVolumeClaimInfo == nil || volumeStatus.HotplugVolume != nil {
-			continue
-		}
-		if isBlockVolume(&vmi.Status, volumeName) {
+	for _, vol := range vmi.Status.MigratedVolumes {
+		isFilesystem := vol.DestinationPVCInfo.VolumeMode != nil && *vol.DestinationPVCInfo.VolumeMode == k8sv1.PersistentVolumeFilesystem
+		if !isFilesystem {
 			continue
 		}
 
-		volume := fmt.Sprintf("%s/%s/volumes/kubernetes.io~empty-dir/private/vmi-disks/%s/disk.img", util.KubeletPodsDir, launcherUID, volumeName)
-		_, err := os.Stat(volume)
+		volumeName := vol.VolumeName
+		diskPath := fmt.Sprintf("%s/%s/volumes/kubernetes.io~empty-dir/private/vmi-disks/%s/disk.img", util.KubeletPodsDir, launcherUID, volumeName)
+		_, err := os.Stat(diskPath)
 		switch {
 		case err == nil:
 			continue
@@ -2896,21 +2892,13 @@ func (d *VirtualMachineController) prepareFilesystemDisksIfNotExists(vmi *v1.Vir
 			return err
 		}
 
-		err = d.pvcDiskImgCreator().Create(vmi, volumeName, volume)
+		err = d.pvcDiskImgCreator().Create(vmi, volumeName, diskPath)
 		if err != nil {
 			return fmt.Errorf("failed to create PVC disk image: %v", err)
 		}
+
 	}
 	return nil
-}
-
-func isBlockVolume(vmiStatus *v1.VirtualMachineInstanceStatus, volumeName string) bool {
-	for _, status := range vmiStatus.VolumeStatus {
-		if status.Name == volumeName {
-			return status.PersistentVolumeClaimInfo != nil && storagetypes.IsPVCBlock(status.PersistentVolumeClaimInfo.VolumeMode)
-		}
-	}
-	return false
 }
 
 func (d *VirtualMachineController) vmUpdateHelperMigrationTarget(origVMI *v1.VirtualMachineInstance) error {
