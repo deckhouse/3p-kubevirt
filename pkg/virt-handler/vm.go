@@ -2924,10 +2924,10 @@ func (d *VirtualMachineController) vmUpdateHelperMigrationTarget(origVMI *v1.Vir
 		return nil
 	}
 
-	err = d.prepareFilesystemDisksIfNotExists(vmi)
-	if err != nil {
-		return err
-	}
+	//err = d.prepareFilesystemDisksIfNotExists(vmi)
+	//if err != nil {
+	//	return err
+	//}
 
 	// The VolumeStatus is used to retrive additional information for the volume handling.
 	// For example, for filesystem PVC, the information are used to create a right size image.
