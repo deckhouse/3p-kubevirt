@@ -100,6 +100,7 @@ import (
 	hostdisk "kubevirt.io/kubevirt/pkg/host-disk"
 	neterrors "kubevirt.io/kubevirt/pkg/network/errors"
 	"kubevirt.io/kubevirt/pkg/storage/reservation"
+	storagetypes "kubevirt.io/kubevirt/pkg/storage/types"
 	virtutil "kubevirt.io/kubevirt/pkg/util"
 	virtconfig "kubevirt.io/kubevirt/pkg/virt-config"
 	virtcache "kubevirt.io/kubevirt/pkg/virt-handler/cache"
@@ -258,10 +259,12 @@ func NewController(
 		nam: migrations.NewNetworkAccessibilityManager(clientset),
 	}
 
-	c.hotplugVolumeMounter = hotplug_volume.NewVolumeMounterWithCreator(filepath.Join(virtPrivateDir, "hotplug-volume-mount-state"), kubeletPodsDir,
-		func() hostdisk.PVCDiskImgCreator {
-			return hostdisk.NewPVCDiskImgCreator(recorder, c.clusterConfig.GetLessPVCSpaceToleration(), c.clusterConfig.GetMinimumReservePVCBytes())
-		})
+	pvcDiskImgCreator := func() hostdisk.PVCDiskImgCreator {
+		return hostdisk.NewPVCDiskImgCreator(recorder, c.clusterConfig.GetLessPVCSpaceToleration(), c.clusterConfig.GetMinimumReservePVCBytes())
+	}
+
+	c.pvcDiskImgCreator = pvcDiskImgCreator
+	c.hotplugVolumeMounter = hotplug_volume.NewVolumeMounterWithCreator(filepath.Join(virtPrivateDir, "hotplug-volume-mount-state"), kubeletPodsDir, pvcDiskImgCreator)
 
 	_, err := vmiSourceInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc:    c.addFunc,
@@ -369,7 +372,8 @@ type VirtualMachineController struct {
 	hotplugContainerDiskMounter container_disk.HotplugMounter
 	nam                         *migrations.NetworkAccessibilityManager
 
-	checksumCtrl *checksum_controller.Controller
+	checksumCtrl      *checksum_controller.Controller
+	pvcDiskImgCreator func() hostdisk.PVCDiskImgCreator
 }
 
 type virtLauncherCriticalSecurebootError struct {
@@ -2852,6 +2856,63 @@ func replaceMigratedVolumesStatus(vmi *v1.VirtualMachineInstance) {
 
 }
 
+func (d *VirtualMachineController) prepareFilesystemDisksIfNotExists(vmi *v1.VirtualMachineInstance) error {
+	var socketFile string
+	info, found := d.launcherClients.Load(vmi.UID)
+	if found && info != nil {
+		socketFile = info.SocketFile
+	}
+	if socketFile == "" {
+		return fmt.Errorf("failed to find socketfile")
+	}
+
+	var launcherUID string
+	for uid, node := range vmi.Status.ActivePods {
+		if node == vmi.Status.MigrationState.TargetNode && strings.Contains(socketFile, string(uid)) {
+			launcherUID = string(uid)
+			break
+		}
+	}
+	if launcherUID == "" {
+		return fmt.Errorf("failed to find launcherUID")
+	}
+
+	for _, volumeStatus := range vmi.Status.VolumeStatus {
+		volumeName := volumeStatus.Name
+
+		if volumeStatus.PersistentVolumeClaimInfo == nil || volumeStatus.HotplugVolume != nil {
+			continue
+		}
+		if isBlockVolume(&vmi.Status, volumeName) {
+			continue
+		}
+
+		volume := fmt.Sprintf("%s/%s/volumes/kubernetes.io~empty-dir/private/vmi-disks/%s/disk.img", util.KubeletPodsDir, launcherUID, volumeName)
+		_, err := os.Stat(volume)
+		switch {
+		case err == nil:
+			continue
+		case !os.IsNotExist(err):
+			return err
+		}
+
+		err = d.pvcDiskImgCreator().Create(vmi, volumeName, volume)
+		if err != nil {
+			return fmt.Errorf("failed to create PVC disk image: %v", err)
+		}
+	}
+	return nil
+}
+
+func isBlockVolume(vmiStatus *v1.VirtualMachineInstanceStatus, volumeName string) bool {
+	for _, status := range vmiStatus.VolumeStatus {
+		if status.Name == volumeName {
+			return status.PersistentVolumeClaimInfo != nil && storagetypes.IsPVCBlock(status.PersistentVolumeClaimInfo.VolumeMode)
+		}
+	}
+	return false
+}
+
 func (d *VirtualMachineController) vmUpdateHelperMigrationTarget(origVMI *v1.VirtualMachineInstance) error {
 	client, err := d.getLauncherClient(origVMI)
 	if err != nil {
@@ -2874,6 +2935,12 @@ func (d *VirtualMachineController) vmUpdateHelperMigrationTarget(origVMI *v1.Vir
 		// then there's nothing left to prepare on the target side
 		return nil
 	}
+
+	err = d.prepareFilesystemDisksIfNotExists(vmi)
+	if err != nil {
+		return err
+	}
+
 	// The VolumeStatus is used to retrive additional information for the volume handling.
 	// For example, for filesystem PVC, the information are used to create a right size image.
 	// In the case of migrated volumes, we need to replace the original volume information with the
