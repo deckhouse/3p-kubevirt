@@ -29,6 +29,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1996,14 +1997,21 @@ func boolToString(value *bool, defaultPositive bool, positive string, negative s
 }
 
 func GetImageInfo(imagePath string) (*containerdisk.DiskInfo, error) {
-
 	// #nosec No risk for attacket injection. Only get information about an image
-	out, err := exec.Command(
+	cmd := exec.Command(
 		"/usr/bin/qemu-img", "info", imagePath, "--output", "json",
-	).Output()
+	)
+
+	stderr, err := cmd.StderrPipe()
 	if err != nil {
-		return nil, fmt.Errorf("failed to invoke qemu-img: %v", err)
+		return nil, fmt.Errorf("failed to get stderr for qemu-img command: %v", err)
 	}
+	out, err := cmd.Output()
+	if err != nil {
+		errout, _ := io.ReadAll(stderr)
+		return nil, fmt.Errorf("failed to invoke qemu-img: %v: %s", err, errout)
+	}
+
 	info := &containerdisk.DiskInfo{}
 	err = json.Unmarshal(out, info)
 	if err != nil {

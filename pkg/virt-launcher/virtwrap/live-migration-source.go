@@ -923,6 +923,26 @@ func configureLocalDiskToMigrate(dom *libvirtxml.Domain, vmi *v1.VirtualMachineI
 	fsSrcBlockDstVols := getFsSrcBlockDstVols(vmi)
 	blockSrcFsDstVols := getBlockSrcFsDstVols(vmi)
 
+	// TODO: remove this begin
+	if migDisks != nil {
+		for k, v := range migDisks.localToMigrate {
+			log.DefaultLogger().Errorf("migDisks.localToMigrate: %s=%v", k, v)
+		}
+		for k, v := range migDisks.generated {
+			log.DefaultLogger().Errorf("migDisks.generated: %s=%v", k, v)
+		}
+		for k, v := range migDisks.shared {
+			log.DefaultLogger().Errorf("migDisks.shared: %s=%v", k, v)
+		}
+	}
+	for k, v := range fsSrcBlockDstVols {
+		log.DefaultLogger().Errorf("fsSrcBlockDstVols: %s=%v", k, v)
+	}
+	for k, v := range blockSrcFsDstVols {
+		log.DefaultLogger().Errorf("blockSrcFsDstVols: %s=%v", k, v)
+	}
+	// TODO: remove this end
+
 	for i, d := range dom.Devices.Disks {
 		if d.Alias == nil {
 			return fmt.Errorf("empty alias")
@@ -962,7 +982,7 @@ func configureLocalDiskToMigrate(dom *libvirtxml.Domain, vmi *v1.VirtualMachineI
 		if _, ok := blockSrcFsDstVols[name]; ok {
 			log.Log.V(2).Infof("Replace block source with destination for volume %s", name)
 			dom.Devices.Disks[i].Source.File = &libvirtxml.DomainDiskSourceFile{
-				File: hostdisk.GetMountedHostDiskDir(name),
+				File: filepath.Join(hostdisk.GetMountedHostDiskDir(name), "disk.img"),
 			}
 			dom.Devices.Disks[i].Source.Block = nil
 		}
