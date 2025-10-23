@@ -158,6 +158,12 @@ func (l *LibvirtDomainManager) prepareMigrationTarget(
 		return fmt.Errorf("conversion failed: %v", err)
 	}
 
+	domainxml, err := xml.Marshal(domain)
+	if err != nil {
+		return fmt.Errorf("marshalling domain failed: %v", err)
+	}
+	log.Log.Errorf("Domain XML: %s", domainxml)
+
 	dom, err := l.preStartHook(vmi, domain, true, options)
 	if err != nil {
 		return fmt.Errorf("pre-start pod-setup failed: %v", err)

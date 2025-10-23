@@ -2884,12 +2884,12 @@ func (d *VirtualMachineController) prepareFilesystemDisksIfNotExists(vmi *v1.Vir
 
 		volumeName := vol.VolumeName
 		diskPath := fmt.Sprintf("%s/%s/volumes/kubernetes.io~empty-dir/private/vmi-disks/%s/disk.img", util.KubeletPodsDir, launcherUID, volumeName)
-		_, err := os.Stat(diskPath)
-		switch {
-		case err == nil:
-			continue
-		case !os.IsNotExist(err):
+		exists, err := diskutils.FileExists(diskPath)
+		if err != nil {
 			return err
+		}
+		if exists {
+			continue
 		}
 
 		err = d.pvcDiskImgCreator().Create(vmi, volumeName, diskPath)
