@@ -1999,7 +1999,7 @@ func boolToString(value *bool, defaultPositive bool, positive string, negative s
 func GetImageInfo(imagePath string) (*containerdisk.DiskInfo, error) {
 	// #nosec No risk for attacket injection. Only get information about an image
 	cmd := exec.Command(
-		"/usr/bin/qemu-img", "info", imagePath, "--output", "json",
+		"/usr/bin/qemu-img", "info", "-U", imagePath, "--output", "json",
 	)
 
 	stderr, err := cmd.StderrPipe()

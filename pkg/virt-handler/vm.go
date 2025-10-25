@@ -37,7 +37,9 @@ import (
 	"time"
 
 	backendstorage "kubevirt.io/kubevirt/pkg/storage/backend-storage"
+	"kubevirt.io/kubevirt/pkg/unsafepath"
 	checksum_controller "kubevirt.io/kubevirt/pkg/virt-handler/checksum-controller"
+	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/converter"
 
 	cmdv1 "kubevirt.io/kubevirt/pkg/handler-launcher-com/cmd/v1"
 	pvctypes "kubevirt.io/kubevirt/pkg/storage/types"
@@ -1508,13 +1510,13 @@ func (d *VirtualMachineController) updatePVCSizeStatus(vmi *v1.VirtualMachineIns
 			continue
 		}
 
-		fileInfo, err := safepath.StatAtNoFollow(safeVolPath)
+		diskInfo, err := converter.GetImageInfo(unsafepath.UnsafeAbsolute(safeVolPath.Raw()))
 		if err != nil {
 			log.DefaultLogger().Warningf("failed to determine file size for volume %s", volPath)
 			continue
 		}
 
-		vmi.Status.VolumeStatus[volumeStatusIndex].Size = fileInfo.Size()
+		vmi.Status.VolumeStatus[volumeStatusIndex].Size = diskInfo.VirtualSize
 	}
 
 }
