@@ -1418,10 +1418,105 @@ func (d *VirtualMachineController) updateIsoSizeStatus(vmi *v1.VirtualMachineIns
 		for i := range vmi.Status.VolumeStatus {
 			if vmi.Status.VolumeStatus[i].Name == volume.Name {
 				vmi.Status.VolumeStatus[i].Size = fileInfo.Size()
-				continue
+				break
 			}
 		}
 	}
+}
+
+func (d *VirtualMachineController) updateStatusSize(vmi *v1.VirtualMachineInstance) {
+	var podUID string
+	if vmi.Status.Phase != v1.Running {
+		return
+	}
+
+	for k, v := range vmi.Status.ActivePods {
+		if v == vmi.Status.NodeName {
+			podUID = string(k)
+			break
+		}
+	}
+	if podUID == "" {
+		log.DefaultLogger().Warningf("failed to find pod UID for VMI %s", vmi.Name)
+		return
+	}
+
+	volumes := make(map[string]v1.Volume)
+	for _, volume := range vmi.Spec.Volumes {
+		volumes[volume.Name] = volume
+	}
+
+	volumeStatusIndexes := make(map[string]int, len(vmi.Status.VolumeStatus))
+	for i, volumeStatus := range vmi.Status.VolumeStatus {
+		volumeStatusIndexes[volumeStatus.Name] = i
+	}
+
+	for _, disk := range vmi.Spec.Domain.Devices.Disks {
+		volume, ok := volumes[disk.Name]
+		if !ok {
+			log.DefaultLogger().Warningf("No matching volume with name %s found", disk.Name)
+			continue
+		}
+
+		if volume.PersistentVolumeClaim == nil {
+			continue
+		}
+
+		volumeStatusIndex, found := volumeStatusIndexes[volume.Name]
+		if !found {
+			log.DefaultLogger().Warningf("No matching volume status with name %s found", volume.Name)
+			continue
+		}
+
+		volumeStatus := vmi.Status.VolumeStatus[volumeStatusIndex]
+		if volumeStatus.PersistentVolumeClaimInfo == nil {
+			log.DefaultLogger().Warningf("No PersistentVolumeClaimInfo found for volume %s", volume.Name)
+			continue
+		}
+
+		volumeMode := volumeStatus.PersistentVolumeClaimInfo.VolumeMode
+		volPath := ""
+		switch {
+		case volumeMode == nil:
+			log.DefaultLogger().Infof("Cannot detect volume mode for volume %s", volume.Name)
+			continue
+
+		case *volumeMode == k8sv1.PersistentVolumeBlock:
+			volPath = fmt.Sprintf("/dev/%s", volume.Name)
+		case *volumeMode == k8sv1.PersistentVolumeFilesystem:
+			volPath = fmt.Sprintf("/var/run/kubevirt-private/vmi-disks/%s/disk.img", volume.Name)
+		default:
+			log.DefaultLogger().Errorf("Unknown volume mode %s for volume %s", *volumeMode, volume.Name)
+			continue
+		}
+
+		res, err := d.podIsolationDetector.Detect(vmi)
+		if err != nil {
+			log.DefaultLogger().Reason(err).Warningf("failed to detect VMI %s", vmi.Name)
+			continue
+		}
+
+		rootPath, err := res.MountRoot()
+		if err != nil {
+			log.DefaultLogger().Reason(err).Warningf("failed to detect VMI %s", vmi.Name)
+			continue
+		}
+
+		safeVolPath, err := rootPath.AppendAndResolveWithRelativeRoot(volPath)
+		if err != nil {
+			log.DefaultLogger().Warningf("failed to determine file size for volume %s", volPath)
+			continue
+		}
+
+		fileInfo, err := safepath.StatAtNoFollow(safeVolPath)
+		if err != nil {
+			log.DefaultLogger().Warningf("failed to determine file size for volume %s", volPath)
+			continue
+		}
+
+		vmi.Status.VolumeStatus[volumeStatusIndex].Size = fileInfo.Size()
+	}
+
 }
 
 func (d *VirtualMachineController) updateSELinuxContext(vmi *v1.VirtualMachineInstance) error {
@@ -1444,6 +1539,7 @@ func (d *VirtualMachineController) updateSELinuxContext(vmi *v1.VirtualMachineIn
 
 func (d *VirtualMachineController) updateVMIStatusFromDomain(vmi *v1.VirtualMachineInstance, domain *api.Domain) error {
 	d.updateIsoSizeStatus(vmi)
+	d.updateStatusSize(vmi)
 	err := d.updateSELinuxContext(vmi)
 	if err != nil {
 		log.Log.Reason(err).Errorf("couldn't find the SELinux context for %s", vmi.Name)
