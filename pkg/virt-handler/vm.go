@@ -1424,7 +1424,7 @@ func (d *VirtualMachineController) updateIsoSizeStatus(vmi *v1.VirtualMachineIns
 	}
 }
 
-func (d *VirtualMachineController) updateStatusSize(vmi *v1.VirtualMachineInstance) {
+func (d *VirtualMachineController) updatePVCSizeStatus(vmi *v1.VirtualMachineInstance) {
 	var podUID string
 	if vmi.Status.Phase != v1.Running {
 		return
@@ -1539,7 +1539,6 @@ func (d *VirtualMachineController) updateSELinuxContext(vmi *v1.VirtualMachineIn
 
 func (d *VirtualMachineController) updateVMIStatusFromDomain(vmi *v1.VirtualMachineInstance, domain *api.Domain) error {
 	d.updateIsoSizeStatus(vmi)
-	d.updateStatusSize(vmi)
 	err := d.updateSELinuxContext(vmi)
 	if err != nil {
 		log.Log.Reason(err).Errorf("couldn't find the SELinux context for %s", vmi.Name)
@@ -1553,6 +1552,7 @@ func (d *VirtualMachineController) updateVMIStatusFromDomain(vmi *v1.VirtualMach
 		return err
 	}
 	err = d.netStat.UpdateStatus(vmi, domain)
+	d.updatePVCSizeStatus(vmi)
 	return err
 }
 
