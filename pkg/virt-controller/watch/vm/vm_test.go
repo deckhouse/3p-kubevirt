@@ -5515,20 +5515,16 @@ var _ = Describe("VirtualMachine", func() {
 					vmi := SetupVMIFromVM(vm)
 					vmi, err := virtFakeClient.KubevirtV1().VirtualMachineInstances(vm.Namespace).Create(context.Background(), vmi, metav1.CreateOptions{})
 					Expect(err).NotTo(HaveOccurred())
-					controller.vmiIndexer.Add(vmi)
 
 					vm.Spec.Template.Spec.Domain.CPU = &v1.CPU{
 						Sockets: 3,
 					}
-					addVirtualMachine(vm)
-					vm, err = virtFakeClient.KubevirtV1().VirtualMachines(vm.Namespace).Create(context.Background(), vm, metav1.CreateOptions{})
-					Expect(err).NotTo(HaveOccurred())
 
-					sanityExecute(vm)
+					err = controller.handleCPUChangeRequest(vm, vmi)
+					Expect(err).ToNot(HaveOccurred())
 
-					vm, err = virtFakeClient.KubevirtV1().VirtualMachines(vm.Namespace).Get(context.Background(), vm.Name, metav1.GetOptions{})
-					Expect(err).NotTo(HaveOccurred())
-					Expect(vm).To(matcher.HaveConditionTrue(v1.VirtualMachineRestartRequired))
+					vmConditionController := virtcontroller.NewVirtualMachineConditionManager()
+					Expect(vmConditionController.HasCondition(vm, v1.VirtualMachineRestartRequired)).To(BeTrue())
 				})
 			})
 
@@ -6412,6 +6408,8 @@ var _ = Describe("VirtualMachine", func() {
 			})
 
 			It("should appear when VM doesn't specify maxSockets and sockets go above cluster-wide maxSockets", func() {
+				testutils.UpdateFakeKubeVirtClusterConfig(kvStore, kv)
+
 				var maxSockets uint32 = 8
 
 				By("Creating a VM with CPU sockets set to the cluster maxiumum")
@@ -6421,6 +6419,7 @@ var _ = Describe("VirtualMachine", func() {
 
 				By("Creating a VMI with cluster max")
 				vmi = SetupVMIFromVM(vm)
+				watchtesting.MarkAsReady(vmi)
 				controller.vmiIndexer.Add(vmi)
 
 				By("Bumping the VM sockets above the cluster maximum")
@@ -6469,10 +6468,13 @@ var _ = Describe("VirtualMachine", func() {
 			})
 
 			It("should appear when VM sockets count is reduced", func() {
+				testutils.UpdateFakeKubeVirtClusterConfig(kvStore, kv)
+
 				By("Creating a VM with two sockets")
 				vm.Spec.Template.Spec.Domain.CPU.Sockets = 2
 
 				vmi = SetupVMIFromVM(vm)
+				watchtesting.MarkAsReady(vmi)
 				controller.vmiIndexer.Add(vmi)
 
 				By("Creating a Controller Revision with two sockets")

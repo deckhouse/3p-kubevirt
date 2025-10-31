@@ -269,7 +269,7 @@ var _ = Describe("Template", func() {
 			const (
 				testNamespace        = "default"
 				computeContainerName = "d8v-compute"
-				kvmResource          = "devices.kubevirt.io/kvm"
+				kvmResource          = "devices.virtualization.deckhouse.io/kvm"
 				allowEmulationOption = "--allow-emulation"
 			)
 
