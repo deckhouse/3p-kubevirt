@@ -26,9 +26,12 @@ package converter
 */
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
+	"os/exec"
 	"slices"
 	"strconv"
 	"strings"
@@ -1432,4 +1435,28 @@ func convertEFIConfiguration(input *convertertypes.EFIConfiguration) *compute.EF
 		SecureLoader:              input.SecureLoader,
 		UsesFirmwareAutoSelection: input.UsesFirmwareAutoSelection,
 	}
+}
+
+func GetImageInfo(imagePath string) (*disk.DiskInfo, error) {
+	// #nosec No risk for attacket injection. Only get information about an image
+	cmd := exec.Command(
+		"/usr/bin/qemu-img", "info", "-U", imagePath, "--output", "json",
+	)
+
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get stderr for qemu-img command: %v", err)
+	}
+	out, err := cmd.Output()
+	if err != nil {
+		errout, _ := io.ReadAll(stderr)
+		return nil, fmt.Errorf("failed to invoke qemu-img: %v: %s", err, errout)
+	}
+
+	info := &disk.DiskInfo{}
+	err = json.Unmarshal(out, info)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse disk info: %v", err)
+	}
+	return info, err
 }
