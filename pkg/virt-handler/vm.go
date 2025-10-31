@@ -37,7 +37,9 @@ import (
 	"time"
 
 	backendstorage "kubevirt.io/kubevirt/pkg/storage/backend-storage"
+	"kubevirt.io/kubevirt/pkg/unsafepath"
 	checksum_controller "kubevirt.io/kubevirt/pkg/virt-handler/checksum-controller"
+	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/converter"
 
 	cmdv1 "kubevirt.io/kubevirt/pkg/handler-launcher-com/cmd/v1"
 	pvctypes "kubevirt.io/kubevirt/pkg/storage/types"
@@ -258,10 +260,11 @@ func NewController(
 		nam: migrations.NewNetworkAccessibilityManager(clientset),
 	}
 
-	c.hotplugVolumeMounter = hotplug_volume.NewVolumeMounterWithCreator(filepath.Join(virtPrivateDir, "hotplug-volume-mount-state"), kubeletPodsDir,
-		func() hostdisk.PVCDiskImgCreator {
-			return hostdisk.NewPVCDiskImgCreator(recorder, c.clusterConfig.GetLessPVCSpaceToleration(), c.clusterConfig.GetMinimumReservePVCBytes())
-		})
+	pvcDiskImgCreator := func() hostdisk.PVCDiskImgCreator {
+		return hostdisk.NewPVCDiskImgCreator(recorder, c.clusterConfig.GetLessPVCSpaceToleration(), c.clusterConfig.GetMinimumReservePVCBytes())
+	}
+	c.pvcDiskImgCreator = pvcDiskImgCreator
+	c.hotplugVolumeMounter = hotplug_volume.NewVolumeMounterWithCreator(filepath.Join(virtPrivateDir, "hotplug-volume-mount-state"), kubeletPodsDir, pvcDiskImgCreator)
 
 	_, err := vmiSourceInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc:    c.addFunc,
@@ -369,7 +372,8 @@ type VirtualMachineController struct {
 	hotplugContainerDiskMounter container_disk.HotplugMounter
 	nam                         *migrations.NetworkAccessibilityManager
 
-	checksumCtrl *checksum_controller.Controller
+	checksumCtrl      *checksum_controller.Controller
+	pvcDiskImgCreator func() hostdisk.PVCDiskImgCreator
 }
 
 type virtLauncherCriticalSecurebootError struct {
@@ -1362,9 +1366,9 @@ func (d *VirtualMachineController) updateIsoSizeStatus(vmi *v1.VirtualMachineIns
 		return
 	}
 
-	for k, v := range vmi.Status.ActivePods {
-		if v == vmi.Status.NodeName {
-			podUID = string(k)
+	for uid, nodeName := range vmi.Status.ActivePods {
+		if nodeName == vmi.Status.NodeName {
+			podUID = string(uid)
 			break
 		}
 	}
@@ -1416,10 +1420,115 @@ func (d *VirtualMachineController) updateIsoSizeStatus(vmi *v1.VirtualMachineIns
 		for i := range vmi.Status.VolumeStatus {
 			if vmi.Status.VolumeStatus[i].Name == volume.Name {
 				vmi.Status.VolumeStatus[i].Size = fileInfo.Size()
-				continue
+				break
 			}
 		}
 	}
+}
+
+func (d *VirtualMachineController) updatePVCSizeStatus(vmi *v1.VirtualMachineInstance) {
+	var podUID string
+	if vmi.Status.Phase != v1.Running {
+		return
+	}
+
+	for k, v := range vmi.Status.ActivePods {
+		if v == vmi.Status.NodeName {
+			podUID = string(k)
+			break
+		}
+	}
+	if podUID == "" {
+		log.DefaultLogger().Warningf("failed to find pod UID for VMI %s", vmi.Name)
+		return
+	}
+
+	volumes := make(map[string]v1.Volume)
+	for _, volume := range vmi.Spec.Volumes {
+		volumes[volume.Name] = volume
+	}
+
+	volumeStatusIndexes := make(map[string]int, len(vmi.Status.VolumeStatus))
+	for i, volumeStatus := range vmi.Status.VolumeStatus {
+		volumeStatusIndexes[volumeStatus.Name] = i
+	}
+
+	for _, disk := range vmi.Spec.Domain.Devices.Disks {
+		volume, ok := volumes[disk.Name]
+		if !ok {
+			log.DefaultLogger().Warningf("No matching volume with name %s found", disk.Name)
+			continue
+		}
+
+		if volume.PersistentVolumeClaim == nil {
+			continue
+		}
+
+		volumeStatusIndex, found := volumeStatusIndexes[volume.Name]
+		if !found {
+			log.DefaultLogger().Warningf("No matching volume status with name %s found", volume.Name)
+			continue
+		}
+
+		volumeStatus := vmi.Status.VolumeStatus[volumeStatusIndex]
+		if volumeStatus.PersistentVolumeClaimInfo == nil {
+			log.DefaultLogger().Warningf("No PersistentVolumeClaimInfo found for volume %s", volume.Name)
+			continue
+		}
+
+		volumeMode := volumeStatus.PersistentVolumeClaimInfo.VolumeMode
+		hotplugged := volumeStatus.HotplugVolume != nil
+
+		volPath := ""
+		switch {
+		case volumeMode == nil:
+			log.DefaultLogger().Infof("Cannot detect volume mode for volume %s", volume.Name)
+			continue
+
+		case *volumeMode == k8sv1.PersistentVolumeBlock:
+			if hotplugged {
+				volPath = fmt.Sprintf("/var/run/kubevirt/hotplug-disks/%s", volume.Name)
+			} else {
+				volPath = fmt.Sprintf("/dev/%s", volume.Name)
+			}
+		case *volumeMode == k8sv1.PersistentVolumeFilesystem:
+			if hotplugged {
+				volPath = fmt.Sprintf("/var/run/kubevirt/hotplug-disks/%s/disk.img", volume.Name)
+			} else {
+				volPath = fmt.Sprintf("/var/run/kubevirt-private/vmi-disks/%s/disk.img", volume.Name)
+			}
+		default:
+			log.DefaultLogger().Errorf("Unknown volume mode %s for volume %s", *volumeMode, volume.Name)
+			continue
+		}
+
+		res, err := d.podIsolationDetector.Detect(vmi)
+		if err != nil {
+			log.DefaultLogger().Reason(err).Warningf("failed to detect VMI %s", vmi.Name)
+			continue
+		}
+
+		rootPath, err := res.MountRoot()
+		if err != nil {
+			log.DefaultLogger().Reason(err).Warningf("failed to detect VMI %s", vmi.Name)
+			continue
+		}
+
+		safeVolPath, err := rootPath.AppendAndResolveWithRelativeRoot(volPath)
+		if err != nil {
+			log.DefaultLogger().Warningf("failed to determine file size for volume %s", volPath)
+			continue
+		}
+
+		diskInfo, err := converter.GetImageInfo(unsafepath.UnsafeAbsolute(safeVolPath.Raw()))
+		if err != nil {
+			log.DefaultLogger().Warningf("failed to determine file size for volume %s", volPath)
+			continue
+		}
+
+		vmi.Status.VolumeStatus[volumeStatusIndex].Size = diskInfo.VirtualSize
+	}
+
 }
 
 func (d *VirtualMachineController) updateSELinuxContext(vmi *v1.VirtualMachineInstance) error {
@@ -1455,6 +1564,7 @@ func (d *VirtualMachineController) updateVMIStatusFromDomain(vmi *v1.VirtualMach
 		return err
 	}
 	err = d.netStat.UpdateStatus(vmi, domain)
+	d.updatePVCSizeStatus(vmi)
 	return err
 }
 
