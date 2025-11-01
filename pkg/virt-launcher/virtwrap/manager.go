@@ -42,10 +42,10 @@ import (
 	"syscall"
 	"time"
 
-	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/device/hostdevice/dra"
 	"kubevirt.io/kubevirt/pkg/util/checksum"
 	"kubevirt.io/kubevirt/pkg/util/syncobject"
 	migrationproxy "kubevirt.io/kubevirt/pkg/virt-handler/migration-proxy"
+	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/device/hostdevice/dra"
 	virtcache "kubevirt.io/kubevirt/tools/cache"
 
 	"k8s.io/utils/pointer"
@@ -203,10 +203,10 @@ type LibvirtDomainManager struct {
 	cpuSetGetter                  func() ([]int, error)
 	imageVolumeFeatureGateEnabled bool
 	setTimeOnce                   sync.Once
-	rebootShutdownPolicyWasSet bool
+	rebootShutdownPolicyWasSet    bool
 
-	checksum syncobject.SyncObject[string]
-	migrationProxy             *migrationProxyManager
+	checksum       syncobject.SyncObject[string]
+	migrationProxy *migrationProxyManager
 }
 
 type migrationProxyManager struct {
@@ -1109,8 +1109,18 @@ func (l *LibvirtDomainManager) generateConverterContext(vmi *v1.VirtualMachineIn
 		}
 
 		_, existInCache := l.disksInfo[volume.Name]
-		if volume.ContainerDisk != nil && !existInCache {
+		if volume.ContainerDisk != nil && !existInCache && !volume.ContainerDisk.Hotpluggable {
 			info, err := osdisk.GetDiskInfoWithValidation(containerdisk.GetDiskTargetPathFromLauncherView(diskIndex), l.diskMemoryLimitBytes)
+			if err != nil {
+				return nil, fmt.Errorf("failed to get container disk info: %v", err)
+			}
+			if err := osdisk.VerifyImage(info); err != nil {
+				return nil, fmt.Errorf("invalid image in containerDisk %v: %v", volume.Name, err)
+			}
+			l.disksInfo[volume.Name] = info
+		} else if volume.ContainerDisk != nil && !existInCache && volume.ContainerDisk.Hotpluggable {
+			imagePath := converter.GetHotplugContainerDiskPath(volume.Name)
+			info, err := osdisk.GetDiskInfoWithValidation(imagePath, l.diskMemoryLimitBytes)
 			if err != nil {
 				return nil, fmt.Errorf("failed to get container disk info: %v", err)
 			}
