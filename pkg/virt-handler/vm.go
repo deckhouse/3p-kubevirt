@@ -2250,10 +2250,9 @@ func (c *VirtualMachineController) handleStartingVMI(
 		return false, err
 	}
 
-	if ready, err := c.hotplugContainerDiskMounter.ContainerDisksReady(vmi, info.NotInitializedSince, ""); ready && err == nil {
-		if _, err := c.hotplugContainerDiskMounter.MountAndVerify(vmi); err != nil {
-			return false, err
-		}
+	_, err = c.hotplugContainerDiskMounter.MountAndVerify(vmi)
+	if err != nil {
+		return false, err
 	}
 
 	if err := c.hotplugVolumeMounter.Mount(vmi, cgroupManager); err != nil {
