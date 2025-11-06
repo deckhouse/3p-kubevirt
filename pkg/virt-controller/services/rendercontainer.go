@@ -265,10 +265,9 @@ func requiredCapabilities(vmi *v1.VirtualMachineInstance) []k8sv1.Capability {
 	// These capabilies are always required because we set them on virt-launcher binary
 	capabilities := []k8sv1.Capability{CAP_NET_BIND_SERVICE}
 
-	if !util.IsNonRootVMI(vmi) {
-		// add a CAP_SYS_NICE capability to allow setting cpu affinity
-		capabilities = append(capabilities, CAP_SYS_NICE)
-	}
+	// Removed SYS_NICE capability to comply with Deckhouse pod security policies.
+	// This disables CPU pinning/affinity features but ensures compliance with
+	// baseline pod security standards (D8AllowedCapabilities).
 
 	return capabilities
 }
