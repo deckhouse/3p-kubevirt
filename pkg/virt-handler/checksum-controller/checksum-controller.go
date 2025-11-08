@@ -63,7 +63,7 @@ func (c *Controller) Run(stopCh <-chan struct{}) {
 		for key := range c.objects {
 			c.queue.Add(key)
 		}
-	}, time.Minute, stopCh)
+	}, 5*time.Second, stopCh)
 
 	wait.Until(c.runWorker, time.Second, stopCh)
 }
