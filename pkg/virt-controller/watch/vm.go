@@ -793,6 +793,30 @@ func (c *VMController) VMIAffinityPatch(vm *virtv1.VirtualMachine, vmi *virtv1.V
 	return err
 }
 
+func (c *VMController) vmiTolerationsPatch(vm *virtv1.VirtualMachine, vmi *virtv1.VirtualMachineInstance) error {
+	patchset := patch.New()
+	if len(vm.Spec.Template.Spec.Tolerations) > 0 {
+		if len(vmi.Spec.Tolerations) == 0 {
+			patchset.AddOption(patch.WithAdd("/spec/tolerations", vm.Spec.Template.Spec.Tolerations))
+		} else {
+			patchset.AddOption(
+				patch.WithTest("/spec/tolerations", vmi.Spec.Tolerations),
+				patch.WithReplace("/spec/tolerations", vm.Spec.Template.Spec.Tolerations),
+			)
+		}
+	} else {
+		patchset.AddOption(patch.WithRemove("/spec/tolerations"))
+	}
+
+	generatedPatch, err := patchset.GeneratePayload()
+	if err != nil {
+		return err
+	}
+
+	_, err = c.clientset.VirtualMachineInstance(vmi.Namespace).Patch(context.Background(), vmi.Name, types.JSONPatchType, generatedPatch, metav1.PatchOptions{})
+	return err
+}
+
 func (c *VMController) handleAffinityChangeRequest(vm *virtv1.VirtualMachine, vmi *virtv1.VirtualMachineInstance) error {
 	if vmi == nil || vmi.DeletionTimestamp != nil {
 		return nil
@@ -805,8 +829,9 @@ func (c *VMController) handleAffinityChangeRequest(vm *virtv1.VirtualMachine, vm
 
 	hasNodeSelectorChanged := !equality.Semantic.DeepEqual(vmCopyWithInstancetype.Spec.Template.Spec.NodeSelector, vmi.Spec.NodeSelector)
 	hasNodeAffinityChanged := !equality.Semantic.DeepEqual(vmCopyWithInstancetype.Spec.Template.Spec.Affinity, vmi.Spec.Affinity)
+	hasTolerationsChanged := !equality.Semantic.DeepEqual(vmCopyWithInstancetype.Spec.Template.Spec.Tolerations, vmi.Spec.Tolerations)
 
-	if migrations.IsMigrating(vmi) && (hasNodeSelectorChanged || hasNodeAffinityChanged) {
+	if migrations.IsMigrating(vmi) && (hasNodeSelectorChanged || hasNodeAffinityChanged || hasTolerationsChanged) {
 		return fmt.Errorf("Node affinity should not be changed during VMI migration")
 	}
 
@@ -823,6 +848,14 @@ func (c *VMController) handleAffinityChangeRequest(vm *virtv1.VirtualMachine, vm
 			return err
 		}
 	}
+
+	if hasTolerationsChanged {
+		if err := c.vmiTolerationsPatch(vmCopyWithInstancetype, vmi); err != nil {
+			log.Log.Object(vmi).Errorf("unable to patch vmi to update tolerations: %v", err)
+			return err
+		}
+	}
+
 	return nil
 }
 
@@ -3059,6 +3092,7 @@ func (c *VMController) addRestartRequiredIfNeeded(lastSeenVMSpec *virtv1.Virtual
 
 		lastSeenVM.Spec.Template.Spec.NodeSelector = currentVM.Spec.Template.Spec.NodeSelector
 		lastSeenVM.Spec.Template.Spec.Affinity = currentVM.Spec.Template.Spec.Affinity
+		lastSeenVM.Spec.Template.Spec.Tolerations = currentVM.Spec.Template.Spec.Tolerations
 	}
 
 	if !equality.Semantic.DeepEqual(lastSeenVM.Spec.Template.Spec, currentVM.Spec.Template.Spec) {
