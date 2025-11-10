@@ -33,7 +33,7 @@ import (
 
 const (
 	vmiSubresourceURL               = "/apis/subresources.kubevirt.io/%s"
-	vmiSubresourceVirtualizationURL = "/apis/subresources.virtualization.deckhouse.io/v1alpha2" // v1alpha2/namespaces/%s/apivirtualmachines/%s/%s
+	vmiSubresourceVirtualizationURL = "/apis/subresources.virtualization.deckhouse.io/v1alpha2" // v1alpha2/namespaces/%s/virtualmachines/%s/%s
 )
 
 type SerialConsoleOptions struct {
@@ -274,7 +274,7 @@ func (c *virtualMachineInstances) AddVolume(ctx context.Context, name string, ad
 	return c.client.Put().
 		AbsPath(vmiSubresourceVirtualizationURL).
 		Namespace(c.ns).
-		Resource("apivirtualmachines").
+		Resource("virtualmachines").
 		Name(name).
 		SubResource("addvolume").
 		Body(body).
@@ -291,7 +291,7 @@ func (c *virtualMachineInstances) RemoveVolume(ctx context.Context, name string,
 	return c.client.Put().
 		AbsPath(vmiSubresourceVirtualizationURL).
 		Namespace(c.ns).
-		Resource("apivirtualmachines").
+		Resource("virtualmachines").
 		Name(name).
 		SubResource("removevolume").
 		Body(body).
