@@ -59,10 +59,11 @@ import (
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/utils/trace"
 
+	cdiv1 "kubevirt.io/containerized-data-importer-api/pkg/apis/core/v1beta1"
+
 	virtv1 "kubevirt.io/api/core/v1"
 	"kubevirt.io/client-go/kubecli"
 	"kubevirt.io/client-go/log"
-	cdiv1 "kubevirt.io/containerized-data-importer-api/pkg/apis/core/v1beta1"
 
 	"kubevirt.io/kubevirt/pkg/apimachinery/patch"
 	"kubevirt.io/kubevirt/pkg/controller"
@@ -708,16 +709,15 @@ func (c *Controller) VMIAffinityPatch(vm *virtv1.VirtualMachine, vmi *virtv1.Vir
 
 func (c *Controller) vmiTolerationsPatch(vm *virtv1.VirtualMachine, vmi *virtv1.VirtualMachineInstance) error {
 	patchset := patch.New()
-
-	if vm.Spec.Template.Spec.Tolerations != nil {
-		if vmi.Spec.Tolerations == nil {
+	if len(vm.Spec.Template.Spec.Tolerations) > 0 {
+		if len(vmi.Spec.Tolerations) == 0 {
 			patchset.AddOption(patch.WithAdd("/spec/tolerations", vm.Spec.Template.Spec.Tolerations))
 		} else {
 			patchset.AddOption(
 				patch.WithTest("/spec/tolerations", vmi.Spec.Tolerations),
-				patch.WithReplace("/spec/tolerations", vm.Spec.Template.Spec.Tolerations))
+				patch.WithReplace("/spec/tolerations", vm.Spec.Template.Spec.Tolerations),
+			)
 		}
-
 	} else {
 		patchset.AddOption(patch.WithRemove("/spec/tolerations"))
 	}
@@ -769,8 +769,9 @@ func (c *Controller) handleAffinityChangeRequest(vm *virtv1.VirtualMachine, vmi 
 
 	hasNodeSelectorChanged := !equality.Semantic.DeepEqual(vmCopyWithInstancetype.Spec.Template.Spec.NodeSelector, vmi.Spec.NodeSelector)
 	hasNodeAffinityChanged := !equality.Semantic.DeepEqual(vmCopyWithInstancetype.Spec.Template.Spec.Affinity, vmi.Spec.Affinity)
+	hasTolerationsChanged := !equality.Semantic.DeepEqual(vmCopyWithInstancetype.Spec.Template.Spec.Tolerations, vmi.Spec.Tolerations)
 
-	if migrations.IsMigrating(vmi) && (hasNodeSelectorChanged || hasNodeAffinityChanged) {
+	if migrations.IsMigrating(vmi) && (hasNodeSelectorChanged || hasNodeAffinityChanged || hasTolerationsChanged) {
 		return fmt.Errorf("Node affinity should not be changed during VMI migration")
 	}
 
@@ -787,6 +788,14 @@ func (c *Controller) handleAffinityChangeRequest(vm *virtv1.VirtualMachine, vmi 
 			return err
 		}
 	}
+
+	if hasTolerationsChanged {
+		if err := c.vmiTolerationsPatch(vmCopyWithInstancetype, vmi); err != nil {
+			log.Log.Object(vmi).Errorf("unable to patch vmi to update tolerations: %v", err)
+			return err
+		}
+	}
+
 	return nil
 }
 
@@ -3061,6 +3070,7 @@ func (c *Controller) addRestartRequiredIfNeeded(lastSeenVMSpec *virtv1.VirtualMa
 
 		lastSeenVM.Spec.Template.Spec.NodeSelector = currentVM.Spec.Template.Spec.NodeSelector
 		lastSeenVM.Spec.Template.Spec.Affinity = currentVM.Spec.Template.Spec.Affinity
+		lastSeenVM.Spec.Template.Spec.Tolerations = currentVM.Spec.Template.Spec.Tolerations
 		lastSeenVM.Spec.Template.Spec.Tolerations = currentVM.Spec.Template.Spec.Tolerations
 	} else {
 		// In the case live-updates aren't enable the volume set of the VM can be still changed by volume hotplugging.
