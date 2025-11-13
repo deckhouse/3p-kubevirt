@@ -36,6 +36,7 @@ import (
 	"strings"
 	"time"
 
+	"kubevirt.io/kubevirt/pkg/apimachinery/patch"
 	backendstorage "kubevirt.io/kubevirt/pkg/storage/backend-storage"
 	"kubevirt.io/kubevirt/pkg/unsafepath"
 	checksum_controller "kubevirt.io/kubevirt/pkg/virt-handler/checksum-controller"
@@ -3553,6 +3554,16 @@ func (d *VirtualMachineController) processVmUpdate(vmi *v1.VirtualMachineInstanc
 		return err
 	}
 
+	requeue, err := d.cleanupTargetLabelIfMigrationFailed(vmi)
+	if err != nil {
+		return err
+	}
+
+	if requeue {
+		d.Queue.AddAfter(controller.VirtualMachineInstanceKey(vmi), time.Second*1)
+		return nil
+	}
+
 	if d.isPreMigrationTarget(vmi) {
 		return d.vmUpdateHelperMigrationTarget(vmi)
 	} else if d.isMigrationSource(vmi) {
@@ -3560,6 +3571,33 @@ func (d *VirtualMachineController) processVmUpdate(vmi *v1.VirtualMachineInstanc
 	} else {
 		return d.vmUpdateHelperDefault(vmi, domain != nil)
 	}
+}
+
+func (d *VirtualMachineController) cleanupTargetLabelIfMigrationFailed(vmi *v1.VirtualMachineInstance) (bool, error) {
+	if vmi.Status.MigrationState == nil || !(vmi.Status.MigrationState.Failed || vmi.Status.MigrationState.Completed) {
+		return false, nil
+	}
+
+	if d.isPreMigrationTarget(vmi) {
+		return false, nil
+	}
+
+	_, exists := vmi.Labels[v1.MigrationTargetNodeNameLabel]
+	if !exists {
+		return false, nil
+	}
+
+	patchBytes, err := patch.New(patch.WithRemove(fmt.Sprintf("/metadata/labels/%s", patch.EscapeJSONPointer(v1.MigrationTargetNodeNameLabel)))).GeneratePayload()
+	if err != nil {
+		return false, err
+	}
+
+	_, err = d.clientset.VirtualMachineInstance(vmi.Namespace).Patch(context.Background(), vmi.Name, types.JSONPatchType, patchBytes, metav1.PatchOptions{})
+	if err != nil {
+		return false, err
+	}
+
+	return true, nil
 }
 
 func (d *VirtualMachineController) setVmPhaseForStatusReason(domain *api.Domain, vmi *v1.VirtualMachineInstance) error {
