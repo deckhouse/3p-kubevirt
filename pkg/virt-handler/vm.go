@@ -56,6 +56,7 @@ import (
 	v1 "kubevirt.io/api/core/v1"
 	"kubevirt.io/client-go/kubecli"
 	"kubevirt.io/client-go/log"
+
 	"kubevirt.io/kubevirt/pkg/network/domainspec"
 
 	"kubevirt.io/kubevirt/pkg/config"
