@@ -1606,15 +1606,9 @@ var _ = Describe("Template", func() {
 				Expect(pod.Spec.Containers[1].Resources.Limits.Memory().Cmp(mem)).To(BeZero())
 				Expect(pod.Spec.Containers[1].Resources.Limits.Cpu().Cmp(cpu)).To(BeZero())
 
-				// The VMI is considered root (not non-root), and thefore should enable CAP_SYS_NICE
-				found := false
+				// Verify compute container has NET_BIND_SERVICE capability
 				caps := pod.Spec.Containers[0].SecurityContext.Capabilities
-				for _, cap := range caps.Add {
-					if cap == CAP_SYS_NICE {
-						found = true
-					}
-				}
-				Expect(found).To(BeTrue(), "Expected compute container to be granted SYS_NICE capability")
+				Expect(caps.Add).To(ContainElement(k8sv1.Capability(CAP_NET_BIND_SERVICE)))
 				Expect(pod.Spec.NodeSelector).Should(HaveKeyWithValue(v1.CPUManager, "true"))
 			})
 
@@ -3852,7 +3846,7 @@ var _ = Describe("Template", func() {
 		},
 			Entry("on a root virt-launcher", func() *v1.VirtualMachineInstance {
 				return api.NewMinimalVMI("fake-vmi")
-			}, "d8v-compute", []k8sv1.Capability{CAP_NET_BIND_SERVICE, CAP_SYS_NICE}, nil),
+			}, "d8v-compute", []k8sv1.Capability{CAP_NET_BIND_SERVICE}, nil),
 			Entry("on a non-root virt-launcher", func() *v1.VirtualMachineInstance {
 				vmi := api.NewMinimalVMI("fake-vmi")
 				vmi.Status.RuntimeUser = uint64(nonRootUser)
