@@ -52,6 +52,7 @@ import (
 	"kubevirt.io/kubevirt/pkg/virt-controller/watch/descheduler"
 	watchtesting "kubevirt.io/kubevirt/pkg/virt-controller/watch/testing"
 	watchutil "kubevirt.io/kubevirt/pkg/virt-controller/watch/util"
+
 	//"kubevirt.io/kubevirt/tests/framework/matcher"
 
 	gomegatypes "github.com/onsi/gomega/types"

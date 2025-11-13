@@ -139,7 +139,7 @@ func NewHandlerDaemonSet(namespace, repository, imagePrefix, version, launcherVe
 			Name:  "virt-launcher",
 			SecurityContext: &corev1.SecurityContext{
 				ReadOnlyRootFilesystem: pointer.P(true),
-				Privileged: pointer.P(true),
+				Privileged:             pointer.P(true),
 			},
 			VolumeMounts: []corev1.VolumeMount{
 				{
@@ -266,7 +266,7 @@ func NewHandlerDaemonSet(namespace, repository, imagePrefix, version, launcherVe
 	}
 	container.SecurityContext = &corev1.SecurityContext{
 		ReadOnlyRootFilesystem: pointer.P(true),
-		Privileged: pointer.P(true),
+		Privileged:             pointer.P(true),
 		SELinuxOptions: &corev1.SELinuxOptions{
 			Level: "s0",
 		},
