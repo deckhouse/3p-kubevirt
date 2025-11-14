@@ -2062,6 +2062,7 @@ func _Cmd_MigrationProxy_Handler(srv interface{}, ctx context.Context, dec func(
 		return nil, err
 	}
 	if interceptor == nil {
+		println("dlopatin call srv.(CmdServer).MigrationProxy()")
 		return srv.(CmdServer).MigrationProxy(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
@@ -2069,6 +2070,7 @@ func _Cmd_MigrationProxy_Handler(srv interface{}, ctx context.Context, dec func(
 		FullMethod: "/kubevirt.cmd.v1.Cmd/MigrationProxy",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		println("dlopatin call srv.(CmdServer).MigrationProxy()")
 		return srv.(CmdServer).MigrationProxy(ctx, req.(*MigrationProxyRequest))
 	}
 	return interceptor(ctx, in, info, handler)

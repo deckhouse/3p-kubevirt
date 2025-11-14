@@ -795,10 +795,12 @@ func (l *Launcher) GetAppliedVMIChecksum(_ context.Context, _ *cmdv1.EmptyReques
 }
 
 func (l *Launcher) MigrationProxy(_ context.Context, req *cmdv1.MigrationProxyRequest) (*cmdv1.Response, error) {
+	println("dlopatin exec Launcher.MigrationProxy()")
 	response := &cmdv1.Response{
 		Success: true,
 	}
 	if req == nil {
+		println("dlopatin req is nil")
 		response.Success = false
 		response.Message = getErrorMessage(fmt.Errorf("nil request"))
 		return response, nil
@@ -806,21 +808,26 @@ func (l *Launcher) MigrationProxy(_ context.Context, req *cmdv1.MigrationProxyRe
 
 	switch req.Action {
 	case cmdv1.MigrationProxyAction_START:
+		println("dlopatin cmdv1.MigrationProxyAction_START")
 		response.Message = "Migration proxy was started"
 	case cmdv1.MigrationProxyAction_STOP:
+		println("dlopatin cmdv1.MigrationProxyAction_STOP")
 		response.Message = "Migration proxy was stopped"
 	default:
+		println("dlopatin unsupported action")
 		response.Success = false
 		response.Message = getErrorMessage(fmt.Errorf("unsupported action %d", req.Action))
 		return response, nil
 	}
 
+	println("dlopatin call l.domainManager.MigrationProxy()")
 	if err := l.domainManager.MigrationProxy(req.GetAction()); err != nil {
+		println("dlopatin error exist", err.Error())
 		response.Success = false
 		response.Message = getErrorMessage(err)
 		return response, nil
 	}
-
+	println("dlopatin return response")
 	return response, nil
 }
 

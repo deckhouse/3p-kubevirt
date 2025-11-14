@@ -377,6 +377,7 @@ func NewTargetProxy(tcpBindAddress string, tcpBindPort int, serverTLSConfig *tls
 }
 
 func NewVirtLauncherProxy() *migrationProxy {
+	println("dlopatin exec NewVirtLauncherProxy()")
 	const (
 		migrationProxySock = "/var/run/kubevirt/migrationproxy/wrap-virtqemud-sock"
 		virtQemudSock      = "/var/run/libvirt/virtqemud-sock"

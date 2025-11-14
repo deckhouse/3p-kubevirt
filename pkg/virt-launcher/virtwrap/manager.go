@@ -216,18 +216,23 @@ type migrationProxyManager struct {
 }
 
 func (m *migrationProxyManager) Start() error {
+	println("dlopatin exec migrationProxyManager.Start()")
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.started {
 		return nil
 	}
+	println("dlopatin call migrationproxy.NewVirtLauncherProxy()")
 	m.migrationProxy = migrationproxy.NewVirtLauncherProxy()
+	println("dlopatin call m.migrationProxy.Start()")
 	err := m.migrationProxy.Start()
 	if err != nil {
+		println("dlopatin error exist", err.Error())
 		m.migrationProxy.Stop()
 		m.reset()
 		return fmt.Errorf("failed to start migration proxy in virt-launcher")
 	}
+	println("dlopatin started=true")
 	m.started = true
 	return nil
 }
@@ -2852,13 +2857,17 @@ func (l *LibvirtDomainManager) GetAppliedVMIChecksum() string {
 }
 
 func (l *LibvirtDomainManager) MigrationProxy(action cmdv1.MigrationProxyAction) error {
+	println("dlopatin exec LibvirtDomainManager.MigrationProxy()")
 	switch action {
 	case cmdv1.MigrationProxyAction_START:
+		println("dlopatin call l.migrationProxy.Start()")
 		return l.migrationProxy.Start()
 	case cmdv1.MigrationProxyAction_STOP:
+		println("dlopatin call l.migrationProxy.Stop()")
 		l.migrationProxy.Stop()
 		return nil
 	default:
+		println("dlopatin return error")
 		return fmt.Errorf("unsupported action %d", action)
 	}
 }
