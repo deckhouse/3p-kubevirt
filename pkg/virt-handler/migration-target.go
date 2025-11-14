@@ -754,10 +754,6 @@ func (c *MigrationTargetController) processVMI(vmi *v1.VirtualMachineInstance) e
 		return goerror.New(fmt.Sprintf("Can not update a VirtualMachineInstance with unresponsive command server."))
 	}
 
-	if err = c.handlePostMigrationProxyCleanup(vmi); err != nil {
-		return err
-	}
-
 	if migrations.IsMigrating(vmi) {
 		// If the migration has already started,
 		// then there's nothing left to prepare on the target side
@@ -806,23 +802,6 @@ func (c *MigrationTargetController) processVMI(vmi *v1.VirtualMachineInstance) e
 
 	c.recorder.Event(vmi, k8sv1.EventTypeNormal, v1.PreparingTarget.String(), VMIMigrationTargetPrepared)
 
-	return nil
-}
-
-func (c *MigrationTargetController) handlePostMigrationProxyCleanup(vmi *v1.VirtualMachineInstance) error {
-	if vmi.Status.MigrationState == nil || vmi.Status.MigrationState.Completed || vmi.Status.MigrationState.Failed {
-		if !c.isMigrationSource(vmi) {
-			client, err := c.launcherClients.GetLauncherClient(vmi)
-			if err != nil {
-				return fmt.Errorf("failed to get virt-launcher client")
-			}
-			if err = c.StopMigrationProxyInVirtLauncher(client); err != nil {
-				return fmt.Errorf("failed to stop migration proxy in virt launcher")
-			}
-		}
-		c.migrationProxy.StopTargetListener(string(vmi.UID))
-		c.migrationProxy.StopSourceListener(string(vmi.UID))
-	}
 	return nil
 }
 
@@ -1075,8 +1054,4 @@ func finalizeNodePlacement(vmi *v1.VirtualMachineInstance) {
 
 func (c *MigrationTargetController) StartMigrationProxyInVirtLauncher(client cmdclient.LauncherClient) error {
 	return client.MigrationProxy(cmdclient.MigrationProxyActionStart)
-}
-
-func (c *MigrationTargetController) StopMigrationProxyInVirtLauncher(client cmdclient.LauncherClient) error {
-	return client.MigrationProxy(cmdclient.MigrationProxyActionStop)
 }
