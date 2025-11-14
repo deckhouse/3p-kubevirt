@@ -85,7 +85,8 @@ func (om *OwnershipManager) UnsafeSetFileOwnership(file string) error {
 		return err
 	}
 
-	if stat, ok := fileInfo.Sys().(*syscall.Stat_t); ok {
+	stat, ok := fileInfo.Sys().(*syscall.Stat_t)
+	if ok {
 		if uid == int(stat.Uid) && gid == int(stat.Gid) {
 			return nil
 		}
@@ -93,7 +94,20 @@ func (om *OwnershipManager) UnsafeSetFileOwnership(file string) error {
 		return fmt.Errorf("failed to convert stat info")
 	}
 
-	return os.Chown(file, uid, gid)
+	err = os.Chown(file, uid, gid)
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, syscall.EPERM):
+		err = os.Chmod(file, 0700)
+		if err != nil {
+			return fmt.Errorf("chmod: user %s, uid %d, gid %d, stat.uid %d, stat.gid %d, error %w", om.user, uid, gid, stat.Uid, stat.Gid, err)
+		}
+	default:
+		return fmt.Errorf("chown: user %s, uid %d, gid %d, stat.uid %d, stat.gid %d, error %w", om.user, uid, gid, stat.Uid, stat.Gid, err)
+	}
+
+	return nil
 }
 
 func RemoveFilesIfExist(paths ...string) error {
