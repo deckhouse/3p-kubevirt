@@ -583,8 +583,10 @@ func (c *MigrationTargetController) handleTargetMigrationProxy(vmi *v1.VirtualMa
 		vmiUID = string(*vmi.Status.MigrationState.SourceState.VirtualMachineInstanceUID)
 	}
 
-	// Get the libvirt connection socket file on the destination pod.
-	socketFile := fmt.Sprintf(filepath.Join(c.virtLauncherFSRunDirPattern, "libvirt/virtqemud-sock"), res.Pid())
+	// Get the virt-launcher migration proxy connection socket file on the destination pod.
+	socketFile := fmt.Sprintf(filepath.Join(c.virtLauncherFSRunDirPattern, "kubevirt/migrationproxy/wrap-virtqemud-sock"), res.Pid())
+	//// Get the libvirt connection socket file on the destination pod.
+	//socketFile := fmt.Sprintf(filepath.Join(d.virtLauncherFSRunDirPattern, "libvirt/virtqemud-sock"), res.Pid())
 	// the migration-proxy is no longer shared via host mount, so we
 	// pass in the virt-launcher's baseDir to reach the unix sockets.
 	baseDir := fmt.Sprintf(filepath.Join(c.virtLauncherFSRunDirPattern, "kubevirt"), res.Pid())
