@@ -72,7 +72,6 @@ go_test(
     embed = [":go_default_library"],
     deps = [
         "//pkg/config:go_default_library",
-        "//pkg/container-disk:go_default_library",
         "//pkg/hooks:go_default_library",
         "//pkg/libvmi:go_default_library",
         "//pkg/network/istio:go_default_library",
