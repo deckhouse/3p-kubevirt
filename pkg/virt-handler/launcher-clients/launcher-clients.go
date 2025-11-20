@@ -99,14 +99,21 @@ func (l *launcherClientsManager) GetLauncherClient(vmi *v1.VirtualMachineInstanc
 			return nil, err
 		}
 
-		err = virtcache.GhostRecordGlobalStore.Add(vmi.Namespace, vmi.Name, socketFile, vmi.UID)
-		if err != nil {
-			return nil, err
+		// Do not create a ghost record for a VMI that is being terminated.
+		ghostRecordAdded := false
+		if vmi.DeletionTimestamp == nil {
+			err = virtcache.GhostRecordGlobalStore.Add(vmi.Namespace, vmi.Name, socketFile, vmi.UID)
+			if err != nil {
+				return nil, err
+			}
+			ghostRecordAdded = true
 		}
 
 		client, err := cmdclient.NewClient(socketFile)
 		if err != nil {
-			virtcache.GhostRecordGlobalStore.Delete(vmi.Namespace, vmi.Name)
+			if ghostRecordAdded {
+				virtcache.GhostRecordGlobalStore.Delete(vmi.Namespace, vmi.Name)
+			}
 			return nil, err
 		}
 
@@ -115,7 +122,9 @@ func (l *launcherClientsManager) GetLauncherClient(vmi *v1.VirtualMachineInstanc
 		if err != nil {
 			client.Close()
 			close(domainPipeStopChan)
-			virtcache.GhostRecordGlobalStore.Delete(vmi.Namespace, vmi.Name)
+			if ghostRecordAdded {
+				virtcache.GhostRecordGlobalStore.Delete(vmi.Namespace, vmi.Name)
+			}
 			return nil, err
 		}
 
