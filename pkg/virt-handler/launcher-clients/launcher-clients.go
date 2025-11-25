@@ -78,6 +78,10 @@ func (l *launcherClientsManager) GetVerifiedLauncherClient(vmi *v1.VirtualMachin
 	return
 }
 
+func vmiIsFinished(vmi *v1.VirtualMachineInstance) bool {
+	return vmi.DeletionTimestamp != nil || vmi.Status.Phase == v1.Succeeded || vmi.Status.Phase == v1.Failed
+}
+
 func (l *launcherClientsManager) GetLauncherClient(vmi *v1.VirtualMachineInstance) (cmdclient.LauncherClient, error) {
 	// Fast path: return cached connection without any synchronization.
 	clientInfo, exists := l.launcherClients.Load(vmi.UID)
@@ -99,9 +103,9 @@ func (l *launcherClientsManager) GetLauncherClient(vmi *v1.VirtualMachineInstanc
 			return nil, err
 		}
 
-		// Do not create a ghost record for a VMI that is being terminated.
+		// Do not create a ghost record for a VMI that is being terminated or has already finished.
 		ghostRecordAdded := false
-		if vmi.DeletionTimestamp == nil {
+		if !vmiIsFinished(vmi) {
 			err = virtcache.GhostRecordGlobalStore.Add(vmi.Namespace, vmi.Name, socketFile, vmi.UID)
 			if err != nil {
 				return nil, err
