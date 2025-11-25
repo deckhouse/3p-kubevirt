@@ -58,7 +58,6 @@ func NewLauncherClientsManager(
 	virtShareDir string,
 	podIsolationDetector isolation.PodIsolationDetector,
 ) LauncherClientsManager {
-
 	l := &launcherClientsManager{
 		virtShareDir:         virtShareDir,
 		launcherClients:      virtcache.LauncherClientInfoByVMI{},
@@ -93,7 +92,7 @@ func (l *launcherClientsManager) GetLauncherClient(vmi *v1.VirtualMachineInstanc
 		return nil, err
 	}
 
-	if vmi.DeletionTimestamp == nil {
+	if vmi.DeletionTimestamp == nil || vmi.Status.Phase != v1.Succeeded {
 		err = virtcache.GhostRecordGlobalStore.Add(vmi.Namespace, vmi.Name, socketFile, vmi.UID)
 		if err != nil {
 			return nil, err
@@ -106,7 +105,7 @@ func (l *launcherClientsManager) GetLauncherClient(vmi *v1.VirtualMachineInstanc
 	}
 
 	domainPipeStopChan := make(chan struct{})
-	//we pipe in the domain socket into the VMI's filesystem
+	// we pipe in the domain socket into the VMI's filesystem
 	err = l.startDomainNotifyPipe(domainPipeStopChan, vmi)
 	if err != nil {
 		client.Close()
@@ -144,7 +143,6 @@ func (l *launcherClientsManager) CloseLauncherClient(vmi *v1.VirtualMachineInsta
 		clientInfo.Client.Close()
 		close(clientInfo.DomainPipeStopChan)
 	}
-
 	virtcache.GhostRecordGlobalStore.Delete(vmi.Namespace, vmi.Name)
 	l.launcherClients.Delete(vmi.UID)
 }
@@ -204,7 +202,6 @@ func (l *launcherClientsManager) IsLauncherClientUnresponsive(vmi *v1.VirtualMac
 }
 
 func handleDomainNotifyPipe(domainPipeStopChan chan struct{}, ln net.Listener, virtShareDir string, vmi *v1.VirtualMachineInstance) {
-
 	fdChan := make(chan net.Conn, 100)
 
 	// Close listener and exit when stop encountered
@@ -273,7 +270,6 @@ func handleDomainNotifyPipe(domainPipeStopChan chan struct{}, ln net.Listener, v
 					} else {
 						log.Log.Object(vmi).Infof("gracefully closed notify pipe connection for vmi")
 					}
-
 				}(vmi)
 			}
 		}
@@ -281,7 +277,6 @@ func handleDomainNotifyPipe(domainPipeStopChan chan struct{}, ln net.Listener, v
 }
 
 func (l *launcherClientsManager) startDomainNotifyPipe(domainPipeStopChan chan struct{}, vmi *v1.VirtualMachineInstance) error {
-
 	res, err := l.podIsolationDetector.Detect(vmi)
 	if err != nil {
 		return fmt.Errorf("failed to detect isolation for launcher pod when setting up notify pipe: %v", err)
