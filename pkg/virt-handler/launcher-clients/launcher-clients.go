@@ -20,6 +20,7 @@
 package launcher_clients
 
 import (
+	"encoding/json"
 	goerror "errors"
 	"fmt"
 	"io"
@@ -92,10 +93,19 @@ func (l *launcherClientsManager) GetLauncherClient(vmi *v1.VirtualMachineInstanc
 		return nil, err
 	}
 
-	if vmi.DeletionTimestamp == nil || vmi.Status.Phase != v1.Succeeded {
-		err = virtcache.GhostRecordGlobalStore.Add(vmi.Namespace, vmi.Name, socketFile, vmi.UID)
+	if vmi.DeletionTimestamp == nil {
+		vmiDump, err := json.Marshal(vmi)
 		if err != nil {
-			return nil, err
+			println("dlopatin failed to marshal status:", err.Error())
+		} else {
+			println("dlopatin vmi dump", string(vmiDump))
+		}
+		if vmi.Status.Phase != v1.Succeeded && vmi.Status.Phase != v1.Failed {
+			println("dlopatin case add for vmi=", vmi.Name, vmi.UID)
+			err = virtcache.GhostRecordGlobalStore.Add(vmi.Namespace, vmi.Name, socketFile, vmi.UID)
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
 
@@ -143,6 +153,7 @@ func (l *launcherClientsManager) CloseLauncherClient(vmi *v1.VirtualMachineInsta
 		clientInfo.Client.Close()
 		close(clientInfo.DomainPipeStopChan)
 	}
+	println("dlopatin case delete for vmi=", vmi.Name, vmi.UID)
 	virtcache.GhostRecordGlobalStore.Delete(vmi.Namespace, vmi.Name)
 	l.launcherClients.Delete(vmi.UID)
 }
