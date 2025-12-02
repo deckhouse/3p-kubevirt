@@ -488,7 +488,8 @@ spec:
       port: portValue
     timeoutSeconds: -14
   resourceClaims:
-  - name: nameValue
+  - hotpluggable: true
+    name: nameValue
     resourceClaimName: resourceClaimNameValue
     resourceClaimTemplateName: resourceClaimTemplateNameValue
   schedulerName: schedulerNameValue
@@ -620,6 +621,9 @@ status:
             deviceNumber: -12
         name: nameValue
         resourceClaimName: resourceClaimNameValue
+      hotplug:
+        attachPodName: attachPodNameValue
+        attachPodUID: attachPodUIDValue
       name: nameValue
     hostDeviceStatuses:
     - deviceResourceClaimStatus:
@@ -631,6 +635,9 @@ status:
             deviceNumber: -12
         name: nameValue
         resourceClaimName: resourceClaimNameValue
+      hotplug:
+        attachPodName: attachPodNameValue
+        attachPodUID: attachPodUIDValue
       name: nameValue
   evacuationNodeName: evacuationNodeNameValue
   fsFreezeStatus: fsFreezeStatusValue

@@ -701,7 +701,7 @@ func validateHotplugHostDeviceConfiguration(hostDevice *v1.HostDevice, name, mes
 			Field:   field,
 		}}
 	}
-	
+
 	if hostDevice.Tag != "" {
 		return []metav1.StatusCause{{
 			Type:    metav1.CauseTypeFieldValueInvalid,

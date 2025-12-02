@@ -892,7 +892,8 @@
       {
         "name": "nameValue",
         "resourceClaimName": "resourceClaimNameValue",
-        "resourceClaimTemplateName": "resourceClaimTemplateNameValue"
+        "resourceClaimTemplateName": "resourceClaimTemplateNameValue",
+        "hotpluggable": true
       }
     ]
   },
@@ -1147,6 +1148,10 @@
                 "deviceNumber": -12
               }
             }
+          },
+          "hotplug": {
+            "attachPodName": "attachPodNameValue",
+            "attachPodUID": "attachPodUIDValue"
           }
         }
       ],
@@ -1164,6 +1169,10 @@
                 "deviceNumber": -12
               }
             }
+          },
+          "hotplug": {
+            "attachPodName": "attachPodNameValue",
+            "attachPodUID": "attachPodUIDValue"
           }
         }
       ]
