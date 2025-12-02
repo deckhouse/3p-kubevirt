@@ -115,16 +115,17 @@ const (
 )
 
 const (
-	hotplugVolumeErrorReason     = "HotPlugVolumeError"
-	hotplugCPUErrorReason        = "HotPlugCPUError"
-	failedUpdateErrorReason      = "FailedUpdateError"
-	failedCreateReason           = "FailedCreate"
-	vmiFailedDeleteReason        = "FailedDelete"
-	affinityChangeErrorReason    = "AffinityChangeError"
-	hotplugMemoryErrorReason     = "HotPlugMemoryError"
-	volumesUpdateErrorReason     = "VolumesUpdateError"
-	tolerationsChangeErrorReason = "TolerationsChangeError"
-	annotationsChangeErrorReason = "AnnotationsChangeError"
+	hotplugVolumeErrorReason        = "HotPlugVolumeError"
+	hotplugResourceClaimErrorReason = "HotPlugResourceClaimError"
+	hotplugCPUErrorReason           = "HotPlugCPUError"
+	failedUpdateErrorReason         = "FailedUpdateError"
+	failedCreateReason              = "FailedCreate"
+	vmiFailedDeleteReason           = "FailedDelete"
+	affinityChangeErrorReason       = "AffinityChangeError"
+	hotplugMemoryErrorReason        = "HotPlugMemoryError"
+	volumesUpdateErrorReason        = "VolumesUpdateError"
+	tolerationsChangeErrorReason    = "TolerationsChangeError"
+	annotationsChangeErrorReason    = "AnnotationsChangeError"
 )
 
 const defaultMaxCrashLoopBackoffDelaySeconds = 300
@@ -832,6 +833,47 @@ func (c *Controller) handleVolumeRequests(vm *virtv1.VirtualMachine, vmi *virtv1
 			}
 
 			if err := c.clientset.VirtualMachineInstance(vmi.Namespace).RemoveVolume(context.Background(), vmi.Name, request.RemoveVolumeOptions); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+func (c *Controller) handleResourceClaimRequests(vm *virtv1.VirtualMachine, vmi *virtv1.VirtualMachineInstance) error {
+	if len(vm.Status.ResourceClaimRequests) == 0 {
+		return nil
+	}
+
+	vmiResourceClaimMap := make(map[string]virtv1.ResourceClaim)
+	if vmi != nil {
+		for _, resourceClaim := range vmi.Spec.ResourceClaims {
+			vmiResourceClaimMap[resourceClaim.Name] = resourceClaim
+		}
+	}
+
+	for i, request := range vm.Status.ResourceClaimRequests {
+		vm.Spec.Template.Spec = *controller.ApplyResourceClaimRequestOnVMISpec(&vm.Spec.Template.Spec, &vm.Status.ResourceClaimRequests[i])
+
+		if vmi == nil || vmi.DeletionTimestamp != nil {
+			continue
+		}
+
+		if request.AddResourceClaimOptions != nil {
+			if _, exists := vmiResourceClaimMap[request.AddResourceClaimOptions.Name]; exists {
+				continue
+			}
+
+			if err := c.clientset.VirtualMachineInstance(vmi.Namespace).AddResourceClaim(context.Background(), vmi.Name, request.AddResourceClaimOptions); err != nil {
+				return err
+			}
+		} else if request.RemoveResourceClaimOptions != nil {
+			if _, exists := vmiResourceClaimMap[request.RemoveResourceClaimOptions.Name]; !exists {
+				continue
+			}
+
+			if err := c.clientset.VirtualMachineInstance(vmi.Namespace).RemoveResourceClaim(context.Background(), vmi.Name, request.RemoveResourceClaimOptions); err != nil {
 				return err
 			}
 		}
@@ -2531,6 +2573,7 @@ func (c *Controller) updateStatus(vm, vmOrig *virtv1.VirtualMachine, vmi *virtv1
 	}
 
 	c.trimDoneVolumeRequests(vm)
+	c.trimDoneResourceClaimRequests(vm)
 	memorydump.UpdateRequest(vm, vmi)
 
 	if c.isTrimFirstChangeRequestNeeded(vm, vmi) {
@@ -2949,6 +2992,54 @@ func (c *Controller) trimDoneVolumeRequests(vm *virtv1.VirtualMachine) {
 	vm.Status.VolumeRequests = tmpVolRequests
 }
 
+func (c *Controller) trimDoneResourceClaimRequests(vm *virtv1.VirtualMachine) {
+	if len(vm.Status.ResourceClaimRequests) == 0 {
+		return
+	}
+
+	resourceClaimMap := make(map[string]virtv1.ResourceClaim)
+	hostDeviceMap := make(map[string]virtv1.HostDevice)
+
+	for _, resourceClaim := range vm.Spec.Template.Spec.ResourceClaims {
+		resourceClaimMap[resourceClaim.Name] = resourceClaim
+	}
+	for _, hostDevice := range vm.Spec.Template.Spec.Domain.Devices.HostDevices {
+		hostDeviceMap[hostDevice.Name] = hostDevice
+	}
+
+	tmpResourceClaimRequests := vm.Status.ResourceClaimRequests[:0]
+	for _, request := range vm.Status.ResourceClaimRequests {
+
+		var added bool
+		var resourceClaimName string
+
+		removeRequest := false
+
+		if request.AddResourceClaimOptions != nil {
+			resourceClaimName = request.AddResourceClaimOptions.Name
+			added = true
+		} else if request.RemoveResourceClaimOptions != nil {
+			resourceClaimName = request.RemoveResourceClaimOptions.Name
+			added = false
+		}
+
+		_, resourceClaimExists := resourceClaimMap[resourceClaimName]
+		_, hostDeviceExists := hostDeviceMap[resourceClaimName]
+
+		if added && resourceClaimExists && hostDeviceExists {
+			removeRequest = true
+		} else if !added && !resourceClaimExists && !hostDeviceExists {
+			removeRequest = true
+		}
+
+		if !removeRequest {
+			tmpResourceClaimRequests = append(tmpResourceClaimRequests, request)
+		}
+	}
+
+	vm.Status.ResourceClaimRequests = tmpResourceClaimRequests
+}
+
 func validLiveUpdateVolumes(oldVMSpec *virtv1.VirtualMachineSpec, vm *virtv1.VirtualMachine) bool {
 	oldVols := storagetypes.GetVolumesByName(&oldVMSpec.Template.Spec)
 	// Evaluate if any volume has changed or has been added
@@ -3283,6 +3374,10 @@ func (c *Controller) sync(vm *virtv1.VirtualMachine, vmi *virtv1.VirtualMachineI
 
 	if err := c.handleDeclarativeVolumeHotplug(vmCopy, vmi); err != nil {
 		return vm, vmi, common.NewSyncError(fmt.Errorf("Error encountered while handling declarative hotplug volumes: %v", err), hotplugVolumeErrorReason), nil
+	}
+
+	if err := c.handleResourceClaimRequests(vmCopy, vmi); err != nil {
+		return vm, vmi, common.NewSyncError(fmt.Errorf("Error encountered while handling resource claim requests: %v", err), hotplugResourceClaimErrorReason), nil
 	}
 
 	if err := memorydump.HandleRequest(c.clientset, vmCopy, vmi, c.pvcStore); err != nil {

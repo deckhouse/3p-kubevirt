@@ -212,15 +212,16 @@ func (c *Controller) sync(vmi *virtv1.VirtualMachineInstance, pod *k8sv1.Pod, da
 		}
 		pod = patchedPod
 
+		hotplugResourceClaims := controller.GetHotplugResourceClaims(vmi)
 		hotplugVolumes := controller.GetHotplugVolumes(vmi, pod)
 		hotplugAttachmentPods, err := controller.AttachmentPods(pod, c.podIndexer)
 		if err != nil {
 			return common.NewSyncError(fmt.Errorf("failed to get attachment pods: %v", err), controller.FailedHotplugSyncReason), pod
 		}
 
-		if pod.DeletionTimestamp == nil && needsHandleHotplug(hotplugVolumes, hotplugAttachmentPods) {
+		if pod.DeletionTimestamp == nil && needsHandleVolumeOrResourceClaimHotplug(hotplugVolumes, hotplugResourceClaims, hotplugAttachmentPods) {
 			var hotplugSyncErr common.SyncError
-			hotplugSyncErr = c.handleHotplugVolumes(hotplugVolumes, hotplugAttachmentPods, vmi, pod, dataVolumes)
+			hotplugSyncErr = c.handleHotplugVolumesAndResourceClaims(hotplugVolumes, hotplugResourceClaims, hotplugAttachmentPods, vmi, pod, dataVolumes)
 			if hotplugSyncErr != nil {
 				if hotplugSyncErr.Reason() == controller.MissingAttachmentPodReason {
 					// We are missing an essential hotplug pod. Delete all pods associated with the VMI.
@@ -418,6 +419,10 @@ func (c *Controller) updateStatus(vmi *virtv1.VirtualMachineInstance, pod *k8sv1
 					return err
 				}
 
+				if err := c.updateHotplugDeviceStatus(vmiCopy, pod); err != nil {
+					return err
+				}
+
 				// Network
 				if err := c.updateNetworkStatus(vmiCopy, pod); err != nil {
 					log.Log.Errorf("failed to update the interface status: %v", err)
@@ -491,6 +496,11 @@ func (c *Controller) updateStatus(vmi *virtv1.VirtualMachineInstance, pod *k8sv1
 			return err
 		}
 
+		// Devices
+		if err := c.updateHotplugDeviceStatus(vmiCopy, pod); err != nil {
+			return err
+		}
+
 		// Network
 		if err := c.updateNetworkStatus(vmiCopy, pod); err != nil {
 			log.Log.Errorf("failed to update the interface status: %v", err)
@@ -527,6 +537,9 @@ func (c *Controller) updateStatus(vmi *virtv1.VirtualMachineInstance, pod *k8sv1
 		}
 
 		if err := c.updateVolumeStatus(vmiCopy, pod); err != nil {
+			return err
+		}
+		if err := c.updateHotplugDeviceStatus(vmiCopy, pod); err != nil {
 			return err
 		}
 	case vmi.IsWaitingForSync():

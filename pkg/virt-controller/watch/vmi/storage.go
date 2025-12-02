@@ -149,7 +149,7 @@ func (c *Controller) updateVolumeStatus(vmi *virtv1.VirtualMachineInstance, virt
 		return err
 	}
 
-	attachmentPod, _ := getActiveAndOldAttachmentPods(hotplugVolumes, attachmentPods)
+	attachmentPod, _ := getActiveAndOldAttachmentPodsForVolumes(hotplugVolumes, attachmentPods)
 
 	newStatus := make([]virtv1.VolumeStatus, 0)
 
@@ -160,14 +160,14 @@ func (c *Controller) updateVolumeStatus(vmi *virtv1.VirtualMachineInstance, virt
 		}
 	}
 
-	for i, volume := range vmi.Spec.Volumes {
+	for _, volume := range vmi.Spec.Volumes {
 		status := virtv1.VolumeStatus{}
 		if existingStatus, ok := oldStatusMap[volume.Name]; ok {
 			status = existingStatus
 		} else {
 			status.Name = volume.Name
 		}
-		// Remove from map so I can detect existing volumes that have been removed from spec.
+		// Remove from the map, so I can detect existing volumes that have been removed from spec.
 		delete(oldStatusMap, volume.Name)
 
 		//if hotplugVolume, ok := hotplugVolumesMap[volume.Name]; ok {
@@ -193,7 +193,7 @@ func (c *Controller) updateVolumeStatus(vmi *virtv1.VirtualMachineInstance, virt
 					if !c.volumeReady(status.Phase) {
 						status.HotplugVolume.AttachPodUID = ""
 						// Volume is not hotplugged in VM and Pod is gone, or hasn't been created yet, check for the PVC associated with the volume to set phase and message
-						phase, reason, message := c.getVolumePhaseMessageReason(&vmi.Spec.Volumes[i], vmi.Namespace)
+						phase, reason, message := c.getVolumePhaseMessageReason(&volume, vmi.Namespace)
 						status.Phase = phase
 						log.Log.V(3).Infof("Setting phase %s for volume %s", phase, volume.Name)
 						status.Message = message
@@ -301,6 +301,97 @@ func (c *Controller) updateVolumeStatus(vmi *virtv1.VirtualMachineInstance, virt
 		return strings.Compare(newStatus[i].Name, newStatus[j].Name) == -1
 	})
 	vmi.Status.VolumeStatus = newStatus
+	return nil
+}
+
+func (c *Controller) updateHotplugDeviceStatus(vmi *virtv1.VirtualMachineInstance, virtlauncherPod *k8sv1.Pod) error {
+	var oldStatus []virtv1.DeviceStatusInfo
+	if vmi.Status.DeviceStatus != nil {
+		oldStatus = vmi.Status.DeviceStatus.HostDeviceStatuses
+	}
+	oldStatusMap := make(map[string]virtv1.DeviceStatusInfo)
+	for _, status := range oldStatus {
+		oldStatusMap[status.Name] = status
+	}
+
+	hotplugResourceClaims := controller.GetHotplugResourceClaims(vmi)
+	hotplugResourceClaimsMap := make(map[string]*virtv1.ResourceClaim)
+	for _, resourceClaim := range hotplugResourceClaims {
+		hotplugResourceClaimsMap[resourceClaim.Name] = resourceClaim
+	}
+
+	attachmentPods, err := controller.AttachmentPods(virtlauncherPod, c.podIndexer)
+	if err != nil {
+		return err
+	}
+
+	attachmentPod, _ := getActiveAndOldAttachmentPodsForResourceClaims(hotplugResourceClaims, attachmentPods)
+
+	var newStatus []virtv1.DeviceStatusInfo
+
+	for _, resourceClaim := range vmi.Spec.ResourceClaims {
+		status := virtv1.DeviceStatusInfo{}
+		if existingStatus, ok := oldStatusMap[resourceClaim.Name]; ok {
+			status = existingStatus
+		} else {
+			status.Name = resourceClaim.Name
+		}
+
+		// Remove from the map, so I can detect existing volumes that have been removed from spec.
+		delete(oldStatusMap, resourceClaim.Name)
+
+		//if hotplugVolume, ok := hotplugVolumesMap[volume.Name]; ok {
+		if _, ok := hotplugResourceClaimsMap[resourceClaim.Name]; ok {
+			if status.Hotplug == nil {
+				status.Hotplug = &virtv1.HotplugDeviceStatus{}
+			}
+
+			if attachmentPod == nil {
+				status.Hotplug.AttachPodUID = ""
+			} else {
+				status.Hotplug.AttachPodName = attachmentPod.Name
+				var isReady bool
+				for _, cs := range attachmentPod.Status.ContainerStatuses {
+					// TODO: rename it in future, legacy, initially, hotplug was only for disks, but now it's for resource claims
+					if cs.Name == "d8v-hotplug-disk" {
+						isReady = cs.Ready
+						break
+					}
+				}
+
+				if isReady {
+					status.Hotplug.AttachPodUID = attachmentPod.UID
+				} else {
+					// Remove UID of old pod if a new one is available, but not yet ready
+					status.Hotplug.AttachPodUID = ""
+				}
+			}
+		}
+
+		newStatus = append(newStatus, status)
+	}
+
+	for resourceClaimName, status := range oldStatusMap {
+		attachmentPod := findAttachmentPodByResourceClaimName(resourceClaimName, attachmentPods)
+		if attachmentPod != nil {
+			status.Hotplug.AttachPodName = attachmentPod.Name
+			status.Hotplug.AttachPodUID = attachmentPod.UID
+			// If the pod exists, we keep the status.
+			newStatus = append(newStatus, status)
+		} else {
+			log.Log.Object(vmi).V(3).Infof("Deleted status for resource claim %s", resourceClaimName)
+		}
+	}
+
+	sort.SliceStable(newStatus, func(i, j int) bool {
+		return strings.Compare(newStatus[i].Name, newStatus[j].Name) == -1
+	})
+
+	if vmi.Status.DeviceStatus == nil {
+		vmi.Status.DeviceStatus = &virtv1.DeviceStatus{}
+	}
+	vmi.Status.DeviceStatus.HostDeviceStatuses = newStatus
+
 	return nil
 }
 
