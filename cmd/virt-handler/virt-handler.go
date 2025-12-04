@@ -72,7 +72,7 @@ import (
 	containerdisk "kubevirt.io/kubevirt/pkg/container-disk"
 	"kubevirt.io/kubevirt/pkg/controller"
 	clientmetrics "kubevirt.io/kubevirt/pkg/monitoring/metrics/common/client"
-	// metrics "kubevirt.io/kubevirt/pkg/monitoring/metrics/virt-handler"
+	metrics "kubevirt.io/kubevirt/pkg/monitoring/metrics/virt-handler"
 	metricshandler "kubevirt.io/kubevirt/pkg/monitoring/metrics/virt-handler/handler"
 	"kubevirt.io/kubevirt/pkg/monitoring/profiler"
 	"kubevirt.io/kubevirt/pkg/service"
@@ -377,9 +377,9 @@ func (app *virtHandlerApp) Run() {
 		app.VirtShareDir,
 	)
 
-	// if err := metrics.SetupMetrics(app.VirtShareDir, app.HostOverride, app.MaxRequestsInFlight, vmiSourceInformer); err != nil {
-	// 	panic(err)
-	// }
+	if err := metrics.SetupMetrics(app.VirtShareDir, app.HostOverride, app.MaxRequestsInFlight, vmiSourceInformer); err != nil {
+		panic(err)
+	}
 
 	if err := downwardmetrics.RunDownwardMetricsCollector(context.Background(), app.HostOverride, vmiSourceInformer, podIsolationDetector); err != nil {
 		panic(fmt.Errorf("failed to set up the downwardMetrics collector: %v", err))
