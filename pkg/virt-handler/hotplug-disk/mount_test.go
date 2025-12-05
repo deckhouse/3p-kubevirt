@@ -437,16 +437,19 @@ var _ = Describe("HotplugVolume", func() {
 				return true, nil
 			}
 
-			By("Mounting and validating expected rule is set")
-			setExpectedCgroupRuns(2)
-			expectCgroupRule(devices.BlockDevice, 482, 64, true)
-			err = m.mountBlockHotplugVolume(vmi, "testvolume", blockSourcePodUID, record, cgroupManagerMock)
+			By("Mounting and validating the expected allow rule is returned")
+			rule, err := m.mountBlockHotplugVolume(vmi, "testvolume", blockSourcePodUID, record, cgroupManagerMock)
 			Expect(err).ToNot(HaveOccurred())
+			Expect(rule).To(Equal(&devices.Rule{
+				Type: devices.BlockDevice, Major: 482, Minor: 64, Permissions: "rwm", Allow: true,
+			}))
 
-			By("Unmounting, we verify the reverse process happens")
-			expectCgroupRule(devices.BlockDevice, 482, 64, false)
-			err = m.unmountBlockHotplugVolumes(deviceFile, cgroupManagerMock)
+			By("Unmounting, we verify the reverse rule is returned")
+			rule, err = m.unmountBlockHotplugVolumes(deviceFile, cgroupManagerMock)
 			Expect(err).ToNot(HaveOccurred())
+			Expect(rule).To(Equal(&devices.Rule{
+				Type: devices.BlockDevice, Major: 482, Minor: 64, Permissions: "rwm", Allow: false,
+			}))
 		})
 
 		It("should not reuse a previous source UID for subsequent hotplug volumes", func() {
@@ -589,11 +592,12 @@ var _ = Describe("HotplugVolume", func() {
 			deviceFileName, err := newFile(tempDir, "devicefile")
 			Expect(err).ToNot(HaveOccurred())
 
-			By("Mounting and validating expected rule is set")
-			setExpectedCgroupRuns(1)
-			expectCgroupRule(devices.BlockDevice, 482, 64, false)
-			err = m.unmountBlockHotplugVolumes(deviceFileName, cgroupManagerMock)
+			By("Unmounting and validating the expected deny rule is returned")
+			rule, err := m.unmountBlockHotplugVolumes(deviceFileName, cgroupManagerMock)
 			Expect(err).ToNot(HaveOccurred())
+			Expect(rule).To(Equal(&devices.Rule{
+				Type: devices.BlockDevice, Major: 482, Minor: 64, Permissions: "rwm", Allow: false,
+			}))
 		})
 
 		It("Should return error if deviceFile doesn' exist", func() {
@@ -603,7 +607,7 @@ var _ = Describe("HotplugVolume", func() {
 			deviceFileName, err := newFile(tempDir, "devicefile")
 			Expect(err).ToNot(HaveOccurred())
 			os.Remove(unsafepath.UnsafeAbsolute(deviceFileName.Raw()))
-			err = m.unmountBlockHotplugVolumes(deviceFileName, cgroupManagerMock)
+			_, err = m.unmountBlockHotplugVolumes(deviceFileName, cgroupManagerMock)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("no such file or directory"))
 		})
