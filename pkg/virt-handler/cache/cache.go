@@ -186,18 +186,10 @@ func (store *GhostRecordStore) Add(namespace string, name string, socketFile str
 	// not deleted indicates that the VMI shutdown process did not
 	// properly handle cleanup of local data.
 	if ok && record.UID != uid {
-		err = store.Delete(namespace, name)
-		if err != nil {
-			return fmt.Errorf("failed to delete ghost record %s/%s, %w", namespace, name, err)
-		}
 		return fmt.Errorf("can not add ghost record when entry already exists with differing UID")
 	}
 
 	if ok && filepath.Clean(record.SocketFile) != socketFile {
-		err = store.Delete(namespace, name)
-		if err != nil {
-			return fmt.Errorf("failed to delete ghost record %s/%s, %w", namespace, name, err)
-		}
 		return fmt.Errorf("can not add ghost record when entry already exists with differing socket file location")
 	}
 
