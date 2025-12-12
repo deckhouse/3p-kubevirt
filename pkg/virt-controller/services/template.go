@@ -996,6 +996,8 @@ func (t *templateService) RenderHotplugAttachmentPodTemplate(volumes []*v1.Volum
 			Tolerations:                   tmpTolerations,
 			Volumes:                       []k8sv1.Volume{emptyDirVolume(hotplugDisks)},
 			TerminationGracePeriodSeconds: &zero,
+			HostNetwork:                   true,
+			DNSPolicy:                     k8sv1.DNSClusterFirstWithHostNet,
 		},
 	}
 	first := true
@@ -1174,6 +1176,8 @@ func (t *templateService) RenderHotplugAttachmentTriggerPodTemplate(volume *v1.V
 				emptyDirVolume(hotplugDisks),
 			},
 			TerminationGracePeriodSeconds: &zero,
+			HostNetwork:                   true,
+			DNSPolicy:                     k8sv1.DNSClusterFirstWithHostNet,
 		},
 	}
 
