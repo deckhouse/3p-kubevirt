@@ -545,14 +545,14 @@ func (c *MigrationSourceController) migrateVMI(vmi *v1.VirtualMachineInstance, d
 	}
 
 	options := &cmdclient.MigrationOptions{
-		Bandwidth:               *migrationConfiguration.BandwidthPerMigration,
-		ProgressTimeout:         *migrationConfiguration.ProgressTimeout,
-		CompletionTimeoutPerGiB: *migrationConfiguration.CompletionTimeoutPerGiB,
-		MaxDowntimeMs:           *migrationConfiguration.MaxDowntimeMs,
-		UnsafeMigration:         *migrationConfiguration.UnsafeMigrationOverride,
-		AllowAutoConverge:       *migrationConfiguration.AllowAutoConverge,
-		AllowPostCopy:           *migrationConfiguration.AllowPostCopy,
-		AllowWorkloadDisruption: *migrationConfiguration.AllowWorkloadDisruption,
+		Bandwidth:               derefOrDefault(migrationConfiguration.BandwidthPerMigration),
+		ProgressTimeout:         derefOrDefault(migrationConfiguration.ProgressTimeout),
+		CompletionTimeoutPerGiB: derefOrDefault(migrationConfiguration.CompletionTimeoutPerGiB),
+		MaxDowntimeMs:           derefOrDefault(migrationConfiguration.MaxDowntimeMs),
+		UnsafeMigration:         derefOrDefault(migrationConfiguration.UnsafeMigrationOverride),
+		AllowAutoConverge:       derefOrDefault(migrationConfiguration.AllowAutoConverge),
+		AllowPostCopy:           derefOrDefault(migrationConfiguration.AllowPostCopy),
+		AllowWorkloadDisruption: derefOrDefault(migrationConfiguration.AllowWorkloadDisruption),
 	}
 
 	if c.clusterConfig.MigrationStallDetectionEnabled() {
@@ -623,6 +623,14 @@ func (c *MigrationSourceController) migrateVMI(vmi *v1.VirtualMachineInstance, d
 	}
 	c.recorder.Event(vmi, k8sv1.EventTypeNormal, v1.Migrating.String(), VMIMigrating)
 	return nil
+}
+
+func derefOrDefault[T any](v *T) T {
+	if v == nil {
+		var defaultT T
+		return defaultT
+	}
+	return *v
 }
 
 func isMigrationDone(state *v1.VirtualMachineInstanceMigrationState) bool {
