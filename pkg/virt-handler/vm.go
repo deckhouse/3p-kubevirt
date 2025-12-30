@@ -1769,11 +1769,12 @@ func (c *VirtualMachineController) processVmCleanup(vmi *v1.VirtualMachineInstan
 
 	if !c.isMigrationSource(vmi) {
 		client, err := c.launcherClients.GetLauncherClient(vmi)
-		if err != nil {
-			return fmt.Errorf("failed to get virt-launcher client")
-		}
-		if err = c.StopMigrationProxyInVirtLauncher(client); err != nil {
-			return fmt.Errorf("failed to stop migration proxy in virt launcher")
+		if err == nil {
+			if err = c.StopMigrationProxyInVirtLauncher(client); err != nil {
+				log.Log.Object(vmi).Warningf("failed to stop migration proxy in virt launcher: %v", err)
+			}
+		} else {
+			log.Log.Object(vmi).Warningf("failed to get virt-launcher client: %v", err)
 		}
 	}
 
