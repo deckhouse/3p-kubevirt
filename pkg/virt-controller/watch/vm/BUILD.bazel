@@ -4,6 +4,7 @@ go_library(
     name = "go_default_library",
     srcs = [
         "firmware.go",
+        "migration.go",
         "vm.go",
     ],
     importpath = "kubevirt.io/kubevirt/pkg/virt-controller/watch/vm",

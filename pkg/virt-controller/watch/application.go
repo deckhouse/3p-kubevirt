@@ -596,6 +596,16 @@ func (vca *VirtControllerApp) onStartedLeading() func(ctx context.Context) {
 		stop := ctx.Done()
 		vca.informerFactory.Start(stop)
 
+		// Wait for informers to sync before running migrations
+		cache.WaitForCacheSync(stop, vca.vmInformer.HasSynced)
+
+		// Run VM migrations before starting controllers
+		migrationController, err := vm.NewMigrationController(vca.vmInformer, vca.clientSet, log.Log)
+		if err != nil {
+			golog.Fatalf("failed to create migration controller: %v", err)
+		}
+		migrationController.Run(ctx)
+
 		golog.Printf("STARTING controllers with following threads : "+
 			"node %d, vmi %d, replicaset %d, vm %d, migration %d, evacuation %d, disruptionBudget %d",
 			vca.nodeControllerThreads, vca.vmiControllerThreads, vca.rsControllerThreads,
