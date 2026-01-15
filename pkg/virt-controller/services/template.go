@@ -1022,9 +1022,9 @@ func (t *templateService) RenderHotplugAttachmentPodTemplate(volumes []*v1.Volum
 				}),
 			},
 			Labels: map[string]string{
-				v1.AppLabel:                            hotplugDisk,
+				v1.AppLabel:                                    hotplugDisk,
 				"heritage":                             "deckhouse",
-				"security.deckhouse.io/skip-pss-check": "true",
+				"security.deckhouse.io/skip-pss-check":         "true",
 				v1.ResourceQuotaExclusionLabel:          "true",
 			},
 		},
@@ -1201,9 +1201,9 @@ func (t *templateService) RenderHotplugAttachmentTriggerPodTemplate(volume *v1.V
 				}),
 			},
 			Labels: map[string]string{
-				v1.AppLabel:                            hotplugDisk,
+				v1.AppLabel:                                    hotplugDisk,
 				"heritage":                             "deckhouse",
-				"security.deckhouse.io/skip-pss-check": "true",
+				"security.deckhouse.io/skip-pss-check":         "true",
 				v1.ResourceQuotaExclusionLabel:          "true",
 			},
 			Annotations: annotationsList,
