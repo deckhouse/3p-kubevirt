@@ -1023,6 +1023,7 @@ func (t *templateService) RenderHotplugAttachmentPodTemplate(volumes []*v1.Volum
 			},
 			Labels: map[string]string{
 				v1.AppLabel:                            hotplugDisk,
+				"heritage":                             "deckhouse",
 				"security.deckhouse.io/skip-pss-check": "true",
 				v1.ResourceQuotaExclusionLabel:          "true",
 			},
@@ -1201,6 +1202,7 @@ func (t *templateService) RenderHotplugAttachmentTriggerPodTemplate(volume *v1.V
 			},
 			Labels: map[string]string{
 				v1.AppLabel:                            hotplugDisk,
+				"heritage":                             "deckhouse",
 				"security.deckhouse.io/skip-pss-check": "true",
 				v1.ResourceQuotaExclusionLabel:          "true",
 			},
@@ -1709,6 +1711,7 @@ func podLabels(vmi *v1.VirtualMachineInstance, hostName string) map[string]strin
 	labels[v1.AppLabel] = "virt-launcher"
 	labels[v1.CreatedByLabel] = string(vmi.UID)
 	labels[v1.VirtualMachineNameLabel] = hostName
+	labels["heritage"] = "deckhouse"
 	return labels
 }
 
