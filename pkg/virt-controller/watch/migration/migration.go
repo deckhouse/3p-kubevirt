@@ -780,8 +780,6 @@ func (c *Controller) processMigrationPhase(
 			!vmiConditionManager.HasCondition(vmi, virtv1.VirtualMachineInstanceVCPUChange) &&
 			!vmiConditionManager.HasConditionWithStatus(vmi, virtv1.VirtualMachineInstanceMemoryChange, k8sv1.ConditionTrue) &&
 			!vmiConditionManager.HasConditionWithStatus(vmi, virtv1.VirtualMachineInstanceMigrationRequired, k8sv1.ConditionTrue) {
-			migrationCopy.Status.Phase = virtv1.MigrationSucceeded
-			c.recorder.Eventf(migration, k8sv1.EventTypeNormal, controller.SuccessfulMigrationReason, "Source node reported migration succeeded")
 
 			// Remove quota exclusion label from target pod after migration completion
 			if pod != nil && vmi.Status.MigrationState != nil && vmi.Status.MigrationState.TargetPod == pod.Name {
@@ -790,12 +788,15 @@ func (c *Controller) processMigrationPhase(
 					delete(podCopy.Labels, virtv1.ResourceQuotaExclusionLabel)
 					_, err := c.clientset.CoreV1().Pods(podCopy.Namespace).Update(context.Background(), podCopy, v1.UpdateOptions{})
 					if err != nil {
-						log.Log.Object(migration).Reason(err).Warning("Failed to remove quota exclusion label from target pod after migration completion")
+						return fmt.Errorf("failed to remove quota exclusion label from target pod after migration completion: %v", err)
 					} else {
-						log.Log.Object(migration).Info("Removed quota exclusion label from target pod after migration completion")
+						return fmt.Errorf("removed quota exclusion label from target pod after migration completion")
 					}
 				}
 			}
+
+			migrationCopy.Status.Phase = virtv1.MigrationSucceeded
+			c.recorder.Eventf(migration, k8sv1.EventTypeNormal, controller.SuccessfulMigrationReason, "Source node reported migration succeeded")
 		}
 	}
 	return nil
