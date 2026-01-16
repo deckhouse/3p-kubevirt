@@ -3092,10 +3092,30 @@ func (c *Controller) addRestartRequiredIfNeeded(lastSeenVMSpec *virtv1.VirtualMa
 		lastSeenVM.Spec.Template.Spec.Domain.Firmware.UUID = currentVM.Spec.Template.Spec.Domain.Firmware.UUID
 	}
 
+	log.Log.Object(vm).Error("[AAA] CHEC DIFF")
+
 	if !equality.Semantic.DeepEqual(lastSeenVM.Spec.Template.Spec, currentVM.Spec.Template.Spec) {
+		last, err := json.Marshal(lastSeenVM.Spec.Template.Spec)
+		if err != nil {
+			log.Log.Object(vm).Errorf("[AAA] EEEEEEEEEEEE LAST %w", err)
+		} else {
+			log.Log.Object(vm).Errorf("[AAA] AAAAAAAAAAAA LAST %s", last)
+		}
+
+		curr, err := json.Marshal(currentVM.Spec.Template.Spec)
+		if err != nil {
+			log.Log.Object(vm).Errorf("[AAA] EEEEEEEEEEEE CURR %w", err)
+		} else {
+			log.Log.Object(vm).Errorf("[AAA] AAAAAAAAAAAA CURR %s", curr)
+		}
+
+		log.Log.Object(vm).Error("[AAA] DIFF FOUND")
+
 		setRestartRequired(vm, "a non-live-updatable field was changed in the template spec")
 		return true
 	}
+
+	log.Log.Object(vm).Error("[AAA] NOOO DIFF")
 
 	return false
 }
