@@ -3095,10 +3095,31 @@ func (c *VMController) addRestartRequiredIfNeeded(lastSeenVMSpec *virtv1.Virtual
 		lastSeenVM.Spec.Template.Spec.Tolerations = currentVM.Spec.Template.Spec.Tolerations
 	}
 
+	log.Log.Error("[AAA] OLD CHEC DIFF")
+	log.Log.Object(vm).Error("[AAA] OLD CHEC DIFF")
+
 	if !equality.Semantic.DeepEqual(lastSeenVM.Spec.Template.Spec, currentVM.Spec.Template.Spec) {
+		last, err := json.Marshal(lastSeenVM.Spec.Template.Spec)
+		if err != nil {
+			log.Log.Object(vm).Errorf("[AAA] OLD EEEEEEEEEEEE LAST %s", err)
+		} else {
+			log.Log.Object(vm).Errorf("[AAA] OLD AAAAAAAAAAAA LAST %s", last)
+		}
+
+		curr, err := json.Marshal(currentVM.Spec.Template.Spec)
+		if err != nil {
+			log.Log.Object(vm).Errorf("[AAA] OLD EEEEEEEEEEEE CURR %s", err)
+		} else {
+			log.Log.Object(vm).Errorf("[AAA] OLD AAAAAAAAAAAA CURR %s", curr)
+		}
+
+		log.Log.Object(vm).Error("[AAA] OLD DIFF FOUND")
+
 		setRestartRequired(vm, "a non-live-updatable field was changed in the template spec")
 		return true
 	}
+
+	log.Log.Object(vm).Error("[AAA] OLD NOOO DIFF")
 
 	return false
 }
