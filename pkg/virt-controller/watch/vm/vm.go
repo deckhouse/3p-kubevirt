@@ -3087,9 +3087,13 @@ func (c *Controller) addRestartRequiredIfNeeded(lastSeenVMSpec *virtv1.VirtualMa
 	// existing virtual machines, which could previously be absent.
 	// This leads to the need for a restart because the old and new KVVM specs do not match.
 	// The fix allows avoiding a restart of virtual machines when upgrading kubvirt from version 1.3.1 to 1.6.2.
-	if lastSeenVM.Spec.Template.Spec.Domain.Firmware != nil && lastSeenVM.Spec.Template.Spec.Domain.Firmware.UUID == "" &&
-		currentVM.Spec.Template.Spec.Domain.Firmware != nil && currentVM.Spec.Template.Spec.Domain.Firmware.UUID != "" {
-		lastSeenVM.Spec.Template.Spec.Domain.Firmware.UUID = currentVM.Spec.Template.Spec.Domain.Firmware.UUID
+	if currentVM.Spec.Template.Spec.Domain.Firmware != nil && currentVM.Spec.Template.Spec.Domain.Firmware.UUID != "" {
+		if lastSeenVM.Spec.Template.Spec.Domain.Firmware == nil {
+			lastSeenVM.Spec.Template.Spec.Domain.Firmware = &virtv1.Firmware{}
+		}
+		if lastSeenVM.Spec.Template.Spec.Domain.Firmware.UUID == "" {
+			lastSeenVM.Spec.Template.Spec.Domain.Firmware.UUID = currentVM.Spec.Template.Spec.Domain.Firmware.UUID
+		}
 	}
 
 	log.Log.Object(vm).Error("[AAA] CHEC DIFF")
