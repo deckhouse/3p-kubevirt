@@ -3039,6 +3039,12 @@ func (c *Controller) addRestartRequiredIfNeeded(lastSeenVMSpec *virtv1.VirtualMa
 		return false
 	}
 
+	// DEBUG: Log raw specs BEFORE any normalization
+	rawLast, _ := json.Marshal(lastSeenVM.Spec.Template.Spec)
+	rawCurr, _ := json.Marshal(currentVM.Spec.Template.Spec)
+	log.Log.Object(vm).Errorf("[AAA] RAW LAST (from revision, after instancetype): %s", rawLast)
+	log.Log.Object(vm).Errorf("[AAA] RAW CURR (current VM, after instancetype): %s", rawCurr)
+
 	// Ignore all the live-updatable fields by copying them over. (If the feature gate is disabled, nothing is live-updatable)
 	// Note: this list needs to stay up-to-date with everything that can be live-updated
 	// Note2: destroying lastSeenVM here is fine, we don't need it later
