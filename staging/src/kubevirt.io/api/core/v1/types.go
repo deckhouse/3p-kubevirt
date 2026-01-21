@@ -1154,8 +1154,8 @@ const (
 	ResourceQuotaExclusionLabel string = "resource-quota-overrides.deckhouse.io/ignore"
 	// A special label that apply deckhouse policies on system Pods in user namespaces:
 	// forbid deletion, exec, connect for non-system users.
-	HeritageLabel     string = "heritage"
-	HeritageDeckhouse string = "deckhouse"
+	HeritageLabel string = "heritage"
+	HeritageValue string = "deckhouse"
 	// A special annotation through which information is passed from virt-launcher to virt-handler indicating
 	// that the virtual machine has been suspended for offline migration.
 	VirtualMachineSuspendedMigratedAnnotation string = "kubevirt.io/vm-suspended-migrated"
