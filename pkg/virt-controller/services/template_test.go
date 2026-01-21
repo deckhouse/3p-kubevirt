@@ -562,6 +562,7 @@ var _ = Describe("Template", func() {
 					v1.CreatedByLabel:                    "1234",
 					v1.DeprecatedVirtualMachineNameLabel: "testvmi",
 					v1.VirtualMachineInstanceIDLabel:     "testvmi",
+					v1.HeritageLabel:                     v1.HeritageValue,
 				}))
 				Expect(pod.ObjectMeta.Annotations).To(And(
 					HaveKeyWithValue(v1.DomainAnnotation, "testvmi"),
@@ -1181,6 +1182,7 @@ var _ = Describe("Template", func() {
 					v1.CreatedByLabel:                    "1234",
 					v1.DeprecatedVirtualMachineNameLabel: "testvmi",
 					v1.VirtualMachineInstanceIDLabel:     "testvmi",
+					v1.HeritageLabel:                     v1.HeritageValue,
 				}))
 				Expect(pod.ObjectMeta.GenerateName).To(Equal("virt-launcher-testvmi-"))
 				Expect(pod.Spec.NodeSelector).To(Equal(map[string]string{
@@ -2130,6 +2132,7 @@ var _ = Describe("Template", func() {
 						v1.CreatedByLabel:                    "1234",
 						v1.DeprecatedVirtualMachineNameLabel: "testvmi",
 						v1.VirtualMachineInstanceIDLabel:     "testvmi",
+						v1.HeritageLabel:                     v1.HeritageValue,
 					},
 				))
 			})

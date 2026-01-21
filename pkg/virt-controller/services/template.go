@@ -1176,8 +1176,9 @@ func (t *TemplateService) RenderHotplugAttachmentPodTemplate(volumes []*v1.Volum
 			},
 			Labels: map[string]string{
 				v1.AppLabel:                            hotplugDisk,
+				v1.HeritageLabel:                       v1.HeritageValue,
 				"security.deckhouse.io/skip-pss-check": "true",
-				v1.ResourceQuotaExclusionLabel:          "true",
+				v1.ResourceQuotaExclusionLabel:         "true",
 			},
 		},
 		Spec: k8sv1.PodSpec{
@@ -1354,8 +1355,9 @@ func (t *TemplateService) RenderHotplugAttachmentTriggerPodTemplate(volume *v1.V
 			},
 			Labels: map[string]string{
 				v1.AppLabel:                            hotplugDisk,
+				v1.HeritageLabel:                       v1.HeritageValue,
 				"security.deckhouse.io/skip-pss-check": "true",
-				v1.ResourceQuotaExclusionLabel:          "true",
+				v1.ResourceQuotaExclusionLabel:         "true",
 			},
 			Annotations: annotationsList,
 		},
@@ -1855,6 +1857,7 @@ func podLabels(vmi *v1.VirtualMachineInstance, hostName string) map[string]strin
 	if val, exists := vmi.Annotations[istio.InjectSidecarAnnotation]; exists {
 		labels[istio.InjectSidecarLabel] = val
 	}
+	labels[v1.HeritageLabel] = v1.HeritageValue
 	return labels
 }
 
