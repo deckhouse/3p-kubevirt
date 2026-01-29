@@ -243,22 +243,30 @@ func (h *TargetHandler) OnHookSignal(vmiUID types.UID) error {
 		state.injectionDone = cond
 	}
 
-	deadline := time.Now().Add(remaining)
-	for state.injectionState == InjectionInProgress {
-		if time.Now().After(deadline) {
-			if state.cancel != nil {
-				state.cancel()
-			}
-			log.Log.Warningf("Conntrack sync: hook timeout for VMI %s", vmiUID)
-			break
-		}
+	done := make(chan struct{})
 
-		h.mu.Unlock()
-		time.Sleep(10 * time.Millisecond)
+	go func() {
 		h.mu.Lock()
-	}
+		defer h.mu.Unlock()
+		for state.injectionState == InjectionInProgress {
+			cond.Wait()
+		}
+		close(done)
+	}()
 
 	h.mu.Unlock()
+
+	select {
+	case <-done:
+	case <-time.After(remaining):
+		h.mu.Lock()
+		if state.cancel != nil {
+			state.cancel()
+		}
+		h.mu.Unlock()
+		log.Log.Warningf("Conntrack sync: hook timeout for VMI %s", vmiUID)
+	}
+
 	return nil
 }
 
