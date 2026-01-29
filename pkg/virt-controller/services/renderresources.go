@@ -489,6 +489,9 @@ func GetMemoryOverhead(vmi *v1.VirtualMachineInstance, cpuArch string, additiona
 		overhead.Add(resource.MustParse("100Mi"))
 	}
 
+	// Overhead to handle hotplug disks. ~60Mi should be enough for target Pod to survive migration.
+	addHotplugDisksOverheads(vmi, &overhead)
+
 	// Multiplying the ratio is expected to be the last calculation before returning overhead
 	if additionalOverheadRatio != nil && *additionalOverheadRatio != "" {
 		ratio, err := strconv.ParseFloat(*additionalOverheadRatio, 64)

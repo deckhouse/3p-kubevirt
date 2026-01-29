@@ -1374,6 +1374,31 @@ func addProbeOverheads(vmi *v1.VirtualMachineInstance, quantity *resource.Quanti
 	}
 }
 
+func addHotplugDisksOverheads(vmi *v1.VirtualMachineInstance, quantity *resource.Quantity) {
+	// We need to add this overhead due to potential OOMKill during
+	// migration with hotplugged disks.
+	hasHotplugs := false
+	for _, volume := range vmi.Spec.Volumes {
+		if volume.PersistentVolumeClaim != nil && volume.PersistentVolumeClaim.Hotpluggable {
+			hasHotplugs = true
+			break
+		}
+		if volume.ContainerDisk != nil && volume.ContainerDisk.Hotpluggable {
+			hasHotplugs = true
+			break
+		}
+		if volume.DataVolume != nil && volume.DataVolume.Hotpluggable {
+			hasHotplugs = true
+			break
+		}
+	}
+
+	if hasHotplugs {
+		hotplugOverhead := resource.MustParse("60Mi")
+		quantity.Add(hotplugOverhead)
+	}
+}
+
 func HaveContainerDiskVolume(volumes []v1.Volume) bool {
 	for _, volume := range volumes {
 		if volume.ContainerDisk != nil {
