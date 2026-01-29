@@ -29,6 +29,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"libvirt.org/go/libvirtxml"
@@ -62,6 +63,7 @@ import (
 	virtconfig "kubevirt.io/kubevirt/pkg/virt-config"
 	"kubevirt.io/kubevirt/pkg/virt-controller/services"
 	cmdclient "kubevirt.io/kubevirt/pkg/virt-handler/cmd-client"
+	"kubevirt.io/kubevirt/pkg/virt-handler/conntrack"
 	container_disk "kubevirt.io/kubevirt/pkg/virt-handler/container-disk"
 	hotplug_volume "kubevirt.io/kubevirt/pkg/virt-handler/hotplug-disk"
 	"kubevirt.io/kubevirt/pkg/virt-handler/isolation"
@@ -102,6 +104,7 @@ type MigrationTargetController struct {
 	virtLauncherFSRunDirPattern      string
 	hotplugContainerDiskMounter      container_disk.HotplugMounter
 	checksumCtrl                     *checksum_controller.Controller
+	conntrackSync                    *conntrack.TargetHandler
 }
 
 func NewMigrationTargetController(
@@ -117,11 +120,13 @@ func NewMigrationTargetController(
 	clusterConfig *virtconfig.ClusterConfig,
 	podIsolationDetector isolation.PodIsolationDetector,
 	migrationProxy migrationproxy.ProxyManager,
+	virtLauncherFSRunDirPattern string,
 	capabilities *libvirtxml.Caps,
 	netConf netconf,
 	netStat netstat,
 	netBindingPluginMemoryCalculator netBindingPluginMemoryCalculator,
 	passtRepairHandler passtRepairTargetHandler,
+	conntrackSync *conntrack.TargetHandler,
 ) (*MigrationTargetController, error) {
 
 	baseCtrl, err := NewBaseController(
@@ -166,7 +171,8 @@ func NewMigrationTargetController(
 		passtRepairHandler:               passtRepairHandler,
 		podIsolationDetector:             podIsolationDetector,
 		recorder:                         recorder,
-		virtLauncherFSRunDirPattern:      "/proc/%d/root/var/run",
+		virtLauncherFSRunDirPattern:      virtLauncherFSRunDirPattern,
+		conntrackSync:                    conntrackSync,
 
 		hotplugContainerDiskMounter: container_disk.NewHotplugMounter(
 			podIsolationDetector,
@@ -426,6 +432,9 @@ func (c *MigrationTargetController) finalCleanup(vmi *v1.VirtualMachineInstance,
 
 	defer c.migrationProxy.StopTargetListener(string(vmi.UID))
 	defer c.launcherClients.CloseLauncherClient(vmi)
+	if c.conntrackSync != nil {
+		defer c.conntrackSync.Cleanup(vmi.UID)
+	}
 	client, err := c.launcherClients.GetLauncherClient(vmi)
 	if err != nil {
 		return err
@@ -605,6 +614,14 @@ func (c *MigrationTargetController) handleTargetMigrationProxy(vmi *v1.VirtualMa
 		destSocketFile := migrationproxy.SourceUnixFile(baseDir, key)
 		migrationTargetSockets = append(migrationTargetSockets, destSocketFile)
 	}
+
+	// Add CT sync socket to migration proxy
+	if c.conntrackSync != nil {
+		ctSyncKey := migrationproxy.ConstructProxyKey(vmiUID, conntrack.ConntrackSyncPort)
+		ctSyncSocketFile := migrationproxy.SourceUnixFile(baseDir, ctSyncKey)
+		migrationTargetSockets = append(migrationTargetSockets, ctSyncSocketFile)
+	}
+
 	err = c.StartMigrationProxyInVirtLauncher(client)
 	if err != nil {
 		return err
@@ -805,6 +822,37 @@ func (c *MigrationTargetController) processVMI(vmi *v1.VirtualMachineInstance) e
 	err = c.handleTargetMigrationProxy(vmi, client)
 	if err != nil {
 		return fmt.Errorf("failed to handle post sync migration proxy: %v", err)
+	}
+
+	// Start CT sync listeners for conntrack synchronization during migration
+	if c.conntrackSync != nil {
+		res, err := c.podIsolationDetector.Detect(vmi)
+		if err != nil {
+			log.Log.Object(vmi).Warningf("Conntrack sync: failed to detect pod isolation: %v", err)
+		} else {
+			vmiUID := string(vmi.UID)
+			if vmi.Status.MigrationState.SourceState != nil && vmi.Status.MigrationState.SourceState.VirtualMachineInstanceUID != nil {
+				vmiUID = string(*vmi.Status.MigrationState.SourceState.VirtualMachineInstanceUID)
+			}
+			baseDir := fmt.Sprintf(filepath.Join(c.virtLauncherFSRunDirPattern, "kubevirt"), res.Pid())
+			ctSyncKey := migrationproxy.ConstructProxyKey(vmiUID, conntrack.ConntrackSyncPort)
+			ctSyncSocketPath := migrationproxy.SourceUnixFile(baseDir, ctSyncKey)
+			if err := c.conntrackSync.StartProxyListener(vmi.UID, ctSyncSocketPath); err != nil {
+				log.Log.Object(vmi).Warningf("Conntrack sync: failed to start proxy listener: %v", err)
+			}
+		}
+
+		// Start hook listener for libvirt hook communication
+		// Socket path goes through kubelet pods directory so virt-launcher can access it
+		podDir, err := cmdclient.FindPodDirOnHost(vmi, cmdclient.SocketDirectoryOnHost)
+		if err != nil {
+			log.Log.Object(vmi).Warningf("Conntrack sync: failed to find pod directory: %v", err)
+		} else {
+			hookSocketPath := filepath.Join(podDir, string(vmi.UID), "conntrack-hook.sock")
+			if err := c.conntrackSync.StartHookListener(vmi.UID, hookSocketPath); err != nil {
+				log.Log.Object(vmi).Warningf("Conntrack sync: failed to start hook listener: %v", err)
+			}
+		}
 	}
 
 	c.recorder.Event(vmi, k8sv1.EventTypeNormal, v1.PreparingTarget.String(), VMIMigrationTargetPrepared)

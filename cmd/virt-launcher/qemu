@@ -1,5 +1,40 @@
 #!/bin/bash
-if [ "$2" != "release" ] || [ "$3" != "end" ] || [ "$4" != "migrated" ]; then
-	exit
+
+# Libvirt hook script for qemu
+# Called with: domain_name operation sub-operation [extra]
+# Domain XML is passed via stdin
+
+DOMAIN_NAME="$1"
+OPERATION="$2"
+SUB_OPERATION="$3"
+EXTRA="$4"
+
+# Read domain XML from stdin (we need to save it as multiple functions may need it)
+DOMAIN_XML=$(cat)
+
+# Handle release end migrated - existing functionality
+if [ "$OPERATION" = "release" ] && [ "$SUB_OPERATION" = "end" ] && [ "$EXTRA" = "migrated" ]; then
+    touch /run/kubevirt-private/backend-storage-meta/migrated
 fi
-touch /run/kubevirt-private/backend-storage-meta/migrated
+
+# Handle migrate end - conntrack synchronization on migration target
+if [ "$OPERATION" = "migrate" ] && [ "$SUB_OPERATION" = "end" ]; then
+    # Extract VMI UID from domain XML metadata
+    # XML structure: <metadata><kubevirt xmlns="http://kubevirt.io"><uid>...</uid></kubevirt></metadata>
+    VMI_UID=$(echo "$DOMAIN_XML" | sed -n 's/.*<uid>\([^<]*\)<\/uid>.*/\1/p' | head -1)
+
+    if [ -n "$VMI_UID" ]; then
+        SOCKET_PATH="/var/run/kubevirt/sockets/${VMI_UID}/conntrack-hook.sock"
+
+        if [ -S "$SOCKET_PATH" ]; then
+            # Connect to the socket and wait for conntrack sync to complete
+            # Send "wait" command and expect "ok" response
+            # Use timeout to prevent hanging indefinitely (200ms max injection timeout + buffer)
+            RESPONSE=$(echo "wait" | timeout 1 nc -U "$SOCKET_PATH" 2>/dev/null)
+
+            if [ "$RESPONSE" != "ok" ]; then
+                echo "kubevirt-hook: Conntrack sync: did not receive ok response for VMI $VMI_UID" >&2
+            fi
+        fi
+    fi
+fi
