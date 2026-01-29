@@ -35,6 +35,26 @@ import (
 	"kubevirt.io/client-go/log"
 )
 
+const (
+	MaxInjectionTimeout = 200 * time.Millisecond
+	ConntrackSyncPort   = 49154 // Proxy stream identifier (not actual TCP port)
+)
+
+type InjectionState int
+
+const (
+	InjectionPending InjectionState = iota
+	InjectionInProgress
+	InjectionDone
+	InjectionFailed
+	InjectionTimedOut
+)
+
+type CTPayload struct {
+	Data    []byte
+	Version byte
+}
+
 type targetState struct {
 	proxyListener  net.Listener
 	hookListener   net.Listener
@@ -59,12 +79,11 @@ func NewTargetHandler(ciliumClient *CiliumClient) *TargetHandler {
 
 func (h *TargetHandler) StartProxyListener(vmiUID types.UID, socketPath string) error {
 	h.mu.Lock()
-	defer h.mu.Unlock()
-
 	state := h.getOrCreateState(vmiUID)
 	if state.proxyListener != nil {
 		return nil
 	}
+	h.mu.Unlock()
 
 	dir := filepath.Dir(socketPath)
 	if err := os.MkdirAll(dir, 0755); err != nil {
@@ -78,7 +97,9 @@ func (h *TargetHandler) StartProxyListener(vmiUID types.UID, socketPath string) 
 		return err
 	}
 
+	h.mu.Lock()
 	state.proxyListener = listener
+	h.mu.Unlock()
 
 	go h.handleProxyConnections(vmiUID, listener)
 
@@ -156,12 +177,11 @@ func (h *TargetHandler) onCTReceived(vmiUID types.UID, payload *CTPayload) {
 
 func (h *TargetHandler) StartHookListener(vmiUID types.UID, socketPath string) error {
 	h.mu.Lock()
-	defer h.mu.Unlock()
-
 	state := h.getOrCreateState(vmiUID)
 	if state.hookListener != nil {
 		return nil
 	}
+	h.mu.Unlock()
 
 	dir := filepath.Dir(socketPath)
 	if err := os.MkdirAll(dir, 0755); err != nil {
@@ -175,7 +195,9 @@ func (h *TargetHandler) StartHookListener(vmiUID types.UID, socketPath string) e
 		return err
 	}
 
+	h.mu.Lock()
 	state.hookListener = listener
+	h.mu.Unlock()
 
 	go h.handleHookConnections(vmiUID, listener)
 
@@ -204,14 +226,14 @@ func (h *TargetHandler) handleHookConnection(vmiUID types.UID, conn net.Conn) {
 	if scanner.Scan() {
 		line := scanner.Text()
 		if strings.HasPrefix(line, "wait") {
-			h.OnHookSignal(vmiUID)
+			h.onHookSignal(vmiUID)
 		}
 	}
 
 	conn.Write([]byte("ok\n"))
 }
 
-func (h *TargetHandler) OnHookSignal(vmiUID types.UID) error {
+func (h *TargetHandler) onHookSignal(vmiUID types.UID) error {
 	h.mu.Lock()
 
 	state, exists := h.states[vmiUID]
