@@ -847,7 +847,7 @@ func (c *MigrationTargetController) processVMI(vmi *v1.VirtualMachineInstance) e
 		if err != nil {
 			log.Log.Object(vmi).Warningf("Conntrack sync: failed to find pod directory: %v", err)
 		} else {
-			hookSocketPath := filepath.Join(podDir, string(vmi.UID), "conntrack-hook.sock")
+			hookSocketPath := filepath.Join(podDir, "conntrack-hook.sock")
 			if err := c.conntrackSync.StartHookListener(vmi.UID, hookSocketPath); err != nil {
 				log.Log.Object(vmi).Warningf("Conntrack sync: failed to start hook listener: %v", err)
 			}
