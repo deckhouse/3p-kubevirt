@@ -33,8 +33,7 @@ import (
 )
 
 const (
-	exportTimeout     = 5 * time.Second
-	connectionTimeout = 10 * time.Second
+	exportTimeout = 5 * time.Second
 )
 
 type SourceHandler struct {

@@ -29,7 +29,6 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"libvirt.org/go/libvirtxml"
