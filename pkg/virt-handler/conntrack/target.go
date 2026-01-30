@@ -35,10 +35,7 @@ import (
 	"kubevirt.io/client-go/log"
 )
 
-const (
-	MaxInjectionTimeout = 200 * time.Millisecond
-	ConntrackSyncPort   = 49154 // Proxy stream identifier (not actual TCP port)
-)
+const MaxInjectionTimeout = 200 * time.Millisecond
 
 type InjectionState int
 

@@ -616,7 +616,7 @@ func (c *MigrationTargetController) handleTargetMigrationProxy(vmi *v1.VirtualMa
 
 	// Add CT sync socket to migration proxy
 	if c.conntrackSync != nil {
-		ctSyncKey := migrationproxy.ConstructProxyKey(vmiUID, conntrack.ConntrackSyncPort)
+		ctSyncKey := migrationproxy.ConstructProxyKey(vmiUID, migrationproxy.ConntrackSyncPort)
 		ctSyncSocketFile := migrationproxy.SourceUnixFile(baseDir, ctSyncKey)
 		migrationTargetSockets = append(migrationTargetSockets, ctSyncSocketFile)
 	}
@@ -834,7 +834,7 @@ func (c *MigrationTargetController) processVMI(vmi *v1.VirtualMachineInstance) e
 				vmiUID = string(*vmi.Status.MigrationState.SourceState.VirtualMachineInstanceUID)
 			}
 			baseDir := fmt.Sprintf(filepath.Join(c.virtLauncherFSRunDirPattern, "kubevirt"), res.Pid())
-			ctSyncKey := migrationproxy.ConstructProxyKey(vmiUID, conntrack.ConntrackSyncPort)
+			ctSyncKey := migrationproxy.ConstructProxyKey(vmiUID, migrationproxy.ConntrackSyncPort)
 			ctSyncSocketPath := migrationproxy.SourceUnixFile(baseDir, ctSyncKey)
 			if err := c.conntrackSync.StartProxyListener(vmi.UID, ctSyncSocketPath); err != nil {
 				log.Log.Object(vmi).Warningf("Conntrack sync: failed to start proxy listener: %v", err)

@@ -613,7 +613,7 @@ func (c *MigrationSourceController) processVMI(vmi *v1.VirtualMachineInstance, d
 				return
 			}
 			baseDir := fmt.Sprintf(filepath.Join(c.virtLauncherFSRunDirPattern, "kubevirt"), res.Pid())
-			ctSyncKey := migrationproxy.ConstructProxyKey(string(vmi.UID), conntrack.ConntrackSyncPort)
+			ctSyncKey := migrationproxy.ConstructProxyKey(string(vmi.UID), migrationproxy.ConntrackSyncPort)
 			socketPath := migrationproxy.SourceUnixFile(baseDir, ctSyncKey)
 
 			if err := c.conntrackSync.ExportAndSend(vmi, socketPath); err != nil {
