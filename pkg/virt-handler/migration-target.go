@@ -283,8 +283,8 @@ func (c *MigrationTargetController) updateStatus(vmi *v1.VirtualMachineInstance,
 		c.ackMigrationCompletion(vmi, domain)
 	}
 
-	if migrations.IsMigrating(vmi) {
-		log.Log.Object(vmi).V(4).Info("migration is already in progress")
+	if migrations.IsMigrating(vmi) && len(vmi.Status.MigrationState.TargetDirectMigrationNodePorts) > 0 {
+		log.Log.Object(vmi).V(4).Info("migration is already in progress and ports are published")
 		return nil
 	}
 
