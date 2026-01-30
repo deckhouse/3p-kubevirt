@@ -24,7 +24,7 @@ if [ "$OPERATION" = "migrate" ] && [ "$SUB_OPERATION" = "end" ]; then
     VMI_UID=$(echo "$DOMAIN_XML" | sed -n 's/.*<uid>\([^<]*\)<\/uid>.*/\1/p' | head -1)
 
     if [ -n "$VMI_UID" ]; then
-        SOCKET_PATH="/var/run/kubevirt/sockets/${VMI_UID}/conntrack-hook.sock"
+        SOCKET_PATH="/var/run/kubevirt/sockets/conntrack-hook.sock"
 
         if [ -S "$SOCKET_PATH" ]; then
             # Connect to the socket and wait for conntrack sync to complete
