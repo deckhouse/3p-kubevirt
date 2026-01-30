@@ -81,6 +81,7 @@ func (h *TargetHandler) StartProxyListener(vmiUID types.UID, socketPath string) 
 	h.mu.Lock()
 	state := h.getOrCreateState(vmiUID)
 	if state.proxyListener != nil {
+		h.mu.Unlock()
 		return nil
 	}
 	h.mu.Unlock()
@@ -179,6 +180,7 @@ func (h *TargetHandler) StartHookListener(vmiUID types.UID, socketPath string) e
 	h.mu.Lock()
 	state := h.getOrCreateState(vmiUID)
 	if state.hookListener != nil {
+		h.mu.Unlock()
 		return nil
 	}
 	h.mu.Unlock()
