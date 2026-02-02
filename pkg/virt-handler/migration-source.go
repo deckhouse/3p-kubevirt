@@ -601,7 +601,6 @@ func (c *MigrationSourceController) processVMI(vmi *v1.VirtualMachineInstance, d
 		return nil
 	}
 
-	// Detect offline phase start via domain watcher - trigger CT sync when VM is paused for migration
 	if c.conntrackSync != nil &&
 		domain.Status.Status == api.Paused &&
 		domain.Status.Reason == api.ReasonPausedMigration &&

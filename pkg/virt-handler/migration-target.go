@@ -841,8 +841,7 @@ func (c *MigrationTargetController) processVMI(vmi *v1.VirtualMachineInstance) e
 			}
 		}
 
-		// Start hook listener for libvirt hook communication
-		// Socket path goes through kubelet pods directory so virt-launcher can access it
+		// Start hook listener for libvirt hook
 		podDir, err := cmdclient.FindPodDirOnHost(vmi, cmdclient.SocketDirectoryOnHost)
 		if err != nil {
 			log.Log.Object(vmi).Warningf("Conntrack sync: failed to find pod directory: %v", err)

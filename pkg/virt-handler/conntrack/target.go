@@ -62,12 +62,12 @@ type targetState struct {
 }
 
 type TargetHandler struct {
-	ciliumClient *CiliumClient
+	ciliumClient ConntrackClient
 	mu           sync.Mutex
 	states       map[types.UID]*targetState
 }
 
-func NewTargetHandler(ciliumClient *CiliumClient) *TargetHandler {
+func NewTargetHandler(ciliumClient ConntrackClient) *TargetHandler {
 	return &TargetHandler{
 		ciliumClient: ciliumClient,
 		states:       make(map[types.UID]*targetState),

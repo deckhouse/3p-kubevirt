@@ -37,12 +37,12 @@ const (
 )
 
 type SourceHandler struct {
-	ciliumClient *CiliumClient
+	ciliumClient ConntrackClient
 	mu           sync.RWMutex
 	sentVMIs     map[types.UID]struct{}
 }
 
-func NewSourceHandler(ciliumClient *CiliumClient) *SourceHandler {
+func NewSourceHandler(ciliumClient ConntrackClient) *SourceHandler {
 	return &SourceHandler{
 		ciliumClient: ciliumClient,
 		sentVMIs:     make(map[types.UID]struct{}),

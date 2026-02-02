@@ -41,6 +41,11 @@ const (
 	conntrackImportEndpoint = "/v1/conntrack/import"
 )
 
+type ConntrackClient interface {
+	ExportConntrack(ctx context.Context, ip4 string) (*ExportResult, error)
+	ImportConntrack(ctx context.Context, data []byte, version byte) error
+}
+
 type CiliumClient struct {
 	socketPath string
 	httpClient *http.Client
