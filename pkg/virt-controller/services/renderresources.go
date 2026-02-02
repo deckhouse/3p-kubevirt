@@ -275,6 +275,15 @@ func WithMemoryOverhead(guestResourceSpec v1.ResourceRequirements, memoryOverhea
 	}
 }
 
+func WithMemoryLimitsOverhead(memoryLimitsOverhead resource.Quantity) ResourceRendererOption {
+	return func(renderer *ResourceRenderer) {
+		if memoryLimit, ok := renderer.vmLimits[k8sv1.ResourceMemory]; ok {
+			memoryLimit.Add(memoryLimitsOverhead)
+			renderer.vmLimits[k8sv1.ResourceMemory] = memoryLimit
+		}
+	}
+}
+
 func WithAutoMemoryLimits(namespace string, namespaceStore cache.Store) ResourceRendererOption {
 	return func(renderer *ResourceRenderer) {
 		requestRatio := getMemoryLimitsRatio(namespace, namespaceStore)
@@ -490,7 +499,7 @@ func GetMemoryOverhead(vmi *v1.VirtualMachineInstance, cpuArch string, additiona
 	}
 
 	// Overhead to handle hotplug disks. ~60Mi should be enough for target Pod to survive migration.
-	addHotplugDisksOverheads(vmi, &overhead)
+	addHotplugDisksOverheads(vmi, &overhead, nil)
 
 	// Multiplying the ratio is expected to be the last calculation before returning overhead
 	if additionalOverheadRatio != nil && *additionalOverheadRatio != "" {
@@ -503,6 +512,26 @@ func GetMemoryOverhead(vmi *v1.VirtualMachineInstance, cpuArch string, additiona
 
 		overhead = multiplyMemory(overhead, ratio)
 	}
+
+	return overhead
+}
+
+// GetMemoryLimitsOverhead computes the estimation of additional
+// memory limit needed for the domain to operate properly.
+//
+// This includes the memory needed temporarily to perform
+// certain operations:
+// - VM migration with hotplugged disks.
+//
+// The return value is overhead memory quantity
+//
+// Note: This is the best estimation based on experiments
+// and may not be 100% accurate.
+func GetMemoryLimitsOverhead(vmi *v1.VirtualMachineInstance) resource.Quantity {
+	overhead := *resource.NewScaledQuantity(0, resource.Kilo)
+
+	// Add hotplug overhead for memory limits.
+	addHotplugDisksOverheads(vmi, nil, &overhead)
 
 	return overhead
 }

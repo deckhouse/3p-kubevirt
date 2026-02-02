@@ -1374,28 +1374,46 @@ func addProbeOverheads(vmi *v1.VirtualMachineInstance, quantity *resource.Quanti
 	}
 }
 
-func addHotplugDisksOverheads(vmi *v1.VirtualMachineInstance, quantity *resource.Quantity) {
-	// We need to add this overhead due to potential OOMKill during
-	// migration with hotplugged disks.
-	hasHotplugs := false
+// addHotplugDisksOverheads returns additional memory requests and limits needed to
+// overcome potential OOMKill during VM migration with hotplugged disks .
+func addHotplugDisksOverheads(vmi *v1.VirtualMachineInstance, overallOverhead *resource.Quantity, limitOnlyOverhead *resource.Quantity) {
+	hasHotplugDisks := false
 	for _, volume := range vmi.Spec.Volumes {
 		if volume.PersistentVolumeClaim != nil && volume.PersistentVolumeClaim.Hotpluggable {
-			hasHotplugs = true
+			hasHotplugDisks = true
 			break
 		}
 		if volume.ContainerDisk != nil && volume.ContainerDisk.Hotpluggable {
-			hasHotplugs = true
+			hasHotplugDisks = true
 			break
 		}
 		if volume.DataVolume != nil && volume.DataVolume.Hotpluggable {
-			hasHotplugs = true
+			hasHotplugDisks = true
 			break
 		}
 	}
 
-	if hasHotplugs {
-		hotplugOverhead := resource.MustParse("60Mi")
-		quantity.Add(hotplugOverhead)
+	// No disks, no changes.
+	if !hasHotplugDisks {
+		return
+	}
+
+	overheadValue := resource.MustParse("60Mi")
+
+	reqCPU := vmi.Spec.Domain.Resources.Requests.Cpu()
+	limitCPU := vmi.Spec.Domain.Resources.Limits.Cpu()
+	if reqCPU != nil && limitCPU != nil {
+		if reqCPU.Cmp(*limitCPU) == 0 {
+			// Add overhead for requests and limits for the domain with guaranteed CPU cores.
+			if overallOverhead != nil {
+				overallOverhead.Add(overheadValue)
+			}
+		} else {
+			// Add overhead only for limits if CPU cores are not guaranteed: domain CPU requests are not equal to limits.
+			if limitOnlyOverhead != nil {
+				limitOnlyOverhead.Add(overheadValue)
+			}
+		}
 	}
 }
 
@@ -1652,6 +1670,7 @@ func (t *templateService) VMIResourcePredicates(vmi *v1.VirtualMachineInstance, 
 		vmiCPUArch = t.clusterConfig.GetClusterCPUArch()
 	}
 	memoryOverhead := GetMemoryOverhead(vmi, vmiCPUArch, t.clusterConfig.GetConfig().AdditionalGuestMemoryOverheadRatio)
+	memoryLimitsOverhead := GetMemoryLimitsOverhead(vmi)
 
 	if t.netBindingPluginMemoryCalculator != nil {
 		memoryOverhead.Add(
@@ -1679,6 +1698,9 @@ func (t *templateService) VMIResourcePredicates(vmi *v1.VirtualMachineInstance, 
 			NewVMIResourceRule(not(doesVMIRequireDedicatedCPU), WithoutDedicatedCPU(vmi, t.clusterConfig.GetCPUAllocationRatio(), withCPULimits)),
 			NewVMIResourceRule(hasHugePages, WithHugePages(vmi.Spec.Domain.Memory, memoryOverhead)),
 			NewVMIResourceRule(not(hasHugePages), WithMemoryOverhead(vmi.Spec.Domain.Resources, memoryOverhead)),
+			NewVMIResourceRule(func(_ *v1.VirtualMachineInstance) bool {
+				return memoryLimitsOverhead.Value() > 0
+			}, WithMemoryLimitsOverhead(memoryLimitsOverhead)),
 			NewVMIResourceRule(t.doesVMIRequireAutoMemoryLimits, WithAutoMemoryLimits(vmi.Namespace, t.namespaceStore)),
 			NewVMIResourceRule(func(*v1.VirtualMachineInstance) bool {
 				return len(networkToResourceMap) > 0
