@@ -393,14 +393,11 @@ func (t *templateService) renderLaunchManifest(vmi *v1.VirtualMachineInstance, i
 		})
 	}
 
-	// ImageIDs are passed when render target launch manifest for migration.
-	isMigrationTarget := imageIDs != nil
-
 	networkToResourceMap, err := multus.NetworkToResource(t.virtClient, vmi)
 	if err != nil {
 		return nil, err
 	}
-	resourceRenderer, err := t.newResourceRenderer(vmi, networkToResourceMap, isMigrationTarget)
+	resourceRenderer, err := t.newResourceRenderer(vmi, networkToResourceMap)
 	if err != nil {
 		return nil, err
 	}
@@ -909,7 +906,7 @@ func (t *templateService) newVolumeRenderer(vmi *v1.VirtualMachineInstance, name
 	return volumeRenderer, nil
 }
 
-func (t *templateService) newResourceRenderer(vmi *v1.VirtualMachineInstance, networkToResourceMap map[string]string, isMigrationTarget bool) (*ResourceRenderer, error) {
+func (t *templateService) newResourceRenderer(vmi *v1.VirtualMachineInstance, networkToResourceMap map[string]string) (*ResourceRenderer, error) {
 	vmiResources := vmi.Spec.Domain.Resources
 	baseOptions := []ResourceRendererOption{
 		WithEphemeralStorageRequest(),
@@ -920,7 +917,7 @@ func (t *templateService) newResourceRenderer(vmi *v1.VirtualMachineInstance, ne
 		return nil, err
 	}
 
-	options := append(baseOptions, t.VMIResourcePredicates(vmi, networkToResourceMap, isMigrationTarget).Apply()...)
+	options := append(baseOptions, t.VMIResourcePredicates(vmi, networkToResourceMap).Apply()...)
 	return NewResourceRenderer(vmiResources.Limits, vmiResources.Requests, options...), nil
 }
 
@@ -1666,7 +1663,7 @@ func (t *templateService) doesVMIRequireAutoCPULimits(vmi *v1.VirtualMachineInst
 	return false
 }
 
-func (t *templateService) VMIResourcePredicates(vmi *v1.VirtualMachineInstance, networkToResourceMap map[string]string, isMigrationTarget bool) VMIResourcePredicates {
+func (t *templateService) VMIResourcePredicates(vmi *v1.VirtualMachineInstance, networkToResourceMap map[string]string) VMIResourcePredicates {
 	// Set default with vmi Architecture. compatible with multi-architecture hybrid environments
 	vmiCPUArch := vmi.Spec.Architecture
 	if vmiCPUArch == "" {
@@ -1702,7 +1699,7 @@ func (t *templateService) VMIResourcePredicates(vmi *v1.VirtualMachineInstance, 
 			NewVMIResourceRule(hasHugePages, WithHugePages(vmi.Spec.Domain.Memory, memoryOverhead)),
 			NewVMIResourceRule(not(hasHugePages), WithMemoryOverhead(vmi.Spec.Domain.Resources, memoryOverhead)),
 			NewVMIResourceRule(func(_ *v1.VirtualMachineInstance) bool {
-				return memoryLimitsOverhead.Value() > 0 && isMigrationTarget
+				return memoryLimitsOverhead.Value() > 0
 			}, WithMemoryLimitsOverhead(memoryLimitsOverhead)),
 			NewVMIResourceRule(t.doesVMIRequireAutoMemoryLimits, WithAutoMemoryLimits(vmi.Namespace, t.namespaceStore)),
 			NewVMIResourceRule(func(*v1.VirtualMachineInstance) bool {
