@@ -1192,7 +1192,7 @@ func (t *templateService) RenderHotplugAttachmentTriggerPodTemplate(volume *v1.V
 
 	pod := &k8sv1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			GenerateName: "d8v-hp-",
+			GenerateName: fmt.Sprintf("d8v-hp-%s-", vmi.Name),
 			OwnerReferences: []metav1.OwnerReference{
 				*metav1.NewControllerRef(ownerPod, schema.GroupVersionKind{
 					Group:   k8sv1.SchemeGroupVersion.Group,
