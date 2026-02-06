@@ -123,7 +123,7 @@ func replaceForHostDisk(volumeSource *v1.VolumeSource, volumeName string, pvcVol
 		return fmt.Errorf("the size for volume %s is too low, must be at least 1MiB", volumeName)
 	}
 
-	// If PVC filesystem overhead information is available, prefer the actual
+	// If it’s a PVC filesystem (we infer this indirectly by the presence of FilesystemOverhead), then prefer the actual
 	// virtual size of the existing source image when creating the target qcow2.
 	//
 	// QEMU requires source and target images used for block migration to have
