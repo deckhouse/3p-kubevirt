@@ -745,7 +745,7 @@ func (t *TemplateService) renderLaunchManifest(vmi *v1.VirtualMachineInstance, i
 
 	pod := k8sv1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			GenerateName: "virt-launcher-" + domain + "-",
+			GenerateName: "d8v-vm-" + domain + "-",
 			Labels:       podLabels(vmi, hostName),
 			Annotations:  podAnnotations,
 			OwnerReferences: []metav1.OwnerReference{
@@ -1166,7 +1166,7 @@ func (t *TemplateService) RenderHotplugAttachmentPodTemplate(volumes []*v1.Volum
 
 	pod := &k8sv1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			GenerateName: "hp-volume-",
+			GenerateName: fmt.Sprintf("d8v-hp-%s-", vmi.Name),
 			OwnerReferences: []metav1.OwnerReference{
 				*metav1.NewControllerRef(ownerPod, schema.GroupVersionKind{
 					Group:   k8sv1.SchemeGroupVersion.Group,
@@ -1345,7 +1345,7 @@ func (t *TemplateService) RenderHotplugAttachmentTriggerPodTemplate(volume *v1.V
 
 	pod := &k8sv1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			GenerateName: "hp-volume-",
+			GenerateName: fmt.Sprintf("d8v-hp-%s-", vmi.Name),
 			OwnerReferences: []metav1.OwnerReference{
 				*metav1.NewControllerRef(ownerPod, schema.GroupVersionKind{
 					Group:   k8sv1.SchemeGroupVersion.Group,

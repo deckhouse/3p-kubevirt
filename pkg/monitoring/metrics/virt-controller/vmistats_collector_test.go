@@ -155,7 +155,7 @@ var _ = Describe("VMI Stats Collector", func() {
 
 		It("should update the vmi_pod label correctly after migration", func() {
 			setupMigrationPods()
-			vmi := createMigrationVMI("target-node", "virt-launcher-targetpod", true, false)
+			vmi := createMigrationVMI("target-node", "d8v-vm-targetpod", true, false)
 
 			cr := collectVMIInfo(vmi)
 
@@ -163,12 +163,12 @@ var _ = Describe("VMI Stats Collector", func() {
 			Expect(cr.Metric.GetOpts().Name).To(ContainSubstring("kubevirt_vmi_info"))
 			Expect(cr.Value).To(BeEquivalentTo(1))
 			Expect(cr.Labels).To(HaveLen(17))
-			Expect(cr.Labels[16]).To(Equal("virt-launcher-targetpod"))
+			Expect(cr.Labels[16]).To(Equal("d8v-vm-targetpod"))
 		})
 
 		It("should return the original pod when migration failed", func() {
 			setupMigrationPods()
-			vmi := createMigrationVMI("initial-node", "virt-launcher-targetpod", true, true)
+			vmi := createMigrationVMI("initial-node", "d8v-vm-targetpod", true, true)
 
 			cr := collectVMIInfo(vmi)
 
@@ -176,7 +176,7 @@ var _ = Describe("VMI Stats Collector", func() {
 			Expect(cr.Metric.GetOpts().Name).To(ContainSubstring("kubevirt_vmi_info"))
 			Expect(cr.Value).To(BeEquivalentTo(1))
 			Expect(cr.Labels).To(HaveLen(17))
-			Expect(cr.Labels[16]).To(Equal("virt-launcher-originalpod"))
+			Expect(cr.Labels[16]).To(Equal("d8v-vm-originalpod"))
 		})
 
 		DescribeTable("should show instance type value correctly", func(instanceTypeAnnotationKey, instanceType, expected string) {
@@ -581,7 +581,7 @@ var _ = Describe("VMI Stats Collector", func() {
 
 func setupMigrationPods() {
 	originalPod := &k8sv1.Pod{
-		ObjectMeta: newPodMetaForInformer("virt-launcher-originalpod", "test-ns", "test-vmi-uid"),
+		ObjectMeta: newPodMetaForInformer("d8v-vm-originalpod", "test-ns", "test-vmi-uid"),
 		Spec: k8sv1.PodSpec{
 			NodeName: "initial-node",
 		},
@@ -590,7 +590,7 @@ func setupMigrationPods() {
 		},
 	}
 	targetPod := &k8sv1.Pod{
-		ObjectMeta: newPodMetaForInformer("virt-launcher-targetpod", "test-ns", "test-vmi-uid"),
+		ObjectMeta: newPodMetaForInformer("d8v-vm-targetpod", "test-ns", "test-vmi-uid"),
 		Spec: k8sv1.PodSpec{
 			NodeName: "target-node",
 		},
