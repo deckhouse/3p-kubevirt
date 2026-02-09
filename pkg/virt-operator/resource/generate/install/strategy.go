@@ -459,8 +459,8 @@ func GenerateCurrentInstallStrategy(config *operatorutil.KubeVirtDeploymentConfi
 	strategy := &Strategy{}
 
 	functions := []func() (*extv1.CustomResourceDefinition, error){
-		components.NewPresetCrd, components.NewReplicaSetCrd,
-		components.NewVirtualMachineInstanceMigrationCrd,
+		components.NewVirtualMachineInstanceCrd, components.NewPresetCrd, components.NewReplicaSetCrd,
+		components.NewVirtualMachineCrd, components.NewVirtualMachineInstanceMigrationCrd,
 		components.NewVirtualMachineSnapshotCrd, components.NewVirtualMachineSnapshotContentCrd,
 		components.NewVirtualMachineRestoreCrd, components.NewVirtualMachineInstancetypeCrd,
 		components.NewVirtualMachineClusterInstancetypeCrd, components.NewVirtualMachinePoolCrd,

@@ -22,6 +22,7 @@ package apply
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 
 	routev1 "github.com/openshift/api/route/v1"
@@ -595,14 +596,9 @@ func crdHandleDeletion(kvkey string,
 
 	finalizerPath := "/metadata/finalizers"
 
-	crds := []*extv1.CustomResourceDefinition{}
-	for _, obj := range objects {
-		crd, ok := obj.(*extv1.CustomResourceDefinition)
-		if !ok {
-			log.Log.Errorf(castFailedFmt, obj)
-			return nil
-		}
-		crds = append(crds, crd)
+	crds := getCrds(objects)
+	if len(crds) == 0 {
+		return nil
 	}
 
 	needFinalizerAdded := crdFilterNeedFinalizerAdded(crds)
@@ -664,4 +660,35 @@ func crdHandleDeletion(kvkey string,
 	}
 
 	return nil
+}
+
+func getCrds(objects []interface{}) []*extv1.CustomResourceDefinition {
+	var noDeleteCrdsKinds map[string]struct{}
+	if env := os.Getenv("KUBEVIRT_NO_DELETE_CRDS_KINDS"); env != "" {
+		kindList := strings.Split(env, ",")
+		for _, kind := range kindList {
+			noDeleteCrdsKinds[kind] = struct{}{}
+		}
+	}
+
+	var crds []*extv1.CustomResourceDefinition
+	for _, obj := range objects {
+		crd, ok := obj.(*extv1.CustomResourceDefinition)
+		if !ok {
+			log.Log.Errorf(castFailedFmt, obj)
+			return nil
+		}
+
+		if _, ok := noDeleteCrdsKinds[crd.Spec.Names.Kind]; ok {
+			continue
+		}
+
+		if crd.GetAnnotations()["kubevirt.io/no-delete"] == "true" {
+			continue
+		}
+
+		crds = append(crds, crd)
+	}
+
+	return crds
 }
