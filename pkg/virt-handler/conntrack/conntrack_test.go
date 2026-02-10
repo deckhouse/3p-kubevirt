@@ -38,33 +38,38 @@ import (
 var _ = Describe("Conntrack Sync", func() {
 	Describe("Protocol", func() {
 		It("should encode and decode SyncMessage correctly", func() {
+			ts := time.Now().UnixNano()
 			original := &SyncMessage{
-				Version: 2,
-				Data:    []byte("test conntrack data"),
+				Version:   2,
+				Timestamp: ts,
+				Data:      []byte("test conntrack data"),
 			}
 
 			encoded := original.Encode()
-			Expect(encoded).To(HaveLen(1 + 4 + len(original.Data)))
+			Expect(encoded).To(HaveLen(1 + 8 + 4 + len(original.Data)))
 			Expect(encoded[0]).To(Equal(byte(2)))
 
 			decoded, err := DecodeSyncMessage(bytes.NewReader(encoded))
 			Expect(err).ToNot(HaveOccurred())
 			Expect(decoded.Version).To(Equal(original.Version))
+			Expect(decoded.Timestamp).To(Equal(original.Timestamp))
 			Expect(decoded.Data).To(Equal(original.Data))
 		})
 
 		It("should handle empty data", func() {
 			original := &SyncMessage{
-				Version: 1,
-				Data:    []byte{},
+				Version:   1,
+				Timestamp: time.Now().UnixNano(),
+				Data:      []byte{},
 			}
 
 			encoded := original.Encode()
-			Expect(encoded).To(HaveLen(5))
+			Expect(encoded).To(HaveLen(1 + 8 + 4))
 
 			decoded, err := DecodeSyncMessage(bytes.NewReader(encoded))
 			Expect(err).ToNot(HaveOccurred())
 			Expect(decoded.Version).To(Equal(byte(1)))
+			Expect(decoded.Timestamp).To(Equal(original.Timestamp))
 			Expect(decoded.Data).To(BeEmpty())
 		})
 
@@ -75,8 +80,9 @@ var _ = Describe("Conntrack Sync", func() {
 			}
 
 			original := &SyncMessage{
-				Version: 3,
-				Data:    largeData,
+				Version:   3,
+				Timestamp: time.Now().UnixNano(),
+				Data:      largeData,
 			}
 
 			encoded := original.Encode()
@@ -86,7 +92,8 @@ var _ = Describe("Conntrack Sync", func() {
 		})
 
 		It("should fail on truncated data", func() {
-			encoded := []byte{1, 0, 0, 0, 10, 1, 2, 3}
+			// header: version(1) + timestamp(8) + data_len(4) = 13 bytes, then claims 10 bytes of data but only 3 present
+			encoded := []byte{1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 10, 1, 2, 3}
 			_, err := DecodeSyncMessage(bytes.NewReader(encoded))
 			Expect(err).To(HaveOccurred())
 		})
@@ -175,8 +182,9 @@ var _ = Describe("Conntrack Sync", func() {
 			Expect(err).ToNot(HaveOccurred())
 
 			msg := &SyncMessage{
-				Version: 1,
-				Data:    []byte("test ct data"),
+				Version:   1,
+				Timestamp: time.Now().UnixNano(),
+				Data:      []byte("test ct data"),
 			}
 			_, err = conn.Write(msg.Encode())
 			Expect(err).ToNot(HaveOccurred())

@@ -50,6 +50,7 @@ func NewSourceHandler(ciliumClient ConntrackClient) *SourceHandler {
 }
 
 func (h *SourceHandler) ExportAndSend(vmi *v1.VirtualMachineInstance, socketPath string) error {
+	syncStart := time.Now()
 	vmiUID := vmi.UID
 
 	h.mu.RLock()
@@ -103,8 +104,9 @@ func (h *SourceHandler) ExportAndSend(vmi *v1.VirtualMachineInstance, socketPath
 	defer conn.Close()
 
 	msg := &SyncMessage{
-		Version: version,
-		Data:    allData,
+		Version:   version,
+		Timestamp: syncStart.UnixNano(),
+		Data:      allData,
 	}
 
 	encoded := msg.Encode()

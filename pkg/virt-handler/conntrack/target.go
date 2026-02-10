@@ -48,8 +48,9 @@ const (
 )
 
 type CTPayload struct {
-	Data    []byte
-	Version byte
+	Data      []byte
+	Version   byte
+	SyncStart time.Time
 }
 
 type targetState struct {
@@ -131,17 +132,29 @@ func (h *TargetHandler) handleProxyConnection(vmiUID types.UID, conn net.Conn) {
 	log.Log.Infof("Conntrack sync: received %d bytes for VMI %s", len(msg.Data), vmiUID)
 
 	h.onCTReceived(vmiUID, &CTPayload{
-		Data:    msg.Data,
-		Version: msg.Version,
+		Data:      msg.Data,
+		Version:   msg.Version,
+		SyncStart: time.Unix(0, msg.Timestamp),
 	})
 }
 
 func (h *TargetHandler) onCTReceived(vmiUID types.UID, payload *CTPayload) {
 	h.mu.Lock()
 	state := h.getOrCreateState(vmiUID)
+	state.injectionStart = payload.SyncStart
+	remaining := MaxInjectionTimeout - time.Since(payload.SyncStart)
+	if remaining <= 0 {
+		state.injectionState = InjectionTimedOut
+		log.Log.Warningf("Conntrack sync: CT data arrived after timeout for VMI %s (elapsed: %v)", vmiUID, time.Since(payload.SyncStart))
+		if state.injectionDone != nil {
+			state.injectionDone.Broadcast()
+		}
+		h.mu.Unlock()
+		return
+	}
+
 	state.injectionState = InjectionInProgress
-	state.injectionStart = time.Now()
-	ctx, cancel := context.WithTimeout(context.Background(), MaxInjectionTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), remaining)
 	state.cancel = cancel
 	h.mu.Unlock()
 
@@ -156,15 +169,19 @@ func (h *TargetHandler) onCTReceived(vmiUID types.UID, payload *CTPayload) {
 			return
 		}
 
-		if ctx.Err() == context.DeadlineExceeded {
+		if state.injectionState == InjectionTimedOut {
+			return
+		}
+
+		if ctx.Err() != nil {
 			state.injectionState = InjectionTimedOut
-			log.Log.Warningf("Conntrack sync: import timed out for VMI %s", vmiUID)
+			log.Log.Warningf("Conntrack sync: import timed out for VMI %s (elapsed: %v)", vmiUID, time.Since(state.injectionStart))
 		} else if err != nil {
 			state.injectionState = InjectionFailed
 			log.Log.Warningf("Conntrack sync: import failed for VMI %s: %v", vmiUID, err)
 		} else {
 			state.injectionState = InjectionDone
-			log.Log.Infof("Conntrack sync: import completed for VMI %s", vmiUID)
+			log.Log.Infof("Conntrack sync: import completed for VMI %s in %v", vmiUID, time.Since(state.injectionStart))
 		}
 
 		if state.injectionDone != nil {
