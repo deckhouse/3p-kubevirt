@@ -2436,8 +2436,8 @@ var _ = Describe("Template", func() {
 						},
 					))
 			},
-				Entry("on amd64", "amd64", 351),
-				Entry("on arm64", "arm64", 485),
+				Entry("on amd64", "amd64", 357),
+				Entry("on arm64", "arm64", 491),
 			)
 		})
 
