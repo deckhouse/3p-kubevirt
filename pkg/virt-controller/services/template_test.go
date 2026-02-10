@@ -1978,8 +1978,8 @@ var _ = Describe("Template", func() {
 				Expect(pod.Spec.Containers[0].Resources.Requests.Memory().String()).To(Equal(requestMemory))
 				Expect(pod.Spec.Containers[0].Resources.Limits.Memory().String()).To(Equal(limitMemory))
 			},
-				Entry("on amd64", "amd64", "1282971493", "2282971493"),
-				Entry("on arm64", "arm64", "1417189221", "2417189221"),
+				Entry("on amd64", "amd64", "1282971493", "2345886053"),
+				Entry("on arm64", "arm64", "1417189221", "2480103781"),
 			)
 			DescribeTable("should overcommit guest overhead if selected, by only adding the overhead to memory limits", func(arch string, limitMemory string) {
 				config, kvStore, svc = configFactory(arch)
@@ -2015,8 +2015,8 @@ var _ = Describe("Template", func() {
 				Expect(pod.Spec.Containers[0].Resources.Requests.Memory().String()).To(Equal("1G"))
 				Expect(pod.Spec.Containers[0].Resources.Limits.Memory().String()).To(Equal(limitMemory))
 			},
-				Entry("on amd64", "amd64", "2282971493"),
-				Entry("on arm64", "arm64", "2417189221"),
+				Entry("on amd64", "amd64", "2345886053"),
+				Entry("on arm64", "arm64", "2480103781"),
 			)
 			DescribeTable("should not add unset resources", func(arch string, requestMemory int) {
 				config, kvStore, svc = configFactory(arch)
@@ -2357,10 +2357,10 @@ var _ = Describe("Template", func() {
 						},
 					))
 			},
-				Entry("hugepages-2Mi on amd64", "amd64", "2Mi", 282),
-				Entry("hugepages-1Gi on amd64", "amd64", "1Gi", 282),
-				Entry("hugepages-2Mi on arm64", "arm64", "2Mi", 416),
-				Entry("hugepages-1Gi on arm64", "arm64", "1Gi", 416),
+				Entry("hugepages-2Mi on amd64", "amd64", "2Mi", 345),
+				Entry("hugepages-1Gi on amd64", "amd64", "1Gi", 345),
+				Entry("hugepages-2Mi on arm64", "arm64", "2Mi", 479),
+				Entry("hugepages-1Gi on arm64", "arm64", "1Gi", 479),
 			)
 			DescribeTable("should account for difference between guest and container requested memory ", func(arch string, memorySize int) {
 				config, kvStore, svc = configFactory(arch)
@@ -2436,8 +2436,8 @@ var _ = Describe("Template", func() {
 						},
 					))
 			},
-				Entry("on amd64", "amd64", 282),
-				Entry("on arm64", "arm64", 416),
+				Entry("on amd64", "amd64", 351),
+				Entry("on arm64", "arm64", 485),
 			)
 		})
 
