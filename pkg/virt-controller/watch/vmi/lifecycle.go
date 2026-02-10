@@ -662,8 +662,8 @@ func (c *Controller) isChangedNodePlacement(pod, templatePod *k8sv1.Pod) (bool, 
 	affinityEqual := equality.Semantic.DeepEqual(pod.Spec.Affinity, templatePod.Spec.Affinity)
 	changed := !nodeSelectorEqual || !affinityEqual
 	if changed {
-		log.Log.Object(pod).V(4).Infof(
-			"NodePlacement changed: nodeSelectorEqual=%t affinityEqual=%t nodeSelectorDiff=%s affinityDiff=%s",
+		log.Log.Object(pod).Infof(
+			"NodePlacement changed: nodeSelectorEqual=[ %t ] affinityEqual=[ %t ] nodeSelectorDiff=[ %s ] affinityDiff=[ %s ]",
 			nodeSelectorEqual,
 			affinityEqual,
 			gocmp.Diff(pod.Spec.NodeSelector, templatePod.Spec.NodeSelector),
@@ -694,8 +694,8 @@ func (c *Controller) nodePlacementIsMatched(pod, templatePod *k8sv1.Pod) (bool, 
 		return false, fmt.Errorf("failed to match required node selector and affinity: %w", err)
 	}
 	if !match {
-		log.Log.Object(pod).V(4).Infof(
-			"NodePlacement required node affinity mismatch: node=%s labels=%v required=%v",
+		log.Log.Object(pod).Infof(
+			"NodePlacement required node affinity mismatch: podNode=[ %s ] nodeLabels=[ %v ] requiredNodeSelectorAndAffinity=[ %v ]",
 			pod.Spec.NodeName,
 			node.Labels,
 			requiredNodeSelectorAndAffinity,
@@ -747,7 +747,7 @@ func (c *Controller) nodePlacementIsMatched(pod, templatePod *k8sv1.Pod) (bool, 
 		}
 		// If at least one matches the podAntiAffinity, then node placement is not suitable. return false
 		if affinity.MatchPodAntiAffinityTerms(podAntiAffinityTerms, p, nsLabels) {
-			log.Log.Object(pod).V(4).Infof(
+			log.Log.Object(pod).Infof(
 				"NodePlacement podAntiAffinity matched by pod %s/%s labels=%v nsLabels=%v",
 				p.GetNamespace(),
 				p.GetName(),
@@ -758,8 +758,8 @@ func (c *Controller) nodePlacementIsMatched(pod, templatePod *k8sv1.Pod) (bool, 
 		}
 	}
 
-	log.Log.Object(pod).V(4).Infof(
-		"NodePlacement match result: podAffinityMatched=%t checkedPods=%d",
+	log.Log.Object(pod).Infof(
+		"NodePlacement match result: podAffinityMatched=[ %t ] checkedPods=[ %d ]",
 		podMatchedByPodAffinityFound,
 		len(pods),
 	)
