@@ -102,7 +102,7 @@ func (h *TargetHandler) StartProxyListener(vmiUID types.UID, socketPath string) 
 
 	go h.handleProxyConnections(vmiUID, listener)
 
-	log.Log.Infof("Conntrack sync: started proxy listener at %s for VMI %s", socketPath, vmiUID)
+	log.Log.V(3).Infof("Conntrack sync: started proxy listener at %s for VMI %s", socketPath, vmiUID)
 	return nil
 }
 
@@ -129,7 +129,7 @@ func (h *TargetHandler) handleProxyConnection(vmiUID types.UID, conn net.Conn) {
 		return
 	}
 
-	log.Log.Infof("Conntrack sync: received %d bytes for VMI %s", len(msg.Data), vmiUID)
+	log.Log.V(3).Infof("Conntrack sync: received %d bytes for VMI %s", len(msg.Data), vmiUID)
 
 	h.onCTReceived(vmiUID, &CTPayload{
 		Data:      msg.Data,
@@ -181,7 +181,7 @@ func (h *TargetHandler) onCTReceived(vmiUID types.UID, payload *CTPayload) {
 			log.Log.Warningf("Conntrack sync: import failed for VMI %s: %v", vmiUID, err)
 		} else {
 			state.injectionState = InjectionDone
-			log.Log.Infof("Conntrack sync: import completed for VMI %s in %v", vmiUID, time.Since(state.injectionStart))
+			log.Log.V(3).Infof("Conntrack sync: import completed for VMI %s in %v", vmiUID, time.Since(state.injectionStart))
 		}
 
 		if state.injectionDone != nil {
@@ -217,7 +217,7 @@ func (h *TargetHandler) StartHookListener(vmiUID types.UID, socketPath string) e
 
 	go h.handleHookConnections(vmiUID, listener)
 
-	log.Log.Infof("Conntrack sync: started hook listener at %s for VMI %s", socketPath, vmiUID)
+	log.Log.V(3).Infof("Conntrack sync: started hook listener at %s for VMI %s", socketPath, vmiUID)
 	return nil
 }
 

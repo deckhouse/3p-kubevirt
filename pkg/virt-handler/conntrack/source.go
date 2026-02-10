@@ -86,7 +86,7 @@ func (h *SourceHandler) ExportAndSend(vmi *v1.VirtualMachineInstance, socketPath
 				version = result.Version
 			}
 		}
-		log.Log.Infof("Conntrack sync: exported %d bytes for IP %s", len(result.Data), ip)
+		log.Log.V(3).Infof("Conntrack sync: exported %d bytes for IP %s", len(result.Data), ip)
 	}
 
 	if len(allData) == 0 {
@@ -118,7 +118,7 @@ func (h *SourceHandler) ExportAndSend(vmi *v1.VirtualMachineInstance, socketPath
 	h.sentVMIs[vmiUID] = struct{}{}
 	h.mu.Unlock()
 
-	log.Log.Infof("Conntrack sync: sent %d bytes for VMI %s", len(encoded), vmiUID)
+	log.Log.V(3).Infof("Conntrack sync: sent %d bytes for VMI %s", len(encoded), vmiUID)
 	return nil
 }
 
