@@ -1978,8 +1978,8 @@ var _ = Describe("Template", func() {
 				Expect(pod.Spec.Containers[0].Resources.Requests.Memory().String()).To(Equal(requestMemory))
 				Expect(pod.Spec.Containers[0].Resources.Limits.Memory().String()).To(Equal(limitMemory))
 			},
-				Entry("on amd64", "amd64", "1282971493", "2345886053"),
-				Entry("on arm64", "arm64", "1417189221", "2480103781"),
+				Entry("on amd64", "amd64", "1282971493", "2282971493"),
+				Entry("on arm64", "arm64", "1417189221", "2417189221"),
 			)
 			DescribeTable("should overcommit guest overhead if selected, by only adding the overhead to memory limits", func(arch string, limitMemory string) {
 				config, kvStore, svc = configFactory(arch)
@@ -2054,8 +2054,8 @@ var _ = Describe("Template", func() {
 				// Limits for KVM and TUN devices should be requested.
 				Expect(pod.Spec.Containers[0].Resources.Limits).ToNot(BeNil())
 			},
-				Entry("on amd64", "amd64", 346),
-				Entry("on arm64", "arm64", 480),
+				Entry("on amd64", "amd64", 362),
+				Entry("on arm64", "arm64", 497),
 			)
 
 			DescribeTable("should check autoattachGraphicsDevicse", func(arch string, autoAttach *bool, memory int) {
