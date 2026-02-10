@@ -1374,30 +1374,9 @@ func addProbeOverheads(vmi *v1.VirtualMachineInstance, quantity *resource.Quanti
 	}
 }
 
-// addHotplugDisksOverheads returns additional memory requests and limits needed to
-// overcome potential OOMKill during VM migration with hotplugged disks .
-func addHotplugDisksOverheads(vmi *v1.VirtualMachineInstance, overallOverhead *resource.Quantity, limitOnlyOverhead *resource.Quantity) {
-	hasHotplugDisks := false
-	for _, volume := range vmi.Spec.Volumes {
-		if volume.PersistentVolumeClaim != nil && volume.PersistentVolumeClaim.Hotpluggable {
-			hasHotplugDisks = true
-			break
-		}
-		if volume.ContainerDisk != nil && volume.ContainerDisk.Hotpluggable {
-			hasHotplugDisks = true
-			break
-		}
-		if volume.DataVolume != nil && volume.DataVolume.Hotpluggable {
-			hasHotplugDisks = true
-			break
-		}
-	}
-
-	// No disks, no changes.
-	if !hasHotplugDisks {
-		return
-	}
-
+// addDisksOverheads returns additional memory requests and limits needed to
+// overcome potential OOMKill during VM migration.
+func addDisksOverheads(vmi *v1.VirtualMachineInstance, overallOverhead *resource.Quantity, limitOnlyOverhead *resource.Quantity) {
 	overheadValue := resource.MustParse("60Mi")
 
 	reqCPU := vmi.Spec.Domain.Resources.Requests.Cpu()
