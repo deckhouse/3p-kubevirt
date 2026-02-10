@@ -521,9 +521,9 @@ func GetMemoryOverhead(vmi *v1.VirtualMachineInstance, cpuArch string, additiona
 //
 // This includes the memory needed temporarily to perform
 // certain operations:
-// - VM migration with hotplugged disks.
+// - VM migration with disks.
 //
-// The return value is overhead memory quantity
+// The return value is an overhead memory quantity for memory limits.
 //
 // Note: This is the best estimation based on experiments
 // and may not be 100% accurate.
