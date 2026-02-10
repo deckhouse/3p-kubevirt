@@ -1377,6 +1377,13 @@ func addProbeOverheads(vmi *v1.VirtualMachineInstance, quantity *resource.Quanti
 // addDisksOverheads returns additional memory requests and limits needed to
 // overcome potential OOMKill during VM migration.
 func addDisksOverheads(vmi *v1.VirtualMachineInstance, overallOverhead *resource.Quantity, limitOnlyOverhead *resource.Quantity) {
+	// No overhead if hotplug disks are disabled and no directly attached disks.
+	noHotplug := vmi.Spec.Domain.Devices.DisableHotplug
+	noDisks := len(vmi.Spec.Domain.Devices.Disks) == 0
+	if noHotplug && noDisks {
+		return
+	}
+
 	overheadValue := resource.MustParse("60Mi")
 
 	reqCPU := vmi.Spec.Domain.Resources.Requests.Cpu()

@@ -2015,8 +2015,8 @@ var _ = Describe("Template", func() {
 				Expect(pod.Spec.Containers[0].Resources.Requests.Memory().String()).To(Equal("1G"))
 				Expect(pod.Spec.Containers[0].Resources.Limits.Memory().String()).To(Equal(limitMemory))
 			},
-				Entry("on amd64", "amd64", "2345886053"),
-				Entry("on arm64", "arm64", "2480103781"),
+				Entry("on amd64", "amd64", "2282971493"),
+				Entry("on arm64", "arm64", "2417189221"),
 			)
 			DescribeTable("should not add unset resources", func(arch string, requestMemory int) {
 				config, kvStore, svc = configFactory(arch)
@@ -2054,8 +2054,8 @@ var _ = Describe("Template", func() {
 				// Limits for KVM and TUN devices should be requested.
 				Expect(pod.Spec.Containers[0].Resources.Limits).ToNot(BeNil())
 			},
-				Entry("on amd64", "amd64", 362),
-				Entry("on arm64", "arm64", 497),
+				Entry("on amd64", "amd64", 346),
+				Entry("on arm64", "arm64", 480),
 			)
 
 			DescribeTable("should check autoattachGraphicsDevicse", func(arch string, autoAttach *bool, memory int) {
@@ -2357,10 +2357,10 @@ var _ = Describe("Template", func() {
 						},
 					))
 			},
-				Entry("hugepages-2Mi on amd64", "amd64", "2Mi", 345),
-				Entry("hugepages-1Gi on amd64", "amd64", "1Gi", 345),
-				Entry("hugepages-2Mi on arm64", "arm64", "2Mi", 479),
-				Entry("hugepages-1Gi on arm64", "arm64", "1Gi", 479),
+				Entry("hugepages-2Mi on amd64", "amd64", "2Mi", 282),
+				Entry("hugepages-1Gi on amd64", "amd64", "1Gi", 282),
+				Entry("hugepages-2Mi on arm64", "arm64", "2Mi", 416),
+				Entry("hugepages-1Gi on arm64", "arm64", "1Gi", 416),
 			)
 			DescribeTable("should account for difference between guest and container requested memory ", func(arch string, memorySize int) {
 				config, kvStore, svc = configFactory(arch)
@@ -2436,8 +2436,8 @@ var _ = Describe("Template", func() {
 						},
 					))
 			},
-				Entry("on amd64", "amd64", 357),
-				Entry("on arm64", "arm64", 491),
+				Entry("on amd64", "amd64", 282),
+				Entry("on arm64", "arm64", 416),
 			)
 		})
 
