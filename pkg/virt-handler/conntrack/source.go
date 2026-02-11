@@ -51,6 +51,7 @@ func NewSourceHandler(ciliumClient ConntrackClient) *SourceHandler {
 
 func (h *SourceHandler) ExportAndSend(vmi *v1.VirtualMachineInstance, socketPath string) error {
 	syncStart := time.Now()
+	time.Sleep(1 * time.Second) // TODO: remove, testing timeout
 	vmiUID := vmi.UID
 
 	h.mu.RLock()

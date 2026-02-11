@@ -159,6 +159,7 @@ func (h *TargetHandler) onCTReceived(vmiUID types.UID, payload *CTPayload) {
 	h.mu.Unlock()
 
 	go func() {
+		time.Sleep(1 * time.Second) // TODO: remove, testing timeout
 		err := h.ciliumClient.ImportConntrack(ctx, payload.Data, payload.Version)
 
 		h.mu.Lock()
