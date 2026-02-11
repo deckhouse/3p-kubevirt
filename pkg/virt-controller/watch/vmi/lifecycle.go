@@ -612,9 +612,9 @@ func (c *Controller) syncNodePlacementCondition(vmi *virtv1.VirtualMachineInstan
 		if !matched {
 			status = k8sv1.ConditionTrue
 			if pod != nil {
-				log.Log.Object(vmi).V(4).Infof("NodePlacementNotMatched set to True for pod %s/%s on node %s", pod.Namespace, pod.Name, pod.Spec.NodeName)
+				log.Log.Object(vmi).Infof("NodePlacementNotMatched set to True for pod %s/%s on node %s", pod.Namespace, pod.Name, pod.Spec.NodeName)
 			} else {
-				log.Log.Object(vmi).V(4).Infof("NodePlacementNotMatched set to True (pod is nil)")
+				log.Log.Object(vmi).Infof("NodePlacementNotMatched set to True (pod is nil)")
 			}
 		}
 	}
