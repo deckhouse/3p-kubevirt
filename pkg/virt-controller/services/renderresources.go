@@ -13,6 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	v1 "kubevirt.io/api/core/v1"
 
+	"kubevirt.io/kubevirt/pkg/hypervisor/kvm"
 	netvmispec "kubevirt.io/kubevirt/pkg/network/vmispec"
 	"kubevirt.io/kubevirt/pkg/util"
 	"kubevirt.io/kubevirt/pkg/util/hardware"
@@ -307,6 +308,15 @@ func WithMemoryOverhead(guestResourceSpec v1.ResourceRequirements, memoryOverhea
 	}
 }
 
+func WithMemoryLimitsOverhead(memoryLimitsOverhead resource.Quantity) ResourceRendererOption {
+	return func(renderer *ResourceRenderer) {
+		if memoryLimit, ok := renderer.vmLimits[k8sv1.ResourceMemory]; ok {
+			memoryLimit.Add(memoryLimitsOverhead)
+			renderer.vmLimits[k8sv1.ResourceMemory] = memoryLimit
+		}
+	}
+}
+
 func WithAutoMemoryLimits(namespace string, namespaceStore cache.Store) ResourceRendererOption {
 	return func(renderer *ResourceRenderer) {
 		requestRatio := getMemoryLimitsRatio(namespace, namespaceStore)
@@ -413,6 +423,26 @@ func copyResources(srcResources, dstResources k8sv1.ResourceList) {
 	for key, value := range srcResources {
 		dstResources[key] = value
 	}
+}
+
+// GetMemoryLimitsOverhead computes the estimation of additional
+// memory limit needed for the domain to operate properly.
+//
+// This includes the memory needed temporarily to perform
+// certain operations:
+// - VM migration with disks.
+//
+// The return value is an overhead memory quantity for memory limits.
+//
+// Note: This is the best estimation based on experiments
+// and may not be 100% accurate.
+func GetMemoryLimitsOverhead(vmi *v1.VirtualMachineInstance) resource.Quantity {
+	overhead := *resource.NewScaledQuantity(0, resource.Kilo)
+
+	// Add disks overhead for memory limits.
+	kvm.AddDisksOverheads(vmi, nil, &overhead)
+
+	return overhead
 }
 
 // Request a resource by name. This function bumps the number of resources,

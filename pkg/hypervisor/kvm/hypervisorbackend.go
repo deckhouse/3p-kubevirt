@@ -158,6 +158,9 @@ func (k *KvmHypervisorBackend) GetMemoryOverhead(vmi *v1.VirtualMachineInstance,
 		overhead.Add(resource.MustParse("100Mi"))
 	}
 
+	// Overhead to handle disks. ~60Mi should be enough for target Pod to survive migration.
+	AddDisksOverheads(vmi, &overhead, nil)
+
 	if util.RequiresMemoryOverheadReservation(vmi) {
 		overhead.Add(*vmi.Spec.Domain.Memory.ReservedOverhead.AddedOverhead)
 	}
@@ -175,6 +178,36 @@ func (k *KvmHypervisorBackend) GetMemoryOverhead(vmi *v1.VirtualMachineInstance,
 	}
 
 	return overhead
+}
+
+// AddDisksOverheads adds memory needed to overcome potential OOMKill during VM migration.
+// The overhead goes to overallOverhead (requests and limits) for the domain with guaranteed CPU cores,
+// and to limitOnlyOverhead otherwise.
+func AddDisksOverheads(vmi *v1.VirtualMachineInstance, overallOverhead *resource.Quantity, limitOnlyOverhead *resource.Quantity) {
+	// No overhead if hotplug disks are disabled and no directly attached disks.
+	noHotplug := vmi.Spec.Domain.Devices.DisableHotplug
+	noDisks := len(vmi.Spec.Domain.Devices.Disks) == 0
+	if noHotplug && noDisks {
+		return
+	}
+
+	overheadValue := resource.MustParse("60Mi")
+
+	reqCPU := vmi.Spec.Domain.Resources.Requests.Cpu()
+	limitCPU := vmi.Spec.Domain.Resources.Limits.Cpu()
+	if reqCPU != nil && limitCPU != nil {
+		if reqCPU.Cmp(*limitCPU) == 0 {
+			// Add overhead for requests and limits for the domain with guaranteed CPU cores.
+			if overallOverhead != nil {
+				overallOverhead.Add(overheadValue)
+			}
+		} else {
+			// Add overhead only for limits if CPU cores are not guaranteed: domain CPU requests are not equal to limits.
+			if limitOnlyOverhead != nil {
+				limitOnlyOverhead.Add(overheadValue)
+			}
+		}
+	}
 }
 
 func addProbeOverheads(vmi *v1.VirtualMachineInstance, quantity *resource.Quantity) {

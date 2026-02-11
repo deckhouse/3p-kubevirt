@@ -52,6 +52,7 @@ var _ = Describe("GetMemoryOverhead calculation", func() {
 		downwardmetricsOverhead *resource.Quantity
 		sevOverhead             *resource.Quantity
 		tpmOverhead             *resource.Quantity
+		disksOverhead           *resource.Quantity
 	)
 
 	BeforeEach(func() {
@@ -78,6 +79,7 @@ var _ = Describe("GetMemoryOverhead calculation", func() {
 		downwardmetricsOverhead = pointer.P(resource.MustParse("1Mi"))
 		sevOverhead = pointer.P(resource.MustParse("256Mi"))
 		tpmOverhead = pointer.P(resource.MustParse("53Mi"))
+		disksOverhead = pointer.P(resource.MustParse("60Mi"))
 	})
 
 	When("the vmi is not requesting any specific device or cpu or whatever", func() {
@@ -88,6 +90,7 @@ var _ = Describe("GetMemoryOverhead calculation", func() {
 			expected.Add(*videoRAMOverhead)
 			// 8Mi*1core(default)
 			expected.Add(*coresOverhead)
+			expected.Add(*disksOverhead)
 			overhead := kvm.NewKvmHypervisorBackend().GetMemoryOverhead(vmi, "amd64", nil)
 			Expect(overhead.Value()).To(BeEquivalentTo(expected.Value()))
 		})
@@ -110,6 +113,7 @@ var _ = Describe("GetMemoryOverhead calculation", func() {
 			// (2cores* 2threads *2sockets)
 			value := coresOverhead.Value() * 8
 			expected.Add(*resource.NewQuantity(value, coresOverhead.Format))
+			expected.Add(*disksOverhead)
 			overhead := kvm.NewKvmHypervisorBackend().GetMemoryOverhead(vmi, "amd64", nil)
 			Expect(overhead.Value()).To(BeEquivalentTo(expected.Value()))
 		})
@@ -147,6 +151,7 @@ var _ = Describe("GetMemoryOverhead calculation", func() {
 			expected.Add(*baseOverhead)
 			expected.Add(*staticOverhead)
 			expected.Add(*coresOverhead)
+			expected.Add(*disksOverhead)
 			overhead := kvm.NewKvmHypervisorBackend().GetMemoryOverhead(vmi, "amd64", nil)
 			Expect(overhead.Value()).To(BeEquivalentTo(expected.Value()))
 		})
@@ -159,6 +164,7 @@ var _ = Describe("GetMemoryOverhead calculation", func() {
 			expected.Add(*staticOverhead)
 			expected.Add(*videoRAMOverhead)
 			expected.Add(*coresOverhead)
+			expected.Add(*disksOverhead)
 			expected.Add(*cpuArchOverhead)
 			overhead := kvm.NewKvmHypervisorBackend().GetMemoryOverhead(vmi, "arm64", nil)
 			Expect(overhead.Value()).To(BeEquivalentTo(expected.Value()))
@@ -173,6 +179,7 @@ var _ = Describe("GetMemoryOverhead calculation", func() {
 			expected.Add(*staticOverhead)
 			expected.Add(*videoRAMOverhead)
 			expected.Add(*coresOverhead)
+			expected.Add(*disksOverhead)
 			expected.Add(*vfioOverhead)
 			overhead := kvm.NewKvmHypervisorBackend().GetMemoryOverhead(vmi, "amd64", nil)
 			Expect(overhead.Value()).To(BeEquivalentTo(expected.Value()))
@@ -193,6 +200,7 @@ var _ = Describe("GetMemoryOverhead calculation", func() {
 			expected.Add(*staticOverhead)
 			expected.Add(*videoRAMOverhead)
 			expected.Add(*coresOverhead)
+			expected.Add(*disksOverhead)
 			expected.Add(*downwardmetricsOverhead)
 			overhead := kvm.NewKvmHypervisorBackend().GetMemoryOverhead(vmi, "amd64", nil)
 			Expect(overhead.Value()).To(BeEquivalentTo(expected.Value()))
@@ -208,6 +216,7 @@ var _ = Describe("GetMemoryOverhead calculation", func() {
 			expected.Add(*staticOverhead)
 			expected.Add(*videoRAMOverhead)
 			expected.Add(*coresOverhead)
+			expected.Add(*disksOverhead)
 			expected.Add(probeOverhead)
 
 			overhead := kvm.NewKvmHypervisorBackend().GetMemoryOverhead(vmi, "amd64", nil)
@@ -232,6 +241,7 @@ var _ = Describe("GetMemoryOverhead calculation", func() {
 			expected.Add(*staticOverhead)
 			expected.Add(*videoRAMOverhead)
 			expected.Add(*coresOverhead)
+			expected.Add(*disksOverhead)
 			expected.Add(*sevOverhead)
 			overhead := kvm.NewKvmHypervisorBackend().GetMemoryOverhead(vmi, "amd64", nil)
 			Expect(overhead.Value()).To(BeEquivalentTo(expected.Value()))
@@ -251,6 +261,7 @@ var _ = Describe("GetMemoryOverhead calculation", func() {
 			expected.Add(*staticOverhead)
 			expected.Add(*videoRAMOverhead)
 			expected.Add(*coresOverhead)
+			expected.Add(*disksOverhead)
 			expected.Add(*tpmOverhead)
 			overhead := kvm.NewKvmHypervisorBackend().GetMemoryOverhead(vmi, "amd64", nil)
 			Expect(overhead.Value()).To(BeEquivalentTo(expected.Value()))
@@ -264,6 +275,7 @@ var _ = Describe("GetMemoryOverhead calculation", func() {
 			base.Add(*staticOverhead)
 			base.Add(*videoRAMOverhead)
 			base.Add(*coresOverhead)
+			base.Add(*disksOverhead)
 			var expected resource.Quantity
 			if expectParseError {
 				expected = *base
@@ -297,6 +309,7 @@ var _ = Describe("GetMemoryOverhead calculation", func() {
 			expected.Add(*staticOverhead)
 			expected.Add(*videoRAMOverhead)
 			expected.Add(*coresOverhead)
+			expected.Add(*disksOverhead)
 			expected.Add(resource.MustParse("100Mi"))
 
 			overhead := kvm.NewKvmHypervisorBackend().GetMemoryOverhead(vmi, "amd64", nil)
@@ -319,6 +332,7 @@ var _ = Describe("GetMemoryOverhead calculation", func() {
 			expected.Add(*staticOverhead)
 			expected.Add(*videoRAMOverhead)
 			expected.Add(*coresOverhead)
+			expected.Add(*disksOverhead)
 			expected.Add(*overhead)
 			result := kvm.NewKvmHypervisorBackend().GetMemoryOverhead(vmi, cpuArch, nil)
 			Expect(result.Value()).To(BeEquivalentTo(expected.Value()))

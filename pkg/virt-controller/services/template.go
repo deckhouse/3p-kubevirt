@@ -1752,6 +1752,7 @@ func (t *TemplateService) doesVMIRequireAutoCPULimits(vmi *v1.VirtualMachineInst
 }
 
 func (t *TemplateService) VMIResourcePredicates(vmi *v1.VirtualMachineInstance, networkToResourceMap map[string]string, memoryOverhead resource.Quantity) VMIResourcePredicates {
+	memoryLimitsOverhead := GetMemoryLimitsOverhead(vmi)
 	withCPULimits := t.doesVMIRequireAutoCPULimits(vmi)
 	additionalCPUs := uint32(0)
 	if vmi.Spec.Domain.IOThreadsPolicy != nil &&
@@ -1769,6 +1770,9 @@ func (t *TemplateService) VMIResourcePredicates(vmi *v1.VirtualMachineInstance, 
 			NewVMIResourceRule(not(doesVMIRequireDedicatedCPU), WithoutDedicatedCPU(vmi, t.clusterConfig.GetCPUAllocationRatio(), withCPULimits)),
 			NewVMIResourceRule(hasHugePages, WithHugePages(vmi.Spec.Domain.Memory, memoryOverhead)),
 			NewVMIResourceRule(not(hasHugePages), WithMemoryOverhead(vmi.Spec.Domain.Resources, memoryOverhead)),
+			NewVMIResourceRule(func(_ *v1.VirtualMachineInstance) bool {
+				return memoryLimitsOverhead.Value() > 0
+			}, WithMemoryLimitsOverhead(memoryLimitsOverhead)),
 			NewVMIResourceRule(t.doesVMIRequireAutoMemoryLimits, WithAutoMemoryLimits(vmi.Namespace, t.namespaceStore)),
 			NewVMIResourceRule(func(*v1.VirtualMachineInstance) bool {
 				return len(networkToResourceMap) > 0
