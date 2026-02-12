@@ -722,11 +722,14 @@ func (t *templateService) newNodeSelectorRenderer(vmi *v1.VirtualMachineInstance
 		)
 	}
 
+	// Use Spec for node selector so source and migration target pods get the same selector.
+	// Status.Machine.Type comes from domain XML (canonical name, e.g. pc-q35-9.2); Spec may have alias (e.g. q35).
+	// Preferring Spec keeps node selector consistent and avoids unnecessary migrations.
 	var machineType string
-	if vmi.Status.Machine != nil && vmi.Status.Machine.Type != "" {
-		machineType = vmi.Status.Machine.Type
-	} else if vmi.Spec.Domain.Machine != nil && vmi.Spec.Domain.Machine.Type != "" {
+	if vmi.Spec.Domain.Machine != nil && vmi.Spec.Domain.Machine.Type != "" {
 		machineType = vmi.Spec.Domain.Machine.Type
+	} else if vmi.Status.Machine != nil && vmi.Status.Machine.Type != "" {
+		machineType = vmi.Status.Machine.Type
 	}
 
 	if machineType != "" {
