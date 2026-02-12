@@ -130,6 +130,25 @@ var _ = Describe("DRA device attributes from vmi.status.deviceStatus", func() {
 		Expect(pciAddressOf(hostDevices[0])).To(Equal("0x0000:0x03:0x00.0x0"))
 	})
 
+	It("should build a USB host device from the USB address in the device status", func() {
+		vmi := newVMI()
+		vmi.Spec.Domain.Devices.GPUs = nil
+		vmi.Status.DeviceStatus = &v1.DeviceStatus{
+			HostDeviceStatuses: []v1.DeviceStatusInfo{statusInfo("hostdev1", v1.DeviceAttribute{
+				USBAddress: &v1.USBAddress{Bus: 3, DeviceNumber: 12},
+			})},
+		}
+
+		hostDevices, err := CreateDRAHostDevices(vmi, basePath)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(hostDevices).To(HaveLen(1))
+		Expect(hostDevices[0].Type).To(Equal(api.HostDeviceUSB))
+		Expect(hostDevices[0].Mode).To(Equal("subsystem"))
+		Expect(hostDevices[0].Alias.GetName()).To(Equal(DRAHostDeviceAliasPrefix + "hostdev1"))
+		Expect(hostDevices[0].Source.Address.Bus).To(Equal("3"))
+		Expect(hostDevices[0].Source.Address.Device).To(Equal("12"))
+	})
+
 	It("should prefer the device status over a metadata file", func() {
 		writeMetadataWithPCI(pciFromMetadata)
 		vmi := newVMI()

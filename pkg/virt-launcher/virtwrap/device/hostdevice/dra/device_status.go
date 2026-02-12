@@ -21,10 +21,13 @@ package dra
 
 import (
 	"fmt"
+	"strconv"
 
 	v1 "kubevirt.io/api/core/v1"
+	"kubevirt.io/client-go/log"
 
 	drautil "kubevirt.io/kubevirt/pkg/dra"
+	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/api"
 )
 
 // Device attributes come from two sources. The DRA status controller in virt-controller puts them into
@@ -83,4 +86,24 @@ func getPCIAddress(
 		return "", fmt.Errorf("device status for claim %q request %q has no pciAddress", claimName, requestName)
 	}
 	return *statusAttrs.PCIAddress, nil
+}
+
+// usbHostDeviceFromStatus returns a USB host device when the device status carries a USB address.
+// USB devices are known only from the device status: KEP-5304 metadata has no USB attribute.
+func usbHostDeviceFromStatus(name string, statusAttrs *v1.DeviceAttribute) *api.HostDevice {
+	if statusAttrs == nil || statusAttrs.USBAddress == nil {
+		return nil
+	}
+	log.Log.V(2).Infof("Adding DRA USB HostDevice for %s", name)
+	return &api.HostDevice{
+		Type:  api.HostDeviceUSB,
+		Mode:  "subsystem",
+		Alias: api.NewUserDefinedAlias(DRAHostDeviceAliasPrefix + name),
+		Source: api.HostDeviceSource{
+			Address: &api.Address{
+				Bus:    strconv.FormatInt(statusAttrs.USBAddress.Bus, 10),
+				Device: strconv.FormatInt(statusAttrs.USBAddress.DeviceNumber, 10),
+			},
+		},
+	}
 }

@@ -68,6 +68,10 @@ func createHostDeviceForHostDevice(hd v1.HostDevice, statusAttrs *v1.DeviceAttri
 		return nil, fmt.Errorf("HostDevice %s has incomplete ClaimRequest", hd.Name)
 	}
 
+	if usbHostDevice := usbHostDeviceFromStatus(hd.Name, statusAttrs); usbHostDevice != nil {
+		return usbHostDevice, nil
+	}
+
 	claimName := hd.ClaimRequest.ClaimName
 	requestName := hd.ClaimRequest.RequestName
 	resourceClaims := vmiSpecs.ResourceClaims

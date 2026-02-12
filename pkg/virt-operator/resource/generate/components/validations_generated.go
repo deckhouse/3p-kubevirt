@@ -15283,6 +15283,20 @@ var CRDsValidation map[string]string = map[string]string{
                             description: PCIAddress is the PCIe bus address of the
                               allocated device
                             type: string
+                          usbAddress:
+                            description: USBAddress is the USB bus address of the
+                              allocated device
+                            properties:
+                              bus:
+                                format: int64
+                                type: integer
+                              deviceNumber:
+                                format: int64
+                                type: integer
+                            required:
+                            - bus
+                            - deviceNumber
+                            type: object
                         type: object
                       name:
                         description: Name is the name of actual device on the host
@@ -15325,6 +15339,20 @@ var CRDsValidation map[string]string = map[string]string{
                             description: PCIAddress is the PCIe bus address of the
                               allocated device
                             type: string
+                          usbAddress:
+                            description: USBAddress is the USB bus address of the
+                              allocated device
+                            properties:
+                              bus:
+                                format: int64
+                                type: integer
+                              deviceNumber:
+                                format: int64
+                                type: integer
+                            required:
+                            - bus
+                            - deviceNumber
+                            type: object
                         type: object
                       name:
                         description: Name is the name of actual device on the host
