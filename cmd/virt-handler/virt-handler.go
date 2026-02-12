@@ -708,8 +708,22 @@ func (app *virtHandlerApp) setupTLS(factory controller.KubeInformerFactory) erro
 
 func getMachines(capabilities libvirtxml.Caps) []libvirtxml.CapsGuestMachine {
 	var machines []libvirtxml.CapsGuestMachine
+	seen := make(map[string]struct{})
 	for _, guest := range capabilities.Guests {
-		machines = append(machines, guest.Arch.Machines...)
+		for _, m := range guest.Arch.Machines {
+			if _, ok := seen[m.Name]; !ok {
+				seen[m.Name] = struct{}{}
+				machines = append(machines, m)
+			}
+			// Libvirt may report alias (e.g. "q35") with canonical (e.g. "pc-q35-9.2").
+			// Domain XML uses the canonical name in Status.Machine.Type, so add it as a label too.
+			if m.Canonical != "" && m.Canonical != m.Name {
+				if _, ok := seen[m.Canonical]; !ok {
+					seen[m.Canonical] = struct{}{}
+					machines = append(machines, libvirtxml.CapsGuestMachine{Name: m.Canonical})
+				}
+			}
+		}
 	}
 	return machines
 }
