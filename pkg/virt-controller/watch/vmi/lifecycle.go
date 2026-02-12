@@ -663,7 +663,8 @@ func (c *Controller) isChangedNodePlacement(pod, templatePod *k8sv1.Pod) (bool, 
 	changed := !nodeSelectorEqual || !affinityEqual
 	if changed {
 		log.Log.Object(pod).Infof(
-			"NodePlacement changed: nodeSelectorEqual=[ %t ] affinityEqual=[ %t ] nodeSelectorDiff=[ %s ] affinityDiff=[ %s ]",
+			"NodePlacement changed: podName=[ %s ] nodeSelectorEqual=[ %t ] affinityEqual=[ %t ] nodeSelectorDiff=[ %s ] affinityDiff=[ %s ]",
+			pod.Name,
 			nodeSelectorEqual,
 			affinityEqual,
 			gocmp.Diff(pod.Spec.NodeSelector, templatePod.Spec.NodeSelector),
