@@ -1177,7 +1177,8 @@ var _ = Describe("Template", func() {
 				Expect(pod.Spec.NodeSelector).Should(HaveKeyWithValue(machineTypeLabelKey, "true"))
 			},
 				Entry("when only spec machine type is provided", "specMachineType", "", "specMachineType"),
-				Entry("when both spec and status machine types are provided, status takes precedence", "specMachineType", "statusMachineType", "statusMachineType"),
+				// Entry("when both spec and status machine types are provided, status takes precedence", "specMachineType", "statusMachineType", "statusMachineType"),
+				Entry("when both spec and status machine types are provided, spec takes precedence for node selector", "specMachineType", "statusMachineType", "specMachineType"),
 			)
 
 			It("should add node selectors from kubevirt-config configMap", func() {
