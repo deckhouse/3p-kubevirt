@@ -578,10 +578,7 @@ func (c *Controller) updateStatus(vmi *virtv1.VirtualMachineInstance, pod *k8sv1
 	controller.SetVMIPhaseTransitionTimestamp(&vmi.Status, &vmiCopy.Status)
 
 	// If we detect a change on the vmi we update the vmi
-	vmiChanged := !equality.Semantic.DeepEqual(vmi.Status,
-		vmiCopy.Status) || !equality.Semantic.DeepEqual(vmi.Finalizers,
-		vmiCopy.Finalizers) || !equality.Semantic.DeepEqual(vmi.Annotations,
-		vmiCopy.Annotations) || !equality.Semantic.DeepEqual(vmi.Labels, vmiCopy.Labels)
+	vmiChanged := !equality.Semantic.DeepEqual(vmi.Status, vmiCopy.Status) || !equality.Semantic.DeepEqual(vmi.Finalizers, vmiCopy.Finalizers) || !equality.Semantic.DeepEqual(vmi.Annotations, vmiCopy.Annotations) || !equality.Semantic.DeepEqual(vmi.Labels, vmiCopy.Labels)
 	if vmiChanged {
 		c.vmiExpectations.SetExpectations(key, 1, 0)
 		_, err = c.clientset.VirtualMachineInstance(vmi.Namespace).Update(context.Background(), vmiCopy, v1.UpdateOptions{})
@@ -731,7 +728,9 @@ func (c *Controller) nodePlacementIsMatched(pod, templatePod *k8sv1.Pod) (bool, 
 		return false, err
 	}
 
-	var podMatchedByPodAffinityFound bool
+	var (
+		podMatchedByPodAffinityFound bool
+	)
 
 	for _, p := range pods {
 		if p.GetUID() == pod.GetUID() {
