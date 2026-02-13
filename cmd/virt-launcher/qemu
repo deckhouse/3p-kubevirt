@@ -9,7 +9,7 @@ OPERATION="$2"
 SUB_OPERATION="$3"
 EXTRA="$4"
 
-# Read domain XML from stdin (we need to save it as multiple functions may need it)
+# Read domain XML from stdin
 DOMAIN_XML=$(cat)
 
 # Handle release end migrated - existing functionality
@@ -17,8 +17,9 @@ if [ "$OPERATION" = "release" ] && [ "$SUB_OPERATION" = "end" ] && [ "$EXTRA" = 
     touch /run/kubevirt-private/backend-storage-meta/migrated
 fi
 
-# Handle migrate end - conntrack synchronization on migration target
-if [ "$OPERATION" = "migrate" ] && [ "$SUB_OPERATION" = "end" ]; then
+# Handle started begin - conntrack synchronization on migration target
+# "started begin" fires after migration data transfer completes but before VM resumes.
+if [ "$OPERATION" = "started" ] && [ "$SUB_OPERATION" = "begin" ]; then
     # Extract VMI UID from domain XML metadata
     # XML structure: <metadata><kubevirt xmlns="http://kubevirt.io"><uid>...</uid></kubevirt></metadata>
     VMI_UID=$(echo "$DOMAIN_XML" | sed -n 's/.*<uid>\([^<]*\)<\/uid>.*/\1/p' | head -1)
@@ -26,6 +27,7 @@ if [ "$OPERATION" = "migrate" ] && [ "$SUB_OPERATION" = "end" ]; then
     if [ -n "$VMI_UID" ]; then
         SOCKET_PATH="/var/run/kubevirt/sockets/conntrack-hook.sock"
 
+        # The socket check ensures this only runs during migration (socket is created by virt-handler).
         if [ -S "$SOCKET_PATH" ]; then
             # Connect to the socket and wait for conntrack sync to complete
             # Send "wait" command and expect "ok" response
