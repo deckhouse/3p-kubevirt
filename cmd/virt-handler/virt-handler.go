@@ -447,7 +447,7 @@ func (app *virtHandlerApp) Run() {
 			panic(fmt.Errorf("error relabeling required files: %v", err))
 		}
 	} else if err != nil {
-		//an error occurred
+		// an error occurred
 		panic(fmt.Errorf("failed to detect the presence of selinux: %v", err))
 	}
 
@@ -558,7 +558,6 @@ func (app *virtHandlerApp) shouldInstallKubevirtSeccompProfile() {
 		return
 	}
 	log.DefaultLogger().Infof("Kubevirt Seccomp profile was installed at %s", app.KubeletRoot)
-
 }
 
 func (app *virtHandlerApp) runPrometheusServer(errCh chan error) {
@@ -708,22 +707,8 @@ func (app *virtHandlerApp) setupTLS(factory controller.KubeInformerFactory) erro
 
 func getMachines(capabilities libvirtxml.Caps) []libvirtxml.CapsGuestMachine {
 	var machines []libvirtxml.CapsGuestMachine
-	seen := make(map[string]struct{})
 	for _, guest := range capabilities.Guests {
-		for _, m := range guest.Arch.Machines {
-			if _, ok := seen[m.Name]; !ok {
-				seen[m.Name] = struct{}{}
-				machines = append(machines, m)
-			}
-			// Libvirt may report alias (e.g. "q35") with canonical (e.g. "pc-q35-9.2").
-			// Domain XML uses the canonical name in Status.Machine.Type, so add it as a label too.
-			if m.Canonical != "" && m.Canonical != m.Name {
-				if _, ok := seen[m.Canonical]; !ok {
-					seen[m.Canonical] = struct{}{}
-					machines = append(machines, libvirtxml.CapsGuestMachine{Name: m.Canonical})
-				}
-			}
-		}
+		machines = append(machines, guest.Arch.Machines...)
 	}
 	return machines
 }
