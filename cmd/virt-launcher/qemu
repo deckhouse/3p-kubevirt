@@ -12,6 +12,8 @@ EXTRA="$4"
 # Read domain XML from stdin (we need to save it as multiple functions may need it)
 DOMAIN_XML=$(cat)
 
+echo "kubevirt-hook: called with: domain=$DOMAIN_NAME operation=$OPERATION sub_operation=$SUB_OPERATION extra=$EXTRA" >&2
+
 # Handle release end migrated - existing functionality
 if [ "$OPERATION" = "release" ] && [ "$SUB_OPERATION" = "end" ] && [ "$EXTRA" = "migrated" ]; then
     touch /run/kubevirt-private/backend-storage-meta/migrated
