@@ -447,7 +447,7 @@ func (app *virtHandlerApp) Run() {
 			panic(fmt.Errorf("error relabeling required files: %v", err))
 		}
 	} else if err != nil {
-		// an error occurred
+		//an error occurred
 		panic(fmt.Errorf("failed to detect the presence of selinux: %v", err))
 	}
 
@@ -558,6 +558,7 @@ func (app *virtHandlerApp) shouldInstallKubevirtSeccompProfile() {
 		return
 	}
 	log.DefaultLogger().Infof("Kubevirt Seccomp profile was installed at %s", app.KubeletRoot)
+
 }
 
 func (app *virtHandlerApp) runPrometheusServer(errCh chan error) {

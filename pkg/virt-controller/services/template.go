@@ -91,20 +91,16 @@ const (
 	varLibSWTPMLocalCAVolumeName = "var-lib-swtpm-localca"
 )
 
-const (
-	KvmDevice        = "devices.virtualization.deckhouse.io/kvm"
-	TunDevice        = "devices.virtualization.deckhouse.io/tun"
-	VhostNetDevice   = "devices.virtualization.deckhouse.io/vhost-net"
-	SevDevice        = "devices.virtualization.deckhouse.io/sev"
-	VhostVsockDevice = "devices.virtualization.deckhouse.io/vhost-vsock"
-	PrDevice         = "devices.virtualization.deckhouse.io/pr-helper"
-)
+const KvmDevice = "devices.virtualization.deckhouse.io/kvm"
+const TunDevice = "devices.virtualization.deckhouse.io/tun"
+const VhostNetDevice = "devices.virtualization.deckhouse.io/vhost-net"
+const SevDevice = "devices.virtualization.deckhouse.io/sev"
+const VhostVsockDevice = "devices.virtualization.deckhouse.io/vhost-vsock"
+const PrDevice = "devices.virtualization.deckhouse.io/pr-helper"
 
-const (
-	debugLogs         = "debugLogs"
-	logVerbosity      = "logVerbosity"
-	virtiofsDebugLogs = "virtiofsdDebugLogs"
-)
+const debugLogs = "debugLogs"
+const logVerbosity = "logVerbosity"
+const virtiofsDebugLogs = "virtiofsdDebugLogs"
 
 const qemuTimeoutJitterRange = 120
 
@@ -119,12 +115,10 @@ const LibvirtStartupDelay = 10
 
 const IntelVendorName = "Intel"
 
-const (
-	ENV_VAR_LIBVIRT_DEBUG_LOGS          = "LIBVIRT_DEBUG_LOGS"
-	ENV_VAR_VIRTIOFSD_DEBUG_LOGS        = "VIRTIOFSD_DEBUG_LOGS"
-	ENV_VAR_VIRT_LAUNCHER_LOG_VERBOSITY = "VIRT_LAUNCHER_LOG_VERBOSITY"
-	ENV_VAR_SHARED_FILESYSTEM_PATHS     = "SHARED_FILESYSTEM_PATHS"
-)
+const ENV_VAR_LIBVIRT_DEBUG_LOGS = "LIBVIRT_DEBUG_LOGS"
+const ENV_VAR_VIRTIOFSD_DEBUG_LOGS = "VIRTIOFSD_DEBUG_LOGS"
+const ENV_VAR_VIRT_LAUNCHER_LOG_VERBOSITY = "VIRT_LAUNCHER_LOG_VERBOSITY"
+const ENV_VAR_SHARED_FILESYSTEM_PATHS = "SHARED_FILESYSTEM_PATHS"
 
 const ENV_VAR_POD_NAME = "POD_NAME"
 
@@ -224,8 +218,7 @@ func modifyNodeAffintyToRejectLabel(origAffinity *k8sv1.Affinity, labelToReject 
 		Operator: k8sv1.NodeSelectorOpDoesNotExist,
 	}
 	term := k8sv1.NodeSelectorTerm{
-		MatchExpressions: []k8sv1.NodeSelectorRequirement{requirement},
-	}
+		MatchExpressions: []k8sv1.NodeSelectorRequirement{requirement}}
 
 	nodeAffinity := &k8sv1.NodeAffinity{
 		RequiredDuringSchedulingIgnoredDuringExecution: &k8sv1.NodeSelector{
@@ -246,6 +239,7 @@ func modifyNodeAffintyToRejectLabel(origAffinity *k8sv1.Affinity, labelToReject 
 				NodeSelectorTerms: []k8sv1.NodeSelectorTerm{term},
 			}
 		}
+
 	} else if affinity != nil {
 		affinity.NodeAffinity = nodeAffinity
 	} else {
@@ -426,8 +420,7 @@ func (t *templateService) renderLaunchManifest(vmi *v1.VirtualMachineInstance, i
 		logger.Infof("RUNNING doppleganger pod for %s", vmi.Name)
 		command = []string{"temp_pod"}
 	} else {
-		command = []string{
-			"/usr/bin/tini", "--", "/usr/bin/virt-launcher-monitor",
+		command = []string{"/usr/bin/tini", "--", "/usr/bin/virt-launcher-monitor",
 			"--qemu-timeout", generateQemuTimeoutWithJitter(t.launcherQemuTimeout),
 			"--name", domain,
 			"--uid", string(vmi.UID),
@@ -543,7 +536,7 @@ func (t *templateService) renderLaunchManifest(vmi *v1.VirtualMachineInstance, i
 			volumeSource := k8sv1.VolumeSource{
 				ConfigMap: &k8sv1.ConfigMapVolumeSource{
 					LocalObjectReference: k8sv1.LocalObjectReference{Name: cm.Name},
-					DefaultMode:          pointer.P(int32(0o755)),
+					DefaultMode:          pointer.P(int32(0755)),
 				},
 			}
 			vol := k8sv1.Volume{
@@ -591,8 +584,7 @@ func (t *templateService) renderLaunchManifest(vmi *v1.VirtualMachineInstance, i
 	}
 
 	if !t.clusterConfig.ImageVolumeEnabled() && (HaveContainerDiskVolume(vmi.Spec.Volumes) || util.HasKernelBootContainerImage(vmi)) {
-		initContainerCommand := []string{
-			"/usr/bin/cp",
+		initContainerCommand := []string{"/usr/bin/cp",
 			"/usr/bin/container-disk",
 			"/init/usr/bin/container-disk",
 		}
@@ -730,9 +722,6 @@ func (t *templateService) newNodeSelectorRenderer(vmi *v1.VirtualMachineInstance
 		)
 	}
 
-	// Use Spec for node selector so source and migration target pods get the same selector.
-	// Status.Machine.Type comes from domain XML (canonical name, e.g. pc-q35-9.2); Spec may have alias (e.g. q35).
-	// Preferring Spec keeps node selector consistent and avoids unnecessary migrations.
 	var machineType string
 	if vmi.Status.Machine != nil && vmi.Status.Machine.Type != "" {
 		machineType = vmi.Status.Machine.Type
@@ -785,11 +774,10 @@ func newSidecarContainerRenderer(sidecarName string, vmiSpec *v1.VirtualMachineI
 		WithResourceRequirements(resources),
 		WithArgs(requestedHookSidecar.Args),
 		WithExtraEnvVars([]k8sv1.EnvVar{
-			{
+			k8sv1.EnvVar{
 				Name:  hooks.ContainerNameEnvVar,
 				Value: sidecarName,
-			},
-		}),
+			}}),
 	}
 
 	var mounts []k8sv1.VolumeMount
@@ -911,6 +899,7 @@ func (t *templateService) newVolumeRenderer(vmi *v1.VirtualMachineInstance, name
 		t.containerDiskDir,
 		t.virtShareDir,
 		volumeOpts...)
+
 	if err != nil {
 		return nil, err
 	}
@@ -969,7 +958,6 @@ func sidecarContainerName(i int) string {
 func sidecarContainerHotplugContainerdDiskName(id int) string {
 	return fmt.Sprintf("%s%d", HotplugContainerDisk, id)
 }
-
 func sidecarContainerHotplugContainerdDiskVolumeName(name string) string {
 	return fmt.Sprintf("%s%s", HotplugContainerDisk, name)
 }
@@ -1117,8 +1105,7 @@ func (t *templateService) RenderHotplugAttachmentPodTemplate(volumes []*v1.Volum
 		if first {
 			first = false
 			userId := int64(util.NonRootUID)
-			initContainerCommand := []string{
-				"/usr/bin/cp",
+			initContainerCommand := []string{"/usr/bin/cp",
 				"/usr/bin/container-disk",
 				"/init/usr/bin/container-disk",
 			}
@@ -1443,6 +1430,7 @@ func NewTemplateService(launcherImage string,
 	namespaceStore cache.Store,
 	opts ...templateServiceOption,
 ) TemplateService {
+
 	precond.MustNotBeEmpty(launcherImage)
 	log.Log.V(1).Infof("Exporter Image: %s", exporterImage)
 	svc := templateService{
