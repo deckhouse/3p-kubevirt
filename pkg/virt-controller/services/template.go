@@ -641,7 +641,7 @@ func (t *templateService) renderLaunchManifest(vmi *v1.VirtualMachineInstance, i
 
 	pod := k8sv1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			GenerateName: "virt-launcher-" + domain + "-",
+			GenerateName: "d8v-vm-" + domain + "-",
 			Labels:       podLabels(vmi, hostName),
 			Annotations:  podAnnotations,
 			OwnerReferences: []metav1.OwnerReference{
@@ -1013,7 +1013,7 @@ func (t *templateService) RenderHotplugAttachmentPodTemplate(volumes []*v1.Volum
 
 	pod := &k8sv1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			GenerateName: "hp-volume-",
+			GenerateName: fmt.Sprintf("d8v-hp-%s-", vmi.Name),
 			OwnerReferences: []metav1.OwnerReference{
 				*metav1.NewControllerRef(ownerPod, schema.GroupVersionKind{
 					Group:   k8sv1.SchemeGroupVersion.Group,
@@ -1192,7 +1192,7 @@ func (t *templateService) RenderHotplugAttachmentTriggerPodTemplate(volume *v1.V
 
 	pod := &k8sv1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			GenerateName: "hp-volume-",
+			GenerateName: fmt.Sprintf("d8v-hp-%s-", vmi.Name),
 			OwnerReferences: []metav1.OwnerReference{
 				*metav1.NewControllerRef(ownerPod, schema.GroupVersionKind{
 					Group:   k8sv1.SchemeGroupVersion.Group,
@@ -1371,6 +1371,35 @@ func addProbeOverheads(vmi *v1.VirtualMachineInstance, quantity *resource.Quanti
 	}
 	if hasLiveness || hasReadiness {
 		quantity.Add(virtProbeTotalAdditionalOverhead)
+	}
+}
+
+// addDisksOverheads returns additional memory requests and limits needed to
+// overcome potential OOMKill during VM migration.
+func addDisksOverheads(vmi *v1.VirtualMachineInstance, overallOverhead *resource.Quantity, limitOnlyOverhead *resource.Quantity) {
+	// No overhead if hotplug disks are disabled and no directly attached disks.
+	noHotplug := vmi.Spec.Domain.Devices.DisableHotplug
+	noDisks := len(vmi.Spec.Domain.Devices.Disks) == 0
+	if noHotplug && noDisks {
+		return
+	}
+
+	overheadValue := resource.MustParse("60Mi")
+
+	reqCPU := vmi.Spec.Domain.Resources.Requests.Cpu()
+	limitCPU := vmi.Spec.Domain.Resources.Limits.Cpu()
+	if reqCPU != nil && limitCPU != nil {
+		if reqCPU.Cmp(*limitCPU) == 0 {
+			// Add overhead for requests and limits for the domain with guaranteed CPU cores.
+			if overallOverhead != nil {
+				overallOverhead.Add(overheadValue)
+			}
+		} else {
+			// Add overhead only for limits if CPU cores are not guaranteed: domain CPU requests are not equal to limits.
+			if limitOnlyOverhead != nil {
+				limitOnlyOverhead.Add(overheadValue)
+			}
+		}
 	}
 }
 
@@ -1627,6 +1656,7 @@ func (t *templateService) VMIResourcePredicates(vmi *v1.VirtualMachineInstance, 
 		vmiCPUArch = t.clusterConfig.GetClusterCPUArch()
 	}
 	memoryOverhead := GetMemoryOverhead(vmi, vmiCPUArch, t.clusterConfig.GetConfig().AdditionalGuestMemoryOverheadRatio)
+	memoryLimitsOverhead := GetMemoryLimitsOverhead(vmi)
 
 	if t.netBindingPluginMemoryCalculator != nil {
 		memoryOverhead.Add(
@@ -1654,6 +1684,9 @@ func (t *templateService) VMIResourcePredicates(vmi *v1.VirtualMachineInstance, 
 			NewVMIResourceRule(not(doesVMIRequireDedicatedCPU), WithoutDedicatedCPU(vmi, t.clusterConfig.GetCPUAllocationRatio(), withCPULimits)),
 			NewVMIResourceRule(hasHugePages, WithHugePages(vmi.Spec.Domain.Memory, memoryOverhead)),
 			NewVMIResourceRule(not(hasHugePages), WithMemoryOverhead(vmi.Spec.Domain.Resources, memoryOverhead)),
+			NewVMIResourceRule(func(_ *v1.VirtualMachineInstance) bool {
+				return memoryLimitsOverhead.Value() > 0
+			}, WithMemoryLimitsOverhead(memoryLimitsOverhead)),
 			NewVMIResourceRule(t.doesVMIRequireAutoMemoryLimits, WithAutoMemoryLimits(vmi.Namespace, t.namespaceStore)),
 			NewVMIResourceRule(func(*v1.VirtualMachineInstance) bool {
 				return len(networkToResourceMap) > 0
