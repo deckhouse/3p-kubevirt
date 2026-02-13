@@ -211,6 +211,119 @@ var _ = Describe("Conntrack Sync", func() {
 			Expect(err).ToNot(HaveOccurred())
 			Expect(string(buf[:n])).To(Equal("ok\n"))
 		})
+
+		It("should timeout when CT data arrives with expired source timestamp", func() {
+			payload := &CTPayload{
+				Data:      []byte("test ct data"),
+				Version:   1,
+				SyncStart: time.Now().Add(-300 * time.Millisecond),
+			}
+
+			handler.onCTReceived(vmiUID, payload)
+
+			handler.mu.Lock()
+			state := handler.states[vmiUID]
+			Expect(state.injectionState).To(Equal(InjectionTimedOut))
+			handler.mu.Unlock()
+		})
+
+		It("should timeout import when remaining budget is exceeded", func() {
+			cilClient.EXPECT().
+				ImportConntrack(gomock.Any(), gomock.Any(), gomock.Any()).
+				DoAndReturn(func(ctx context.Context, data []byte, version byte) error {
+					<-ctx.Done()
+					return ctx.Err()
+				})
+
+			payload := &CTPayload{
+				Data:      []byte("test ct data"),
+				Version:   1,
+				SyncStart: time.Now().Add(-150 * time.Millisecond),
+			}
+
+			handler.onCTReceived(vmiUID, payload)
+
+			Eventually(func() InjectionState {
+				handler.mu.Lock()
+				defer handler.mu.Unlock()
+				return handler.states[vmiUID].injectionState
+			}, 1*time.Second).Should(Equal(InjectionTimedOut))
+		})
+
+		It("should timeout when hook fires and no CT data arrives", func() {
+			socketPath := filepath.Join(tmpDir, "hook.sock")
+
+			err := handler.StartHookListener(vmiUID, socketPath)
+			Expect(err).ToNot(HaveOccurred())
+
+			start := time.Now()
+			conn, err := net.Dial("unix", socketPath)
+			Expect(err).ToNot(HaveOccurred())
+			defer conn.Close()
+
+			_, err = conn.Write([]byte("wait\n"))
+			Expect(err).ToNot(HaveOccurred())
+
+			buf := make([]byte, 10)
+			n, err := conn.Read(buf)
+			elapsed := time.Since(start)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(string(buf[:n])).To(Equal("ok\n"))
+			Expect(elapsed).To(BeNumerically(">=", MaxInjectionTimeout))
+			Expect(elapsed).To(BeNumerically("<", MaxInjectionTimeout+100*time.Millisecond))
+
+			handler.mu.Lock()
+			state := handler.states[vmiUID]
+			Expect(state.injectionState).To(Equal(InjectionTimedOut))
+			handler.mu.Unlock()
+		})
+
+		It("should complete when hook fires before CT data and CT arrives in time", func() {
+			proxyPath := filepath.Join(tmpDir, "proxy.sock")
+			hookPath := filepath.Join(tmpDir, "hook.sock")
+
+			cilClient.EXPECT().
+				ImportConntrack(gomock.Any(), []byte("test ct data"), byte(1)).
+				DoAndReturn(func(ctx context.Context, data []byte, version byte) error {
+					return nil
+				})
+
+			err := handler.StartProxyListener(vmiUID, proxyPath)
+			Expect(err).ToNot(HaveOccurred())
+			err = handler.StartHookListener(vmiUID, hookPath)
+			Expect(err).ToNot(HaveOccurred())
+
+			// Hook fires first (no CT data yet)
+			hookConn, err := net.Dial("unix", hookPath)
+			Expect(err).ToNot(HaveOccurred())
+			defer hookConn.Close()
+			_, err = hookConn.Write([]byte("wait\n"))
+			Expect(err).ToNot(HaveOccurred())
+
+			// CT data arrives shortly after with recent timestamp
+			time.Sleep(10 * time.Millisecond)
+			proxyConn, err := net.Dial("unix", proxyPath)
+			Expect(err).ToNot(HaveOccurred())
+			msg := &SyncMessage{
+				Version:   1,
+				Timestamp: time.Now().Add(-20 * time.Millisecond).UnixNano(),
+				Data:      []byte("test ct data"),
+			}
+			_, err = proxyConn.Write(msg.Encode())
+			Expect(err).ToNot(HaveOccurred())
+			proxyConn.Close()
+
+			// Hook should respond after import completes
+			buf := make([]byte, 10)
+			n, err := hookConn.Read(buf)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(string(buf[:n])).To(Equal("ok\n"))
+
+			handler.mu.Lock()
+			state := handler.states[vmiUID]
+			Expect(state.injectionState).To(Equal(InjectionDone))
+			handler.mu.Unlock()
+		})
 	})
 
 	Describe("SourceHandler", func() {

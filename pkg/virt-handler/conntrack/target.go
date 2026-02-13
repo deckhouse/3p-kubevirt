@@ -254,7 +254,7 @@ func (h *TargetHandler) onHookSignal(vmiUID types.UID) error {
 	h.mu.Lock()
 
 	state, exists := h.states[vmiUID]
-	if !exists || state.injectionState == InjectionPending {
+	if !exists {
 		h.mu.Unlock()
 		return nil
 	}
@@ -266,14 +266,24 @@ func (h *TargetHandler) onHookSignal(vmiUID types.UID) error {
 		return nil
 	}
 
-	elapsed := time.Since(state.injectionStart)
-	remaining := MaxInjectionTimeout - elapsed
-	if remaining <= 0 {
-		if state.cancel != nil {
-			state.cancel()
+	// Use source timestamp if available, otherwise count from hook fire
+	var deadline time.Duration
+	if state.injectionStart.IsZero() {
+		deadline = MaxInjectionTimeout
+		log.Log.Warningf("Conntrack sync: hook fired before CT data arrived for VMI %s, using %v fallback timeout", vmiUID, MaxInjectionTimeout)
+	} else {
+		deadline = MaxInjectionTimeout - time.Since(state.injectionStart)
+		if deadline <= 0 {
+			if state.cancel != nil {
+				state.cancel()
+			}
+			state.injectionState = InjectionTimedOut
+			if state.injectionDone != nil {
+				state.injectionDone.Broadcast()
+			}
+			h.mu.Unlock()
+			return nil
 		}
-		h.mu.Unlock()
-		return nil
 	}
 
 	cond := state.injectionDone
@@ -287,7 +297,7 @@ func (h *TargetHandler) onHookSignal(vmiUID types.UID) error {
 	go func() {
 		h.mu.Lock()
 		defer h.mu.Unlock()
-		for state.injectionState == InjectionInProgress {
+		for state.injectionState == InjectionInProgress || state.injectionState == InjectionPending {
 			cond.Wait()
 		}
 		close(done)
@@ -297,13 +307,17 @@ func (h *TargetHandler) onHookSignal(vmiUID types.UID) error {
 
 	select {
 	case <-done:
-	case <-time.After(remaining):
+	case <-time.After(deadline):
 		h.mu.Lock()
 		if state.cancel != nil {
 			state.cancel()
 		}
+		state.injectionState = InjectionTimedOut
+		if state.injectionDone != nil {
+			state.injectionDone.Broadcast()
+		}
 		h.mu.Unlock()
-		log.Log.Warningf("Conntrack sync: hook timeout for VMI %s", vmiUID)
+		log.Log.Warningf("Conntrack sync: hook timeout (%v) for VMI %s", deadline, vmiUID)
 	}
 
 	return nil
