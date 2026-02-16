@@ -35,24 +35,13 @@ import (
 	"kubevirt.io/client-go/log"
 )
 
-const MaxInjectionTimeout = 200 * time.Millisecond
-
-type InjectionState int
-
-const (
-	InjectionPending InjectionState = iota
-	InjectionInProgress
-	InjectionDone
-	InjectionFailed
-	InjectionTimedOut
-)
+const SyncTimeout = 200 * time.Millisecond
 
 type targetState struct {
-	proxyListener  net.Listener
-	hookListener   net.Listener
-	injectionState InjectionState
-	injectionDone  chan struct{}
-	cancel         context.CancelFunc
+	proxyListener net.Listener
+	hookListener  net.Listener
+	injectionDone chan struct{}
+	cancel        context.CancelFunc
 }
 
 type TargetHandler struct {
@@ -154,35 +143,28 @@ func (h *TargetHandler) handleProxyConnection(vmiUID types.UID, conn net.Conn) {
 func (h *TargetHandler) onCTReceived(vmiUID types.UID, msg *SyncMessage) {
 	h.mu.Lock()
 	state := h.getOrCreateState(vmiUID)
-	state.injectionState = InjectionInProgress
-	ctx, cancel := context.WithTimeout(context.Background(), MaxInjectionTimeout)
+	ctx, cancel := context.WithCancel(context.Background())
 	state.cancel = cancel
 	h.mu.Unlock()
 
-	go func() {
-		err := h.ciliumClient.ImportConntrack(ctx, msg.Data, msg.Version)
+	err := h.ciliumClient.ImportConntrack(ctx, msg.Data, msg.Version)
 
-		h.mu.Lock()
-		defer h.mu.Unlock()
+	h.mu.Lock()
+	defer h.mu.Unlock()
 
-		state := h.states[vmiUID]
-		if state == nil {
-			return
-		}
+	if h.states[vmiUID] == nil {
+		return
+	}
 
-		if ctx.Err() == context.DeadlineExceeded {
-			state.injectionState = InjectionTimedOut
-			log.Log.Warningf("Conntrack sync: import timed out for VMI %s", vmiUID)
-		} else if err != nil {
-			state.injectionState = InjectionFailed
-			log.Log.Warningf("Conntrack sync: import failed for VMI %s: %v", vmiUID, err)
-		} else {
-			state.injectionState = InjectionDone
-			log.Log.V(3).Infof("Conntrack sync: import completed for VMI %s", vmiUID)
-		}
+	if ctx.Err() == context.DeadlineExceeded {
+		log.Log.Warningf("Conntrack sync: import timed out for VMI %s", vmiUID)
+	} else if err != nil {
+		log.Log.Warningf("Conntrack sync: import failed for VMI %s: %v", vmiUID, err)
+	} else {
+		log.Log.V(3).Infof("Conntrack sync: import completed for VMI %s", vmiUID)
+	}
 
-		close(state.injectionDone)
-	}()
+	close(state.injectionDone)
 }
 
 func (h *TargetHandler) handleHookConnection(vmiUID types.UID, conn net.Conn) {
@@ -211,14 +193,13 @@ func (h *TargetHandler) onHookSignal(vmiUID types.UID) {
 
 	select {
 	case <-done:
-	case <-time.After(MaxInjectionTimeout):
+	case <-time.After(SyncTimeout):
 		h.mu.Lock()
 		if state.cancel != nil {
 			state.cancel()
 		}
-		state.injectionState = InjectionTimedOut
 		h.mu.Unlock()
-		log.Log.Warningf("Conntrack sync: hook timeout (%v) for VMI %s", MaxInjectionTimeout, vmiUID)
+		log.Log.Warningf("Conntrack sync: hook timeout (%v) for VMI %s", SyncTimeout, vmiUID)
 	}
 }
 
@@ -250,8 +231,7 @@ func (h *TargetHandler) getOrCreateState(vmiUID types.UID) *targetState {
 	state, exists := h.states[vmiUID]
 	if !exists {
 		state = &targetState{
-			injectionState: InjectionPending,
-			injectionDone:  make(chan struct{}),
+			injectionDone: make(chan struct{}),
 		}
 		h.states[vmiUID] = state
 	}
