@@ -56,7 +56,6 @@ type targetState struct {
 	proxyListener  net.Listener
 	hookListener   net.Listener
 	injectionState InjectionState
-	injectionStart time.Time
 	injectionDone  *sync.Cond
 	cancel         context.CancelFunc
 }
@@ -140,7 +139,6 @@ func (h *TargetHandler) onCTReceived(vmiUID types.UID, payload *CTPayload) {
 	h.mu.Lock()
 	state := h.getOrCreateState(vmiUID)
 	state.injectionState = InjectionInProgress
-	state.injectionStart = time.Now()
 	ctx, cancel := context.WithTimeout(context.Background(), MaxInjectionTimeout)
 	state.cancel = cancel
 	h.mu.Unlock()
@@ -236,7 +234,7 @@ func (h *TargetHandler) onHookSignal(vmiUID types.UID) error {
 	h.mu.Lock()
 
 	state, exists := h.states[vmiUID]
-	if !exists || state.injectionState == InjectionPending {
+	if !exists {
 		h.mu.Unlock()
 		return nil
 	}
@@ -244,16 +242,6 @@ func (h *TargetHandler) onHookSignal(vmiUID types.UID) error {
 	if state.injectionState == InjectionDone ||
 		state.injectionState == InjectionFailed ||
 		state.injectionState == InjectionTimedOut {
-		h.mu.Unlock()
-		return nil
-	}
-
-	elapsed := time.Since(state.injectionStart)
-	remaining := MaxInjectionTimeout - elapsed
-	if remaining <= 0 {
-		if state.cancel != nil {
-			state.cancel()
-		}
 		h.mu.Unlock()
 		return nil
 	}
@@ -269,7 +257,7 @@ func (h *TargetHandler) onHookSignal(vmiUID types.UID) error {
 	go func() {
 		h.mu.Lock()
 		defer h.mu.Unlock()
-		for state.injectionState == InjectionInProgress {
+		for state.injectionState == InjectionPending || state.injectionState == InjectionInProgress {
 			cond.Wait()
 		}
 		close(done)
@@ -279,13 +267,15 @@ func (h *TargetHandler) onHookSignal(vmiUID types.UID) error {
 
 	select {
 	case <-done:
-	case <-time.After(remaining):
+	case <-time.After(MaxInjectionTimeout):
 		h.mu.Lock()
 		if state.cancel != nil {
 			state.cancel()
 		}
+		state.injectionState = InjectionTimedOut
+		cond.Broadcast()
 		h.mu.Unlock()
-		log.Log.Warningf("Conntrack sync: hook timeout for VMI %s", vmiUID)
+		log.Log.Warningf("Conntrack sync: hook timeout (%v) for VMI %s", MaxInjectionTimeout, vmiUID)
 	}
 
 	return nil
