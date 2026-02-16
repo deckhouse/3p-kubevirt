@@ -82,7 +82,7 @@ func handleStartedBegin(xmlData []byte) {
 		return
 	}
 
-	if err := waitForConntrackSync(vmiUID); err != nil {
+	if err := waitForConntrackSync(); err != nil {
 		log.Printf("conntrack sync error for VMI %s: %v", vmiUID, err)
 	}
 }
@@ -95,7 +95,7 @@ func parseVMIUID(xmlData []byte) (string, error) {
 	return domain.Metadata.KubeVirt.UID, nil
 }
 
-func waitForConntrackSync(vmiUID string) error {
+func waitForConntrackSync() error {
 	if _, err := os.Stat(conntrackHookSock); err != nil {
 		return nil
 	}

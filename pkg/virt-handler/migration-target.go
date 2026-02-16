@@ -585,6 +585,13 @@ func migrationNeedsFinalization(migrationState *v1.VirtualMachineInstanceMigrati
 		!migrationState.Failed
 }
 
+func resolveSourceVMIUID(vmi *v1.VirtualMachineInstance) string {
+	if vmi.Status.MigrationState.SourceState != nil && vmi.Status.MigrationState.SourceState.VirtualMachineInstanceUID != nil {
+		return string(*vmi.Status.MigrationState.SourceState.VirtualMachineInstanceUID)
+	}
+	return string(vmi.UID)
+}
+
 func (c *MigrationTargetController) handleTargetMigrationProxy(vmi *v1.VirtualMachineInstance, client cmdclient.LauncherClient) error {
 	// handle starting/stopping target migration proxy
 	migrationTargetSockets := []string{}
@@ -592,10 +599,7 @@ func (c *MigrationTargetController) handleTargetMigrationProxy(vmi *v1.VirtualMa
 	if err != nil {
 		return err
 	}
-	vmiUID := string(vmi.UID)
-	if vmi.Status.MigrationState.SourceState != nil && vmi.Status.MigrationState.SourceState.VirtualMachineInstanceUID != nil {
-		vmiUID = string(*vmi.Status.MigrationState.SourceState.VirtualMachineInstanceUID)
-	}
+	vmiUID := resolveSourceVMIUID(vmi)
 
 	// Get the virt-launcher migration proxy connection socket file on the destination pod.
 	socketFile := fmt.Sprintf(filepath.Join(c.virtLauncherFSRunDirPattern, "kubevirt/migrationproxy/wrap-virtqemud-sock"), res.Pid())
@@ -829,10 +833,7 @@ func (c *MigrationTargetController) processVMI(vmi *v1.VirtualMachineInstance) e
 		if err != nil {
 			log.Log.Object(vmi).Warningf("Conntrack sync: failed to detect pod isolation: %v", err)
 		} else {
-			vmiUID := string(vmi.UID)
-			if vmi.Status.MigrationState.SourceState != nil && vmi.Status.MigrationState.SourceState.VirtualMachineInstanceUID != nil {
-				vmiUID = string(*vmi.Status.MigrationState.SourceState.VirtualMachineInstanceUID)
-			}
+			vmiUID := resolveSourceVMIUID(vmi)
 			baseDir := fmt.Sprintf(filepath.Join(c.virtLauncherFSRunDirPattern, "kubevirt"), res.Pid())
 			ctSyncKey := migrationproxy.ConstructProxyKey(vmiUID, migrationproxy.ConntrackSyncPort)
 			ctSyncSocketPath := migrationproxy.SourceUnixFile(baseDir, ctSyncKey)

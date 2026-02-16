@@ -47,16 +47,11 @@ const (
 	InjectionTimedOut
 )
 
-type CTPayload struct {
-	Data    []byte
-	Version byte
-}
-
 type targetState struct {
 	proxyListener  net.Listener
 	hookListener   net.Listener
 	injectionState InjectionState
-	injectionDone  *sync.Cond
+	injectionDone  chan struct{}
 	cancel         context.CancelFunc
 }
 
@@ -82,14 +77,7 @@ func (h *TargetHandler) StartProxyListener(vmiUID types.UID, socketPath string) 
 	}
 	h.mu.Unlock()
 
-	dir := filepath.Dir(socketPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return err
-	}
-
-	os.Remove(socketPath)
-
-	listener, err := net.Listen("unix", socketPath)
+	listener, err := listenUnix(socketPath)
 	if err != nil {
 		return err
 	}
@@ -98,23 +86,54 @@ func (h *TargetHandler) StartProxyListener(vmiUID types.UID, socketPath string) 
 	state.proxyListener = listener
 	h.mu.Unlock()
 
-	go h.handleProxyConnections(vmiUID, listener)
+	go h.acceptConnections(vmiUID, listener, h.handleProxyConnection)
 
 	log.Log.V(3).Infof("Conntrack sync: started proxy listener at %s for VMI %s", socketPath, vmiUID)
 	return nil
 }
 
-func (h *TargetHandler) handleProxyConnections(vmiUID types.UID, listener net.Listener) {
+func (h *TargetHandler) StartHookListener(vmiUID types.UID, socketPath string) error {
+	h.mu.Lock()
+	state := h.getOrCreateState(vmiUID)
+	if state.hookListener != nil {
+		h.mu.Unlock()
+		return nil
+	}
+	h.mu.Unlock()
+
+	listener, err := listenUnix(socketPath)
+	if err != nil {
+		return err
+	}
+
+	h.mu.Lock()
+	state.hookListener = listener
+	h.mu.Unlock()
+
+	go h.acceptConnections(vmiUID, listener, h.handleHookConnection)
+
+	log.Log.V(3).Infof("Conntrack sync: started hook listener at %s for VMI %s", socketPath, vmiUID)
+	return nil
+}
+
+func listenUnix(socketPath string) (net.Listener, error) {
+	if err := os.MkdirAll(filepath.Dir(socketPath), 0755); err != nil {
+		return nil, err
+	}
+	os.Remove(socketPath)
+	return net.Listen("unix", socketPath)
+}
+
+func (h *TargetHandler) acceptConnections(vmiUID types.UID, listener net.Listener, handler func(types.UID, net.Conn)) {
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
 			if !errors.Is(err, net.ErrClosed) {
-				log.Log.Warningf("Conntrack sync: proxy accept error for VMI %s: %v", vmiUID, err)
+				log.Log.Warningf("Conntrack sync: accept error for VMI %s: %v", vmiUID, err)
 			}
 			return
 		}
-
-		go h.handleProxyConnection(vmiUID, conn)
+		go handler(vmiUID, conn)
 	}
 }
 
@@ -129,13 +148,10 @@ func (h *TargetHandler) handleProxyConnection(vmiUID types.UID, conn net.Conn) {
 
 	log.Log.V(3).Infof("Conntrack sync: received %d bytes for VMI %s", len(msg.Data), vmiUID)
 
-	h.onCTReceived(vmiUID, &CTPayload{
-		Data:    msg.Data,
-		Version: msg.Version,
-	})
+	h.onCTReceived(vmiUID, msg)
 }
 
-func (h *TargetHandler) onCTReceived(vmiUID types.UID, payload *CTPayload) {
+func (h *TargetHandler) onCTReceived(vmiUID types.UID, msg *SyncMessage) {
 	h.mu.Lock()
 	state := h.getOrCreateState(vmiUID)
 	state.injectionState = InjectionInProgress
@@ -144,7 +160,7 @@ func (h *TargetHandler) onCTReceived(vmiUID types.UID, payload *CTPayload) {
 	h.mu.Unlock()
 
 	go func() {
-		err := h.ciliumClient.ImportConntrack(ctx, payload.Data, payload.Version)
+		err := h.ciliumClient.ImportConntrack(ctx, msg.Data, msg.Version)
 
 		h.mu.Lock()
 		defer h.mu.Unlock()
@@ -165,55 +181,8 @@ func (h *TargetHandler) onCTReceived(vmiUID types.UID, payload *CTPayload) {
 			log.Log.V(3).Infof("Conntrack sync: import completed for VMI %s", vmiUID)
 		}
 
-		if state.injectionDone != nil {
-			state.injectionDone.Broadcast()
-		}
+		close(state.injectionDone)
 	}()
-}
-
-func (h *TargetHandler) StartHookListener(vmiUID types.UID, socketPath string) error {
-	h.mu.Lock()
-	state := h.getOrCreateState(vmiUID)
-	if state.hookListener != nil {
-		h.mu.Unlock()
-		return nil
-	}
-	h.mu.Unlock()
-
-	dir := filepath.Dir(socketPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return err
-	}
-
-	os.Remove(socketPath)
-
-	listener, err := net.Listen("unix", socketPath)
-	if err != nil {
-		return err
-	}
-
-	h.mu.Lock()
-	state.hookListener = listener
-	h.mu.Unlock()
-
-	go h.handleHookConnections(vmiUID, listener)
-
-	log.Log.V(3).Infof("Conntrack sync: started hook listener at %s for VMI %s", socketPath, vmiUID)
-	return nil
-}
-
-func (h *TargetHandler) handleHookConnections(vmiUID types.UID, listener net.Listener) {
-	for {
-		conn, err := listener.Accept()
-		if err != nil {
-			if !errors.Is(err, net.ErrClosed) {
-				log.Log.Warningf("Conntrack sync: hook accept error for VMI %s: %v", vmiUID, err)
-			}
-			return
-		}
-
-		go h.handleHookConnection(vmiUID, conn)
-	}
 }
 
 func (h *TargetHandler) handleHookConnection(vmiUID types.UID, conn net.Conn) {
@@ -230,39 +199,14 @@ func (h *TargetHandler) handleHookConnection(vmiUID types.UID, conn net.Conn) {
 	conn.Write([]byte("ok\n"))
 }
 
-func (h *TargetHandler) onHookSignal(vmiUID types.UID) error {
+func (h *TargetHandler) onHookSignal(vmiUID types.UID) {
 	h.mu.Lock()
-
 	state, exists := h.states[vmiUID]
 	if !exists {
 		h.mu.Unlock()
-		return nil
+		return
 	}
-
-	if state.injectionState == InjectionDone ||
-		state.injectionState == InjectionFailed ||
-		state.injectionState == InjectionTimedOut {
-		h.mu.Unlock()
-		return nil
-	}
-
-	cond := state.injectionDone
-	if cond == nil {
-		cond = sync.NewCond(&h.mu)
-		state.injectionDone = cond
-	}
-
-	done := make(chan struct{})
-
-	go func() {
-		h.mu.Lock()
-		defer h.mu.Unlock()
-		for state.injectionState == InjectionPending || state.injectionState == InjectionInProgress {
-			cond.Wait()
-		}
-		close(done)
-	}()
-
+	done := state.injectionDone
 	h.mu.Unlock()
 
 	select {
@@ -273,12 +217,9 @@ func (h *TargetHandler) onHookSignal(vmiUID types.UID) error {
 			state.cancel()
 		}
 		state.injectionState = InjectionTimedOut
-		cond.Broadcast()
 		h.mu.Unlock()
 		log.Log.Warningf("Conntrack sync: hook timeout (%v) for VMI %s", MaxInjectionTimeout, vmiUID)
 	}
-
-	return nil
 }
 
 func (h *TargetHandler) Cleanup(vmiUID types.UID) {
@@ -310,6 +251,7 @@ func (h *TargetHandler) getOrCreateState(vmiUID types.UID) *targetState {
 	if !exists {
 		state = &targetState{
 			injectionState: InjectionPending,
+			injectionDone:  make(chan struct{}),
 		}
 		h.states[vmiUID] = state
 	}
