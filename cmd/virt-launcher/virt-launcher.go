@@ -374,14 +374,6 @@ func main() {
 		}
 	}
 
-	// Debug: check if libvirt qemu hook script exists
-	hookPath := "/etc/libvirt/hooks/qemu"
-	if info, err := os.Stat(hookPath); err == nil {
-		log.Log.Infof("Libvirt hook script exists: %s (size=%d, mode=%s)", hookPath, info.Size(), info.Mode())
-	} else {
-		log.Log.Infof("Libvirt hook script not found: %s: %v", hookPath, err)
-	}
-
 	// Initialize local and shared directories
 	initializeDirs(*ephemeralDiskDir, *containerDiskDir, *hotplugDiskDir, *uid)
 

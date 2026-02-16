@@ -63,9 +63,12 @@ func main() {
 
 	stdinData, _ := io.ReadAll(os.Stdin)
 
+	log.Printf("domain=%s operation=%s sub_operation=%s", os.Args[1], operation, subOperation)
+
 	// "started begin" fires on the destination after migration data transfer
 	// completes but before VM resumes. Used to gate conntrack injection.
 	if operation == "started" && subOperation == "begin" {
+		log.Printf("STARTED BEGIN WAS HIT!!")
 		handleStartedBegin(stdinData)
 	}
 }
