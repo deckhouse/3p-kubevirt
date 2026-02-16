@@ -61,6 +61,8 @@ func (h *SourceHandler) ExportAndSend(vmi *v1.VirtualMachineInstance, socketPath
 		return nil
 	}
 
+	log.Log.V(3).Infof("Conntrack sync: starting export for VMI %s", vmiUID)
+
 	ips := extractVMIIPs(vmi)
 	if len(ips) == 0 {
 		log.Log.Warningf("Conntrack sync: no IPs found for VMI %s", vmiUID)
