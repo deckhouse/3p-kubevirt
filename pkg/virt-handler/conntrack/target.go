@@ -48,9 +48,8 @@ const (
 )
 
 type CTPayload struct {
-	Data      []byte
-	Version   byte
-	SyncStart time.Time
+	Data    []byte
+	Version byte
 }
 
 type targetState struct {
@@ -132,29 +131,17 @@ func (h *TargetHandler) handleProxyConnection(vmiUID types.UID, conn net.Conn) {
 	log.Log.V(3).Infof("Conntrack sync: received %d bytes for VMI %s", len(msg.Data), vmiUID)
 
 	h.onCTReceived(vmiUID, &CTPayload{
-		Data:      msg.Data,
-		Version:   msg.Version,
-		SyncStart: time.Unix(0, msg.Timestamp),
+		Data:    msg.Data,
+		Version: msg.Version,
 	})
 }
 
 func (h *TargetHandler) onCTReceived(vmiUID types.UID, payload *CTPayload) {
 	h.mu.Lock()
 	state := h.getOrCreateState(vmiUID)
-	state.injectionStart = payload.SyncStart
-	remaining := MaxInjectionTimeout - time.Since(payload.SyncStart)
-	if remaining <= 0 {
-		state.injectionState = InjectionTimedOut
-		log.Log.Warningf("Conntrack sync: CT data arrived after timeout for VMI %s (elapsed: %v)", vmiUID, time.Since(payload.SyncStart))
-		if state.injectionDone != nil {
-			state.injectionDone.Broadcast()
-		}
-		h.mu.Unlock()
-		return
-	}
-
 	state.injectionState = InjectionInProgress
-	ctx, cancel := context.WithTimeout(context.Background(), remaining)
+	state.injectionStart = time.Now()
+	ctx, cancel := context.WithTimeout(context.Background(), MaxInjectionTimeout)
 	state.cancel = cancel
 	h.mu.Unlock()
 
@@ -169,19 +156,15 @@ func (h *TargetHandler) onCTReceived(vmiUID types.UID, payload *CTPayload) {
 			return
 		}
 
-		if state.injectionState == InjectionTimedOut {
-			return
-		}
-
-		if ctx.Err() != nil {
+		if ctx.Err() == context.DeadlineExceeded {
 			state.injectionState = InjectionTimedOut
-			log.Log.Warningf("Conntrack sync: import timed out for VMI %s (elapsed: %v)", vmiUID, time.Since(state.injectionStart))
+			log.Log.Warningf("Conntrack sync: import timed out for VMI %s", vmiUID)
 		} else if err != nil {
 			state.injectionState = InjectionFailed
 			log.Log.Warningf("Conntrack sync: import failed for VMI %s: %v", vmiUID, err)
 		} else {
 			state.injectionState = InjectionDone
-			log.Log.V(3).Infof("Conntrack sync: import completed for VMI %s in %v", vmiUID, time.Since(state.injectionStart))
+			log.Log.V(3).Infof("Conntrack sync: import completed for VMI %s", vmiUID)
 		}
 
 		if state.injectionDone != nil {
@@ -253,7 +236,7 @@ func (h *TargetHandler) onHookSignal(vmiUID types.UID) error {
 	h.mu.Lock()
 
 	state, exists := h.states[vmiUID]
-	if !exists {
+	if !exists || state.injectionState == InjectionPending {
 		h.mu.Unlock()
 		return nil
 	}
@@ -265,24 +248,14 @@ func (h *TargetHandler) onHookSignal(vmiUID types.UID) error {
 		return nil
 	}
 
-	// Use source timestamp if available, otherwise count from hook fire
-	var deadline time.Duration
-	if state.injectionStart.IsZero() {
-		deadline = MaxInjectionTimeout
-		log.Log.Warningf("Conntrack sync: hook fired before CT data arrived for VMI %s, using %v fallback timeout", vmiUID, MaxInjectionTimeout)
-	} else {
-		deadline = MaxInjectionTimeout - time.Since(state.injectionStart)
-		if deadline <= 0 {
-			if state.cancel != nil {
-				state.cancel()
-			}
-			state.injectionState = InjectionTimedOut
-			if state.injectionDone != nil {
-				state.injectionDone.Broadcast()
-			}
-			h.mu.Unlock()
-			return nil
+	elapsed := time.Since(state.injectionStart)
+	remaining := MaxInjectionTimeout - elapsed
+	if remaining <= 0 {
+		if state.cancel != nil {
+			state.cancel()
 		}
+		h.mu.Unlock()
+		return nil
 	}
 
 	cond := state.injectionDone
@@ -296,7 +269,7 @@ func (h *TargetHandler) onHookSignal(vmiUID types.UID) error {
 	go func() {
 		h.mu.Lock()
 		defer h.mu.Unlock()
-		for state.injectionState == InjectionInProgress || state.injectionState == InjectionPending {
+		for state.injectionState == InjectionInProgress {
 			cond.Wait()
 		}
 		close(done)
@@ -306,17 +279,13 @@ func (h *TargetHandler) onHookSignal(vmiUID types.UID) error {
 
 	select {
 	case <-done:
-	case <-time.After(deadline):
+	case <-time.After(remaining):
 		h.mu.Lock()
 		if state.cancel != nil {
 			state.cancel()
 		}
-		state.injectionState = InjectionTimedOut
-		if state.injectionDone != nil {
-			state.injectionDone.Broadcast()
-		}
 		h.mu.Unlock()
-		log.Log.Warningf("Conntrack sync: hook timeout (%v) for VMI %s", deadline, vmiUID)
+		log.Log.Warningf("Conntrack sync: hook timeout for VMI %s", vmiUID)
 	}
 
 	return nil

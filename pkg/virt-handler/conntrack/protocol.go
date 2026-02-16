@@ -25,21 +25,20 @@ import (
 	"io"
 )
 
-// Wire format: [version:byte][timestamp:int64][data_len:uint32][data:bytes]
+// Wire format: [version:byte][data_len:uint32][data:bytes]
 type SyncMessage struct {
-	Version   byte
-	Timestamp int64 // UnixNano from source, marks start of offline migration
-	Data      []byte
+	Version byte
+	Data    []byte
 }
 
 func (m *SyncMessage) Encode() []byte {
 	dataLen := len(m.Data)
-	buf := make([]byte, 1+8+4+dataLen)
+	buf := make([]byte, 1+4+dataLen)
 
 	buf[0] = m.Version
-	binary.BigEndian.PutUint64(buf[1:9], uint64(m.Timestamp))
-	binary.BigEndian.PutUint32(buf[9:13], uint32(dataLen))
-	copy(buf[13:], m.Data)
+
+	binary.BigEndian.PutUint32(buf[1:5], uint32(dataLen))
+	copy(buf[5:], m.Data)
 
 	return buf
 }
@@ -48,11 +47,6 @@ func DecodeSyncMessage(r io.Reader) (*SyncMessage, error) {
 	var version byte
 	if err := binary.Read(r, binary.BigEndian, &version); err != nil {
 		return nil, fmt.Errorf("failed to read version: %w", err)
-	}
-
-	var timestamp int64
-	if err := binary.Read(r, binary.BigEndian, &timestamp); err != nil {
-		return nil, fmt.Errorf("failed to read timestamp: %w", err)
 	}
 
 	var dataLen uint32
@@ -66,8 +60,7 @@ func DecodeSyncMessage(r io.Reader) (*SyncMessage, error) {
 	}
 
 	return &SyncMessage{
-		Version:   version,
-		Timestamp: timestamp,
-		Data:      data,
+		Version: version,
+		Data:    data,
 	}, nil
 }

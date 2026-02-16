@@ -38,38 +38,33 @@ import (
 var _ = Describe("Conntrack Sync", func() {
 	Describe("Protocol", func() {
 		It("should encode and decode SyncMessage correctly", func() {
-			ts := time.Now().UnixNano()
 			original := &SyncMessage{
-				Version:   2,
-				Timestamp: ts,
-				Data:      []byte("test conntrack data"),
+				Version: 2,
+				Data:    []byte("test conntrack data"),
 			}
 
 			encoded := original.Encode()
-			Expect(encoded).To(HaveLen(1 + 8 + 4 + len(original.Data)))
+			Expect(encoded).To(HaveLen(1 + 4 + len(original.Data)))
 			Expect(encoded[0]).To(Equal(byte(2)))
 
 			decoded, err := DecodeSyncMessage(bytes.NewReader(encoded))
 			Expect(err).ToNot(HaveOccurred())
 			Expect(decoded.Version).To(Equal(original.Version))
-			Expect(decoded.Timestamp).To(Equal(original.Timestamp))
 			Expect(decoded.Data).To(Equal(original.Data))
 		})
 
 		It("should handle empty data", func() {
 			original := &SyncMessage{
-				Version:   1,
-				Timestamp: time.Now().UnixNano(),
-				Data:      []byte{},
+				Version: 1,
+				Data:    []byte{},
 			}
 
 			encoded := original.Encode()
-			Expect(encoded).To(HaveLen(1 + 8 + 4))
+			Expect(encoded).To(HaveLen(5))
 
 			decoded, err := DecodeSyncMessage(bytes.NewReader(encoded))
 			Expect(err).ToNot(HaveOccurred())
 			Expect(decoded.Version).To(Equal(byte(1)))
-			Expect(decoded.Timestamp).To(Equal(original.Timestamp))
 			Expect(decoded.Data).To(BeEmpty())
 		})
 
@@ -80,9 +75,8 @@ var _ = Describe("Conntrack Sync", func() {
 			}
 
 			original := &SyncMessage{
-				Version:   3,
-				Timestamp: time.Now().UnixNano(),
-				Data:      largeData,
+				Version: 3,
+				Data:    largeData,
 			}
 
 			encoded := original.Encode()
@@ -92,8 +86,7 @@ var _ = Describe("Conntrack Sync", func() {
 		})
 
 		It("should fail on truncated data", func() {
-			// header: version(1) + timestamp(8) + data_len(4) = 13 bytes, then claims 10 bytes of data but only 3 present
-			encoded := []byte{1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 10, 1, 2, 3}
+			encoded := []byte{1, 0, 0, 0, 10, 1, 2, 3}
 			_, err := DecodeSyncMessage(bytes.NewReader(encoded))
 			Expect(err).To(HaveOccurred())
 		})
@@ -182,9 +175,8 @@ var _ = Describe("Conntrack Sync", func() {
 			Expect(err).ToNot(HaveOccurred())
 
 			msg := &SyncMessage{
-				Version:   1,
-				Timestamp: time.Now().UnixNano(),
-				Data:      []byte("test ct data"),
+				Version: 1,
+				Data:    []byte("test ct data"),
 			}
 			_, err = conn.Write(msg.Encode())
 			Expect(err).ToNot(HaveOccurred())
@@ -210,119 +202,6 @@ var _ = Describe("Conntrack Sync", func() {
 			n, err := conn.Read(buf)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(string(buf[:n])).To(Equal("ok\n"))
-		})
-
-		It("should timeout when CT data arrives with expired source timestamp", func() {
-			payload := &CTPayload{
-				Data:      []byte("test ct data"),
-				Version:   1,
-				SyncStart: time.Now().Add(-300 * time.Millisecond),
-			}
-
-			handler.onCTReceived(vmiUID, payload)
-
-			handler.mu.Lock()
-			state := handler.states[vmiUID]
-			Expect(state.injectionState).To(Equal(InjectionTimedOut))
-			handler.mu.Unlock()
-		})
-
-		It("should timeout import when remaining budget is exceeded", func() {
-			cilClient.EXPECT().
-				ImportConntrack(gomock.Any(), gomock.Any(), gomock.Any()).
-				DoAndReturn(func(ctx context.Context, data []byte, version byte) error {
-					<-ctx.Done()
-					return ctx.Err()
-				})
-
-			payload := &CTPayload{
-				Data:      []byte("test ct data"),
-				Version:   1,
-				SyncStart: time.Now().Add(-150 * time.Millisecond),
-			}
-
-			handler.onCTReceived(vmiUID, payload)
-
-			Eventually(func() InjectionState {
-				handler.mu.Lock()
-				defer handler.mu.Unlock()
-				return handler.states[vmiUID].injectionState
-			}, 1*time.Second).Should(Equal(InjectionTimedOut))
-		})
-
-		It("should timeout when hook fires and no CT data arrives", func() {
-			socketPath := filepath.Join(tmpDir, "hook.sock")
-
-			err := handler.StartHookListener(vmiUID, socketPath)
-			Expect(err).ToNot(HaveOccurred())
-
-			start := time.Now()
-			conn, err := net.Dial("unix", socketPath)
-			Expect(err).ToNot(HaveOccurred())
-			defer conn.Close()
-
-			_, err = conn.Write([]byte("wait\n"))
-			Expect(err).ToNot(HaveOccurred())
-
-			buf := make([]byte, 10)
-			n, err := conn.Read(buf)
-			elapsed := time.Since(start)
-			Expect(err).ToNot(HaveOccurred())
-			Expect(string(buf[:n])).To(Equal("ok\n"))
-			Expect(elapsed).To(BeNumerically(">=", MaxInjectionTimeout))
-			Expect(elapsed).To(BeNumerically("<", MaxInjectionTimeout+100*time.Millisecond))
-
-			handler.mu.Lock()
-			state := handler.states[vmiUID]
-			Expect(state.injectionState).To(Equal(InjectionTimedOut))
-			handler.mu.Unlock()
-		})
-
-		It("should complete when hook fires before CT data and CT arrives in time", func() {
-			proxyPath := filepath.Join(tmpDir, "proxy.sock")
-			hookPath := filepath.Join(tmpDir, "hook.sock")
-
-			cilClient.EXPECT().
-				ImportConntrack(gomock.Any(), []byte("test ct data"), byte(1)).
-				DoAndReturn(func(ctx context.Context, data []byte, version byte) error {
-					return nil
-				})
-
-			err := handler.StartProxyListener(vmiUID, proxyPath)
-			Expect(err).ToNot(HaveOccurred())
-			err = handler.StartHookListener(vmiUID, hookPath)
-			Expect(err).ToNot(HaveOccurred())
-
-			// Hook fires first (no CT data yet)
-			hookConn, err := net.Dial("unix", hookPath)
-			Expect(err).ToNot(HaveOccurred())
-			defer hookConn.Close()
-			_, err = hookConn.Write([]byte("wait\n"))
-			Expect(err).ToNot(HaveOccurred())
-
-			// CT data arrives shortly after with recent timestamp
-			time.Sleep(10 * time.Millisecond)
-			proxyConn, err := net.Dial("unix", proxyPath)
-			Expect(err).ToNot(HaveOccurred())
-			msg := &SyncMessage{
-				Version:   1,
-				Timestamp: time.Now().Add(-20 * time.Millisecond).UnixNano(),
-				Data:      []byte("test ct data"),
-			}
-			_, err = proxyConn.Write(msg.Encode())
-			Expect(err).ToNot(HaveOccurred())
-			proxyConn.Close()
-
-			// Hook should respond after import completes
-			buf := make([]byte, 10)
-			n, err := hookConn.Read(buf)
-			Expect(err).ToNot(HaveOccurred())
-			Expect(string(buf[:n])).To(Equal("ok\n"))
-
-			handler.mu.Lock()
-			state := handler.states[vmiUID]
-			Expect(state.injectionState).To(Equal(InjectionDone))
-			handler.mu.Unlock()
 		})
 	})
 
