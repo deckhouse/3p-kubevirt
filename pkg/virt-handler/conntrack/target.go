@@ -35,31 +35,13 @@ import (
 	"kubevirt.io/client-go/log"
 )
 
-const MaxInjectionTimeout = 200 * time.Millisecond
-
-type InjectionState int
-
-const (
-	InjectionPending InjectionState = iota
-	InjectionInProgress
-	InjectionDone
-	InjectionFailed
-	InjectionTimedOut
-)
-
-type CTPayload struct {
-	Data      []byte
-	Version   byte
-	SyncStart time.Time
-}
+const SyncTimeout = 200 * time.Millisecond
 
 type targetState struct {
-	proxyListener  net.Listener
-	hookListener   net.Listener
-	injectionState InjectionState
-	injectionStart time.Time
-	injectionDone  *sync.Cond
-	cancel         context.CancelFunc
+	proxyListener net.Listener
+	hookListener  net.Listener
+	injectionDone chan struct{}
+	cancel        context.CancelFunc
 }
 
 type TargetHandler struct {
@@ -84,14 +66,7 @@ func (h *TargetHandler) StartProxyListener(vmiUID types.UID, socketPath string) 
 	}
 	h.mu.Unlock()
 
-	dir := filepath.Dir(socketPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return err
-	}
-
-	os.Remove(socketPath)
-
-	listener, err := net.Listen("unix", socketPath)
+	listener, err := listenUnix(socketPath)
 	if err != nil {
 		return err
 	}
@@ -100,23 +75,54 @@ func (h *TargetHandler) StartProxyListener(vmiUID types.UID, socketPath string) 
 	state.proxyListener = listener
 	h.mu.Unlock()
 
-	go h.handleProxyConnections(vmiUID, listener)
+	go h.acceptConnections(vmiUID, listener, h.handleProxyConnection)
 
 	log.Log.V(3).Infof("Conntrack sync: started proxy listener at %s for VMI %s", socketPath, vmiUID)
 	return nil
 }
 
-func (h *TargetHandler) handleProxyConnections(vmiUID types.UID, listener net.Listener) {
+func (h *TargetHandler) StartHookListener(vmiUID types.UID, socketPath string) error {
+	h.mu.Lock()
+	state := h.getOrCreateState(vmiUID)
+	if state.hookListener != nil {
+		h.mu.Unlock()
+		return nil
+	}
+	h.mu.Unlock()
+
+	listener, err := listenUnix(socketPath)
+	if err != nil {
+		return err
+	}
+
+	h.mu.Lock()
+	state.hookListener = listener
+	h.mu.Unlock()
+
+	go h.acceptConnections(vmiUID, listener, h.handleHookConnection)
+
+	log.Log.V(3).Infof("Conntrack sync: started hook listener at %s for VMI %s", socketPath, vmiUID)
+	return nil
+}
+
+func listenUnix(socketPath string) (net.Listener, error) {
+	if err := os.MkdirAll(filepath.Dir(socketPath), 0755); err != nil {
+		return nil, err
+	}
+	os.Remove(socketPath)
+	return net.Listen("unix", socketPath)
+}
+
+func (h *TargetHandler) acceptConnections(vmiUID types.UID, listener net.Listener, handler func(types.UID, net.Conn)) {
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
 			if !errors.Is(err, net.ErrClosed) {
-				log.Log.Warningf("Conntrack sync: proxy accept error for VMI %s: %v", vmiUID, err)
+				log.Log.Warningf("Conntrack sync: accept error for VMI %s: %v", vmiUID, err)
 			}
 			return
 		}
-
-		go h.handleProxyConnection(vmiUID, conn)
+		go handler(vmiUID, conn)
 	}
 }
 
@@ -131,108 +137,34 @@ func (h *TargetHandler) handleProxyConnection(vmiUID types.UID, conn net.Conn) {
 
 	log.Log.V(3).Infof("Conntrack sync: received %d bytes for VMI %s", len(msg.Data), vmiUID)
 
-	h.onCTReceived(vmiUID, &CTPayload{
-		Data:      msg.Data,
-		Version:   msg.Version,
-		SyncStart: time.Unix(0, msg.Timestamp),
-	})
+	h.onCTReceived(vmiUID, msg)
 }
 
-func (h *TargetHandler) onCTReceived(vmiUID types.UID, payload *CTPayload) {
+func (h *TargetHandler) onCTReceived(vmiUID types.UID, msg *SyncMessage) {
 	h.mu.Lock()
 	state := h.getOrCreateState(vmiUID)
-	state.injectionStart = payload.SyncStart
-	remaining := MaxInjectionTimeout - time.Since(payload.SyncStart)
-	if remaining <= 0 {
-		state.injectionState = InjectionTimedOut
-		log.Log.Warningf("Conntrack sync: CT data arrived after timeout for VMI %s (elapsed: %v)", vmiUID, time.Since(payload.SyncStart))
-		if state.injectionDone != nil {
-			state.injectionDone.Broadcast()
-		}
-		h.mu.Unlock()
-		return
-	}
-
-	state.injectionState = InjectionInProgress
-	ctx, cancel := context.WithTimeout(context.Background(), remaining)
+	ctx, cancel := context.WithCancel(context.Background())
 	state.cancel = cancel
 	h.mu.Unlock()
 
-	go func() {
-		err := h.ciliumClient.ImportConntrack(ctx, payload.Data, payload.Version)
-
-		h.mu.Lock()
-		defer h.mu.Unlock()
-
-		state := h.states[vmiUID]
-		if state == nil {
-			return
-		}
-
-		if state.injectionState == InjectionTimedOut {
-			return
-		}
-
-		if ctx.Err() != nil {
-			state.injectionState = InjectionTimedOut
-			log.Log.Warningf("Conntrack sync: import timed out for VMI %s (elapsed: %v)", vmiUID, time.Since(state.injectionStart))
-		} else if err != nil {
-			state.injectionState = InjectionFailed
-			log.Log.Warningf("Conntrack sync: import failed for VMI %s: %v", vmiUID, err)
-		} else {
-			state.injectionState = InjectionDone
-			log.Log.V(3).Infof("Conntrack sync: import completed for VMI %s in %v", vmiUID, time.Since(state.injectionStart))
-		}
-
-		if state.injectionDone != nil {
-			state.injectionDone.Broadcast()
-		}
-	}()
-}
-
-func (h *TargetHandler) StartHookListener(vmiUID types.UID, socketPath string) error {
-	h.mu.Lock()
-	state := h.getOrCreateState(vmiUID)
-	if state.hookListener != nil {
-		h.mu.Unlock()
-		return nil
-	}
-	h.mu.Unlock()
-
-	dir := filepath.Dir(socketPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return err
-	}
-
-	os.Remove(socketPath)
-
-	listener, err := net.Listen("unix", socketPath)
-	if err != nil {
-		return err
-	}
+	err := h.ciliumClient.ImportConntrack(ctx, msg.Data, msg.Version)
 
 	h.mu.Lock()
-	state.hookListener = listener
-	h.mu.Unlock()
+	defer h.mu.Unlock()
 
-	go h.handleHookConnections(vmiUID, listener)
-
-	log.Log.V(3).Infof("Conntrack sync: started hook listener at %s for VMI %s", socketPath, vmiUID)
-	return nil
-}
-
-func (h *TargetHandler) handleHookConnections(vmiUID types.UID, listener net.Listener) {
-	for {
-		conn, err := listener.Accept()
-		if err != nil {
-			if !errors.Is(err, net.ErrClosed) {
-				log.Log.Warningf("Conntrack sync: hook accept error for VMI %s: %v", vmiUID, err)
-			}
-			return
-		}
-
-		go h.handleHookConnection(vmiUID, conn)
+	if h.states[vmiUID] == nil {
+		return
 	}
+
+	if ctx.Err() == context.DeadlineExceeded {
+		log.Log.Warningf("Conntrack sync: import timed out for VMI %s", vmiUID)
+	} else if err != nil {
+		log.Log.Warningf("Conntrack sync: import failed for VMI %s: %v", vmiUID, err)
+	} else {
+		log.Log.V(3).Infof("Conntrack sync: import completed for VMI %s", vmiUID)
+	}
+
+	close(state.injectionDone)
 }
 
 func (h *TargetHandler) handleHookConnection(vmiUID types.UID, conn net.Conn) {
@@ -249,77 +181,26 @@ func (h *TargetHandler) handleHookConnection(vmiUID types.UID, conn net.Conn) {
 	conn.Write([]byte("ok\n"))
 }
 
-func (h *TargetHandler) onHookSignal(vmiUID types.UID) error {
+func (h *TargetHandler) onHookSignal(vmiUID types.UID) {
 	h.mu.Lock()
-
 	state, exists := h.states[vmiUID]
 	if !exists {
 		h.mu.Unlock()
-		return nil
+		return
 	}
-
-	if state.injectionState == InjectionDone ||
-		state.injectionState == InjectionFailed ||
-		state.injectionState == InjectionTimedOut {
-		h.mu.Unlock()
-		return nil
-	}
-
-	// Use source timestamp if available, otherwise count from hook fire
-	var deadline time.Duration
-	if state.injectionStart.IsZero() {
-		deadline = MaxInjectionTimeout
-		log.Log.Warningf("Conntrack sync: hook fired before CT data arrived for VMI %s, using %v fallback timeout", vmiUID, MaxInjectionTimeout)
-	} else {
-		deadline = MaxInjectionTimeout - time.Since(state.injectionStart)
-		if deadline <= 0 {
-			if state.cancel != nil {
-				state.cancel()
-			}
-			state.injectionState = InjectionTimedOut
-			if state.injectionDone != nil {
-				state.injectionDone.Broadcast()
-			}
-			h.mu.Unlock()
-			return nil
-		}
-	}
-
-	cond := state.injectionDone
-	if cond == nil {
-		cond = sync.NewCond(&h.mu)
-		state.injectionDone = cond
-	}
-
-	done := make(chan struct{})
-
-	go func() {
-		h.mu.Lock()
-		defer h.mu.Unlock()
-		for state.injectionState == InjectionInProgress || state.injectionState == InjectionPending {
-			cond.Wait()
-		}
-		close(done)
-	}()
-
+	done := state.injectionDone
 	h.mu.Unlock()
 
 	select {
 	case <-done:
-	case <-time.After(deadline):
+	case <-time.After(SyncTimeout):
 		h.mu.Lock()
 		if state.cancel != nil {
 			state.cancel()
 		}
-		state.injectionState = InjectionTimedOut
-		if state.injectionDone != nil {
-			state.injectionDone.Broadcast()
-		}
 		h.mu.Unlock()
-		log.Log.Warningf("Conntrack sync: hook timeout (%v) for VMI %s", deadline, vmiUID)
+		log.Log.Warningf("Conntrack sync: hook timeout (%v) for VMI %s", SyncTimeout, vmiUID)
 	}
-
-	return nil
 }
 
 func (h *TargetHandler) Cleanup(vmiUID types.UID) {
@@ -350,7 +231,7 @@ func (h *TargetHandler) getOrCreateState(vmiUID types.UID) *targetState {
 	state, exists := h.states[vmiUID]
 	if !exists {
 		state = &targetState{
-			injectionState: InjectionPending,
+			injectionDone: make(chan struct{}),
 		}
 		h.states[vmiUID] = state
 	}

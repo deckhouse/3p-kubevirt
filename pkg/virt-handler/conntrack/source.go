@@ -50,7 +50,6 @@ func NewSourceHandler(ciliumClient ConntrackClient) *SourceHandler {
 }
 
 func (h *SourceHandler) ExportAndSend(vmi *v1.VirtualMachineInstance, socketPath string) error {
-	syncStart := time.Now()
 	time.Sleep(1 * time.Second) // TODO: remove, testing timeout
 	vmiUID := vmi.UID
 
@@ -62,6 +61,8 @@ func (h *SourceHandler) ExportAndSend(vmi *v1.VirtualMachineInstance, socketPath
 		log.Log.V(3).Infof("Conntrack sync: CT already sent for VMI %s", vmiUID)
 		return nil
 	}
+
+	log.Log.V(3).Infof("Conntrack sync: starting export for VMI %s", vmiUID)
 
 	ips := extractVMIIPs(vmi)
 	if len(ips) == 0 {
@@ -105,9 +106,8 @@ func (h *SourceHandler) ExportAndSend(vmi *v1.VirtualMachineInstance, socketPath
 	defer conn.Close()
 
 	msg := &SyncMessage{
-		Version:   version,
-		Timestamp: syncStart.UnixNano(),
-		Data:      allData,
+		Version: version,
+		Data:    allData,
 	}
 
 	encoded := msg.Encode()
