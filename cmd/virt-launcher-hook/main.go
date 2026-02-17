@@ -50,9 +50,6 @@ type domainXML struct {
 }
 
 func main() {
-	if f, err := os.OpenFile("/proc/1/fd/2", os.O_WRONLY|os.O_APPEND, 0); err == nil {
-		log.SetOutput(f)
-	}
 	log.SetFlags(0)
 	log.SetPrefix("qemu-hook: ")
 
@@ -71,7 +68,6 @@ func main() {
 	// "started begin" fires on the destination after migration data transfer
 	// completes but before VM resumes. Used to gate conntrack injection.
 	if operation == "started" && subOperation == "begin" {
-		log.Printf("STARTED BEGIN WAS HIT!!")
 		handleStartedBegin(stdinData)
 	}
 }

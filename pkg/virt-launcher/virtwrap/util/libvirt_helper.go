@@ -537,11 +537,6 @@ func (l LibvirtWrapper) SetupLibvirt(customLogFilters *string) (err error) {
 		}
 	}
 
-	hookPath := filepath.Join(etcLibvirt, "hooks", "qemu")
-	if _, err := os.Stat(hookPath); err == nil {
-		os.Chmod(hookPath, 0755)
-	}
-
 	runtimeQemuConfPath := qemuConfPath
 	if !l.root() {
 		runtimeQemuConfPath = qemuNonRootConfPath
