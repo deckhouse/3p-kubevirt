@@ -25,9 +25,7 @@ package main
 
 import (
 	"bufio"
-	"encoding/xml"
 	"fmt"
-	"io"
 	"log"
 	"net"
 	"os"
@@ -38,16 +36,6 @@ const (
 	conntrackHookSock = "/var/run/kubevirt/sockets/conntrack-hook.sock"
 	socketTimeout     = 1 * time.Second
 )
-
-type domainMetadata struct {
-	KubeVirt struct {
-		UID string `xml:"uid"`
-	} `xml:"http://kubevirt.io kubevirt"`
-}
-
-type domainXML struct {
-	Metadata domainMetadata `xml:"metadata"`
-}
 
 func main() {
 	// Write error logs to container stderr
@@ -65,36 +53,13 @@ func main() {
 	operation := os.Args[2]
 	subOperation := os.Args[3]
 
-	stdinData, _ := io.ReadAll(os.Stdin)
-
 	// "started begin" fires on the destination after migration data transfer
 	// completes but before VM resumes. Used to gate conntrack injection.
 	if operation == "started" && subOperation == "begin" {
-		handleStartedBegin(stdinData)
+		if err := waitForConntrackSync(); err != nil {
+			log.Printf("conntrack sync error: %v", err)
+		}
 	}
-}
-
-func handleStartedBegin(xmlData []byte) {
-	vmiUID, err := parseVMIUID(xmlData)
-	if err != nil {
-		log.Printf("failed to parse domain XML: %v", err)
-		return
-	}
-	if vmiUID == "" {
-		return
-	}
-
-	if err := waitForConntrackSync(); err != nil {
-		log.Printf("conntrack sync error for VMI %s: %v", vmiUID, err)
-	}
-}
-
-func parseVMIUID(xmlData []byte) (string, error) {
-	var domain domainXML
-	if err := xml.Unmarshal(xmlData, &domain); err != nil {
-		return "", err
-	}
-	return domain.Metadata.KubeVirt.UID, nil
 }
 
 func waitForConntrackSync() error {
