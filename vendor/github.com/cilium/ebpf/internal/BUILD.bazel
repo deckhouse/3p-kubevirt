@@ -3,8 +3,9 @@ load("@io_bazel_rules_go//go:def.bzl", "go_library")
 go_library(
     name = "go_default_library",
     srcs = [
-        "auxv.go",
+        "align.go",
         "buffer.go",
+        "cpu.go",
         "deque.go",
         "elf.go",
         "endian_be.go",
@@ -12,7 +13,7 @@ go_library(
         "errors.go",
         "feature.go",
         "io.go",
-        "math.go",
+        "memoize.go",
         "output.go",
         "pinning.go",
         "platform.go",

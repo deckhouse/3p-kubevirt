@@ -19,11 +19,16 @@ var (
 // vdsoVersion returns the LINUX_VERSION_CODE embedded in the vDSO library
 // linked into the current process image.
 func vdsoVersion() (uint32, error) {
-	av, err := newAuxvRuntimeReader()
-	if err != nil {
-		return 0, err
+	// Read data from the auxiliary vector, which is normally passed directly
+	// to the process. Go does not expose that data, so we must read it from procfs.
+	// https://man7.org/linux/man-pages/man3/getauxval.3.html
+	av, err := os.Open("/proc/self/auxv")
+	if errors.Is(err, unix.EACCES) {
+		return 0, fmt.Errorf("opening auxv: %w (process may not be dumpable due to file capabilities)", err)
 	}
-
+	if err != nil {
+		return 0, fmt.Errorf("opening auxv: %w", err)
+	}
 	defer av.Close()
 
 	vdsoAddr, err := vdsoMemoryAddress(av)
@@ -49,19 +54,24 @@ func vdsoVersion() (uint32, error) {
 
 // vdsoMemoryAddress returns the memory address of the vDSO library
 // linked into the current process image. r is an io.Reader into an auxv blob.
-func vdsoMemoryAddress(r auxvPairReader) (uintptr, error) {
+func vdsoMemoryAddress(r io.Reader) (uint64, error) {
+	const (
+		_AT_NULL         = 0  // End of vector
+		_AT_SYSINFO_EHDR = 33 // Offset to vDSO blob in process image
+	)
+
 	// Loop through all tag/value pairs in auxv until we find `AT_SYSINFO_EHDR`,
 	// the address of a page containing the virtual Dynamic Shared Object (vDSO).
+	aux := struct{ Tag, Val uint64 }{}
 	for {
-		tag, value, err := r.ReadAuxvPair()
-		if err != nil {
-			return 0, err
+		if err := binary.Read(r, NativeEndian, &aux); err != nil {
+			return 0, fmt.Errorf("reading auxv entry: %w", err)
 		}
 
-		switch tag {
+		switch aux.Tag {
 		case _AT_SYSINFO_EHDR:
-			if value != 0 {
-				return uintptr(value), nil
+			if aux.Val != 0 {
+				return aux.Val, nil
 			}
 			return 0, fmt.Errorf("invalid vDSO address in auxv")
 		// _AT_NULL is always the last tag/val pair in the aux vector
