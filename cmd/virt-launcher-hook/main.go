@@ -50,6 +50,10 @@ type domainXML struct {
 }
 
 func main() {
+	// Write error logs to container stderr
+	if f, err := os.OpenFile("/proc/1/fd/2", os.O_WRONLY|os.O_APPEND, 0); err == nil {
+		log.SetOutput(f)
+	}
 	log.SetFlags(0)
 	log.SetPrefix("qemu-hook: ")
 
