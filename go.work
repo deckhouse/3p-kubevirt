@@ -53,3 +53,9 @@ replace k8s.io/sample-cli-plugin => k8s.io/sample-cli-plugin v0.34.2
 replace k8s.io/sample-controller => k8s.io/sample-controller v0.34.2
 
 replace k8s.io/kube-openapi => k8s.io/kube-openapi v0.0.0-20250710124328-f3f2b991d03b
+
+// D8 CVE Replaces
+replace (
+	github.com/opencontainers/runc => github.com/opencontainers/runc v1.2.9
+	github.com/opencontainers/selinux => github.com/opencontainers/selinux v1.13.1
+)
