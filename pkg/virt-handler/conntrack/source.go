@@ -38,7 +38,7 @@ const (
 
 type SourceHandler struct {
 	ciliumClient ConntrackClient
-	mu           sync.RWMutex
+	mu           sync.Mutex
 	sentVMIs     map[types.UID]struct{}
 }
 
@@ -53,14 +53,14 @@ func (h *SourceHandler) ExportAndSend(vmi *v1.VirtualMachineInstance, socketPath
 	time.Sleep(1 * time.Second) // TODO: remove, testing timeout
 	vmiUID := vmi.UID
 
-	h.mu.RLock()
-	_, alreadySent := h.sentVMIs[vmiUID]
-	h.mu.RUnlock()
-
-	if alreadySent {
+	h.mu.Lock()
+	if _, alreadySent := h.sentVMIs[vmiUID]; alreadySent {
+		h.mu.Unlock()
 		log.Log.V(3).Infof("Conntrack sync: CT already sent for VMI %s", vmiUID)
 		return nil
 	}
+	h.sentVMIs[vmiUID] = struct{}{}
+	h.mu.Unlock()
 
 	log.Log.V(3).Infof("Conntrack sync: starting export for VMI %s", vmiUID)
 
@@ -93,9 +93,6 @@ func (h *SourceHandler) ExportAndSend(vmi *v1.VirtualMachineInstance, socketPath
 
 	if len(allData) == 0 {
 		log.Log.V(3).Infof("Conntrack sync: no CT entries to send for VMI %s", vmiUID)
-		h.mu.Lock()
-		h.sentVMIs[vmiUID] = struct{}{}
-		h.mu.Unlock()
 		return nil
 	}
 
@@ -115,17 +112,13 @@ func (h *SourceHandler) ExportAndSend(vmi *v1.VirtualMachineInstance, socketPath
 		return fmt.Errorf("failed to send CT data: %w", err)
 	}
 
-	h.mu.Lock()
-	h.sentVMIs[vmiUID] = struct{}{}
-	h.mu.Unlock()
-
 	log.Log.V(3).Infof("Conntrack sync: sent %d bytes for VMI %s", len(encoded), vmiUID)
 	return nil
 }
 
 func (h *SourceHandler) HasSentCT(vmiUID types.UID) bool {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
+	h.mu.Lock()
+	defer h.mu.Unlock()
 
 	_, sent := h.sentVMIs[vmiUID]
 	return sent
