@@ -75,7 +75,7 @@ func (h *TargetHandler) StartProxyListener(vmiUID types.UID, socketPath string) 
 	state.proxyListener = listener
 	h.mu.Unlock()
 
-	go h.acceptConnections(vmiUID, listener, h.handleProxyConnection)
+	go h.acceptConnection(vmiUID, listener, h.handleProxyConnection)
 
 	log.Log.V(3).Infof("Conntrack sync: started proxy listener at %s for VMI %s", socketPath, vmiUID)
 	return nil
@@ -99,7 +99,7 @@ func (h *TargetHandler) StartHookListener(vmiUID types.UID, socketPath string) e
 	state.hookListener = listener
 	h.mu.Unlock()
 
-	go h.acceptConnections(vmiUID, listener, h.handleHookConnection)
+	go h.acceptConnection(vmiUID, listener, h.handleHookConnection)
 
 	log.Log.V(3).Infof("Conntrack sync: started hook listener at %s for VMI %s", socketPath, vmiUID)
 	return nil
@@ -113,17 +113,15 @@ func listenUnix(socketPath string) (net.Listener, error) {
 	return net.Listen("unix", socketPath)
 }
 
-func (h *TargetHandler) acceptConnections(vmiUID types.UID, listener net.Listener, handler func(types.UID, net.Conn)) {
-	for {
-		conn, err := listener.Accept()
-		if err != nil {
-			if !errors.Is(err, net.ErrClosed) {
-				log.Log.Warningf("Conntrack sync: accept error for VMI %s: %v", vmiUID, err)
-			}
-			return
+func (h *TargetHandler) acceptConnection(vmiUID types.UID, listener net.Listener, handler func(types.UID, net.Conn)) {
+	conn, err := listener.Accept()
+	if err != nil {
+		if !errors.Is(err, net.ErrClosed) {
+			log.Log.Warningf("Conntrack sync: accept error for VMI %s: %v", vmiUID, err)
 		}
-		go handler(vmiUID, conn)
+		return
 	}
+	handler(vmiUID, conn)
 }
 
 func (h *TargetHandler) handleProxyConnection(vmiUID types.UID, conn net.Conn) {
