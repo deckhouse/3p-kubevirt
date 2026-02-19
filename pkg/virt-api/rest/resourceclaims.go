@@ -233,13 +233,13 @@ func verifyResourceClaimOptions(resourceClaims []v1.ResourceClaim, resourceClaim
 			switch {
 			case resourceClaim.PodResourceClaim.ResourceClaimName != nil:
 				if add.ResourceClaim.PodResourceClaim.ResourceClaimName != nil {
-					if *add.ResourceClaim.PodResourceClaim.ResourceClaimName != *resourceClaim.PodResourceClaim.ResourceClaimName {
+					if *add.ResourceClaim.PodResourceClaim.ResourceClaimName == *resourceClaim.PodResourceClaim.ResourceClaimName {
 						return fmt.Errorf("Unable to add ResourceClaimName [%s] because it already exists", name)
 					}
 				}
 			case resourceClaim.PodResourceClaim.ResourceClaimTemplateName != nil:
 				if add.ResourceClaim.PodResourceClaim.ResourceClaimTemplateName != nil {
-					if *add.ResourceClaim.PodResourceClaim.ResourceClaimTemplateName != *resourceClaim.PodResourceClaim.ResourceClaimTemplateName {
+					if *add.ResourceClaim.PodResourceClaim.ResourceClaimTemplateName == *resourceClaim.PodResourceClaim.ResourceClaimTemplateName {
 						return fmt.Errorf("Unable to add ResourceClaimTemplateName [%s] because it already exists", name)
 					}
 				}
