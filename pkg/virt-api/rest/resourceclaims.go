@@ -216,45 +216,51 @@ func verifyResourceClaimOptions(resourceClaims []v1.ResourceClaim, resourceClaim
 	add := resourceClaimRequest.AddResourceClaimOptions
 	remove := resourceClaimRequest.RemoveResourceClaimOptions
 
-	name := ""
-	if add != nil {
-		name = add.Name
-	} else if remove != nil {
-		name = remove.Name
+	switch {
+	case add != nil:
+		return verifyResourceClaimAddRequest(resourceClaims, add)
+	case remove != nil:
+		return verifyResourceClaimRemoveRequest(resourceClaims, remove)
+	default:
+		return fmt.Errorf("Must specify either AddResourceClaimOptions or RemoveResourceClaimOptions")
 	}
+}
 
+func verifyResourceClaimAddRequest(resourceClaims []v1.ResourceClaim, add *v1.AddResourceClaimOptions) error {
 	for _, resourceClaim := range resourceClaims {
-		switch {
-		case add != nil:
-			if resourceClaimNameExists(resourceClaim, name) {
-				return fmt.Errorf("Unable to add ResourceClaim [%s] because ResourceClaim with that name already exists", name)
-			}
+		if resourceClaimNameExists(resourceClaim, add.Name) {
+			return fmt.Errorf("Unable to add ResourceClaim [%s] because ResourceClaim with that name already exists", add.Name)
+		}
 
-			switch {
-			case resourceClaim.PodResourceClaim.ResourceClaimName != nil:
-				if add.ResourceClaim.PodResourceClaim.ResourceClaimName != nil {
-					if *add.ResourceClaim.PodResourceClaim.ResourceClaimName == *resourceClaim.PodResourceClaim.ResourceClaimName {
-						return fmt.Errorf("Unable to add ResourceClaimName [%s] because it already exists", name)
-					}
-				}
-			case resourceClaim.PodResourceClaim.ResourceClaimTemplateName != nil:
-				if add.ResourceClaim.PodResourceClaim.ResourceClaimTemplateName != nil {
-					if *add.ResourceClaim.PodResourceClaim.ResourceClaimTemplateName == *resourceClaim.PodResourceClaim.ResourceClaimTemplateName {
-						return fmt.Errorf("Unable to add ResourceClaimTemplateName [%s] because it already exists", name)
-					}
+		switch {
+		case resourceClaim.PodResourceClaim.ResourceClaimName != nil:
+			if add.ResourceClaim.PodResourceClaim.ResourceClaimName != nil {
+				if *add.ResourceClaim.PodResourceClaim.ResourceClaimName == *resourceClaim.PodResourceClaim.ResourceClaimName {
+					return fmt.Errorf("Unable to add ResourceClaimName [%s] because it already exists", add.Name)
 				}
 			}
-		case remove != nil:
-			if resourceClaimNameExists(resourceClaim, name) {
-				if !resourceClaimHotpluggable(resourceClaim) {
-					return fmt.Errorf("Unable to remove ResourceClaim [%s] because it is not hotpluggable", name)
+		case resourceClaim.PodResourceClaim.ResourceClaimTemplateName != nil:
+			if add.ResourceClaim.PodResourceClaim.ResourceClaimTemplateName != nil {
+				if *add.ResourceClaim.PodResourceClaim.ResourceClaimTemplateName == *resourceClaim.PodResourceClaim.ResourceClaimTemplateName {
+					return fmt.Errorf("Unable to add ResourceClaimTemplateName [%s] because it already exists", add.Name)
 				}
-				return fmt.Errorf("Unable to remove ResourceClaim [%s] because it does not exist", name)
 			}
 		}
 	}
 
 	return nil
+}
+
+func verifyResourceClaimRemoveRequest(resourceClaims []v1.ResourceClaim, remove *v1.RemoveResourceClaimOptions) error {
+	for _, resourceClaim := range resourceClaims {
+		if resourceClaimNameExists(resourceClaim, remove.Name) {
+			if !resourceClaimHotpluggable(resourceClaim) {
+				return fmt.Errorf("Unable to remove ResourceClaim [%s] because it is not hotpluggable", remove.Name)
+			}
+			return nil
+		}
+	}
+	return fmt.Errorf("Unable to remove ResourceClaim [%s] because it does not exist", remove.Name)
 }
 
 func resourceClaimOrTemplateName(resourceClaim *v1.ResourceClaim) string {
