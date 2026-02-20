@@ -798,10 +798,10 @@ func (c *VirtualMachineController) updateDRAHostDeviceStatusesFromDomain(vmi *v1
 	draHostDeviceMap := make(map[string]string)
 	if domain != nil {
 		for _, hd := range domain.Spec.Devices.HostDevices {
-			if hd.Source.Address != nil {
+			if hd.Address != nil {
 				switch hd.Type {
 				case "usb":
-					draHostDeviceMap[hd.Alias.GetName()] = fmt.Sprintf("%s:%s", hd.Source.Address.Bus, hd.Source.Address.Device)
+					draHostDeviceMap[hd.Alias.GetName()] = fmt.Sprintf("%s:%s", hd.Address.Bus, hd.Address.Port)
 				}
 			}
 		}

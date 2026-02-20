@@ -1162,6 +1162,7 @@ type Address struct {
 	CSSID      string `xml:"cssid,attr,omitempty"`
 	SSID       string `xml:"ssid,attr,omitempty"`
 	DevNo      string `xml:"devno,attr,omitempty"`
+	Port       string `xml:"port,attr,omitempty"`
 }
 
 //END Video -------------------
