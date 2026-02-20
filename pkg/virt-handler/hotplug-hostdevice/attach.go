@@ -1,6 +1,7 @@
 package hotplug_hostdevice
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -246,12 +247,18 @@ func (a hostDeviceAttacher) detachHostDevice(hostDevicePath *safepath.Path, cgro
 	if err != nil {
 		return fmt.Errorf("detach failed to get device major/minor: %w", err)
 	}
+
+	err = a.removeCharacterDeviceMajorMinor(dev, cgroupManager)
+	if err != nil {
+		return fmt.Errorf("failed to remove character device access: %w", err)
+	}
+
 	err = safepath.UnlinkAtNoFollow(hostDevicePath)
 	if err != nil {
 		return fmt.Errorf("detach failed to delete device: %w", err)
 	}
 
-	return a.removeCharacterDeviceMajorMinor(dev, cgroupManager)
+	return nil
 }
 
 func (a hostDeviceAttacher) DetachAll(vmi *v1.VirtualMachineInstance, cgroupManager cgroup.Manager) error {
@@ -357,6 +364,9 @@ func (a hostDeviceAttacher) attachFromPod(vmi *v1.VirtualMachineInstance, source
 		specHostDeviceSet[hd.Name] = struct{}{}
 	}
 
+	var rules []*devices.Rule
+	var attachErr error
+
 	for _, hostDeviceStatus := range vmi.Status.DeviceStatus.HostDeviceStatuses {
 		if _, ok := specHostDeviceSet[hostDeviceStatus.Name]; !ok {
 			continue
@@ -386,24 +396,31 @@ func (a hostDeviceAttacher) attachFromPod(vmi *v1.VirtualMachineInstance, source
 			Attr: *hostDeviceStatus.DeviceResourceClaimStatus.Attributes,
 		}
 
-		if err := a.attachHostDevice(vmi, info, sourceUID, cgroupManager); err != nil {
-			return fmt.Errorf("failed to attach hostdevice %s: %v", hostDeviceStatus.Name, err)
+		rule, err := a.attachHostDevice(vmi, info, sourceUID, cgroupManager)
+		if err != nil {
+			attachErr = errors.Join(attachErr, fmt.Errorf("failed to attach hostdevice %s: %v", hostDeviceStatus.Name, err))
+			continue
 		}
+		rules = append(rules, rule)
 	}
 
-	return nil
+	if err := a.applyDeviceRules(rules, cgroupManager); err != nil {
+		return fmt.Errorf("failed to apply device rules: %w", err)
+	}
+
+	return attachErr
 }
 
-func (a hostDeviceAttacher) attachHostDevice(vmi *v1.VirtualMachineInstance, info deviceInfo, sourceUID types.UID, cgroupManager cgroup.Manager) error {
+func (a hostDeviceAttacher) attachHostDevice(vmi *v1.VirtualMachineInstance, info deviceInfo, sourceUID types.UID, cgroupManager cgroup.Manager) (*devices.Rule, error) {
 	logger := log.DefaultLogger()
 	logger.V(4).Infof("Hotplug check hostdevice name: %s", info.Name)
 	if sourceUID == "" {
-		return nil
+		return nil, nil
 	}
 
 	if !isUSB(info.Attr) {
 		logger.V(4).Infof("Device %s is not a USB device, skipping (supported only usb devices)", info.Name)
-		return nil
+		return nil, nil
 	}
 	usbAddr := *info.Attr.USBAddress
 	logger.V(2).Infof("Attaching hostdevice %s to running VM", info.Name)
@@ -411,36 +428,36 @@ func (a hostDeviceAttacher) attachHostDevice(vmi *v1.VirtualMachineInstance, inf
 	virtlauncherUID := a.findVirtlauncherUID(vmi)
 	if virtlauncherUID == "" {
 		// This is not the node the pod is running on.
-		return nil
+		return nil, nil
 	}
 
 	targetUSBPath, err := targetUsbPath(virtlauncherUID, usbAddr)
 	if os.IsNotExist(err) {
 		res, err := a.isolationDetector.DetectForSocket(vmi, socketPath(sourceUID))
 		if err != nil {
-			return fmt.Errorf("failed to detect isolation for attachment pod: %w", err)
+			return nil, fmt.Errorf("failed to detect isolation for attachment pod: %w", err)
 		}
 
 		sourceUSBPath, err := sourceUsbPath(res.Pid(), *info.Attr.USBAddress)
 		if err != nil {
-			return fmt.Errorf("failed to get source usb path: %w", err)
+			return nil, fmt.Errorf("failed to get source usb path: %w", err)
 		}
 
 		dev, permission, err := a.getSourceMajorMinor(sourceUSBPath)
 		if err != nil {
-			return fmt.Errorf("failed to get device major/minor: %w", err)
+			return nil, fmt.Errorf("failed to get device major/minor: %w", err)
 		}
 
 		target := unsafeTargetUsbPath(virtlauncherUID, usbAddr)
 		err = a.createCharacterDeviceFile(target, dev, permission)
 		if err != nil {
-			return fmt.Errorf("failed to create character device file: %w", err)
+			return nil, fmt.Errorf("failed to create character device file: %w", err)
 		}
 
 		logger.V(1).Infof("Successfully hot-plug hostdevice %s to VM", info.Name)
 
 	} else if err != nil {
-		return fmt.Errorf("failed to get target usb path: %w", err)
+		return nil, fmt.Errorf("failed to get target usb path: %w", err)
 	} else {
 		logger.V(4).Info("HostDevice already attached to VM pod")
 	}
@@ -448,35 +465,34 @@ func (a hostDeviceAttacher) attachHostDevice(vmi *v1.VirtualMachineInstance, inf
 	if targetUSBPath == nil {
 		targetUSBPath, err = targetUsbPath(virtlauncherUID, usbAddr)
 		if err != nil {
-			return fmt.Errorf("failed to get target usb path: %w", err)
+			return nil, fmt.Errorf("failed to get target usb path: %w", err)
 		}
 	}
 
 	if isCharacterExists, err := isCharacterDevice(targetUSBPath); err != nil {
-		return err
+		return nil, err
 	} else if !isCharacterExists {
-		return fmt.Errorf("target device %v exists but it is not a character device", targetUSBPath)
+		return nil, fmt.Errorf("target device %v exists but it is not a character device", targetUSBPath)
 	}
 
 	// Add record to recordManager
 	// If entry already exists, do nothing
 	err = a.recordManager.StoreEntry(vmi.UID, unsafepath.UnsafeAbsolute(targetUSBPath.Raw()))
 	if err != nil {
-		return fmt.Errorf("failed to store record: %w", err)
+		return nil, fmt.Errorf("failed to store record: %w", err)
 	}
 
 	dev, _, err := a.getSourceMajorMinor(targetUSBPath)
 	if err != nil {
-		return fmt.Errorf("failed to get device major/minor: %w", err)
+		return nil, fmt.Errorf("failed to get device major/minor: %w", err)
 	}
 
-	// allow character device access
-	err = a.allowCharacterDeviceMajorMinor(dev, cgroupManager)
+	err = a.ownershipManager.SetFileOwnership(targetUSBPath)
 	if err != nil {
-		return fmt.Errorf("failed to allow character device access: %w", err)
+		return nil, fmt.Errorf("failed to set file ownership: %w", err)
 	}
 
-	return a.ownershipManager.SetFileOwnership(targetUSBPath)
+	return buildDeviceRule(dev, true), nil
 }
 
 func (a hostDeviceAttacher) getSourceMajorMinor(usbPath *safepath.Path) (uint64, os.FileMode, error) {
@@ -533,34 +549,37 @@ func (a hostDeviceAttacher) findVirtlauncherUID(vmi *v1.VirtualMachineInstance) 
 }
 
 func (a hostDeviceAttacher) removeCharacterDeviceMajorMinor(dev uint64, cgroupManager cgroup.Manager) error {
-	return a.updateCharacterMajorMinor(dev, false, cgroupManager)
+	rule := buildDeviceRule(dev, false)
+	return a.applyDeviceRules([]*devices.Rule{rule}, cgroupManager)
 }
 
-func (a hostDeviceAttacher) allowCharacterDeviceMajorMinor(dev uint64, cgroupManager cgroup.Manager) error {
-	return a.updateCharacterMajorMinor(dev, true, cgroupManager)
-}
-
-func (a hostDeviceAttacher) updateCharacterMajorMinor(dev uint64, allow bool, cgroupManager cgroup.Manager) error {
-	deviceRule := &devices.Rule{
+func buildDeviceRule(dev uint64, allow bool) *devices.Rule {
+	return &devices.Rule{
 		Type:        devices.CharDevice,
 		Major:       int64(unix.Major(dev)),
 		Minor:       int64(unix.Minor(dev)),
 		Permissions: "rwm",
 		Allow:       allow,
 	}
+}
+
+func (a hostDeviceAttacher) applyDeviceRules(rules []*devices.Rule, cgroupManager cgroup.Manager) error {
+	if len(rules) == 0 {
+		return nil
+	}
 
 	if cgroupManager == nil {
-		return fmt.Errorf("failed to apply device rule %+v: cgroup manager is nil", *deviceRule)
+		return fmt.Errorf("failed to apply device rules %+v: cgroup manager is nil", rules)
 	}
 
 	err := cgroupManager.Set(&configs.Resources{
-		Devices: []*devices.Rule{deviceRule},
+		Devices: rules,
 	})
 
 	if err != nil {
-		log.Log.Errorf("cgroup %s had failed to set device rule. error: %v. rule: %+v", cgroupManager.GetCgroupVersion(), err, *deviceRule)
+		log.Log.Errorf("cgroup %s had failed to set device rules. error: %v. rule: %+v", cgroupManager.GetCgroupVersion(), err, rules)
 	} else {
-		log.Log.Infof("cgroup %s device rule is set successfully. rule: %+v", cgroupManager.GetCgroupVersion(), *deviceRule)
+		log.Log.Infof("cgroup %s device rules is set successfully. rule: %+v", cgroupManager.GetCgroupVersion(), rules)
 	}
 
 	return err
