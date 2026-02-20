@@ -671,6 +671,47 @@ func (c *Controller) isChangedNodePlacement(pod, templatePod *k8sv1.Pod) (bool, 
 	return changed, nil
 }
 
+// getRequiredNodeAffinityExcludingSchedulableLabel returns required node affinity from the pod
+// without kubevirt.io/schedulable, so that node placement check is not affected by this
+// KubeVirt-managed label (e.g. when virt-handler updates it).
+func getRequiredNodeAffinityExcludingSchedulableLabel(pod *k8sv1.Pod) affinity.RequiredNodeAffinity {
+	podCopy := pod.DeepCopy()
+	if len(podCopy.Spec.NodeSelector) > 0 {
+		nodeSelector := make(map[string]string, len(podCopy.Spec.NodeSelector))
+		for k, v := range podCopy.Spec.NodeSelector {
+			if k != virtv1.NodeSchedulable {
+				nodeSelector[k] = v
+			}
+		}
+		podCopy.Spec.NodeSelector = nodeSelector
+	}
+	if podCopy.Spec.Affinity != nil && podCopy.Spec.Affinity.NodeAffinity != nil &&
+		podCopy.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution != nil {
+		required := podCopy.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution
+		newTerms := make([]k8sv1.NodeSelectorTerm, 0, len(required.NodeSelectorTerms))
+		for _, term := range required.NodeSelectorTerms {
+			newExprs := make([]k8sv1.NodeSelectorRequirement, 0, len(term.MatchExpressions))
+			for _, expr := range term.MatchExpressions {
+				if expr.Key != virtv1.NodeSchedulable {
+					newExprs = append(newExprs, expr)
+				}
+			}
+			if len(newExprs) > 0 || len(term.MatchFields) > 0 {
+				newTerms = append(newTerms, k8sv1.NodeSelectorTerm{
+					MatchExpressions: newExprs,
+					MatchFields:      term.MatchFields,
+				})
+			}
+		}
+		if len(newTerms) > 0 {
+			required.NodeSelectorTerms = newTerms
+		} else {
+			podCopy.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution = nil
+		}
+	}
+	return affinity.GetRequiredNodeAffinity(podCopy)
+}
+
 func (c *Controller) nodePlacementIsMatched(pod, templatePod *k8sv1.Pod) (bool, error) {
 	if pod == nil || templatePod == nil {
 		return false, fmt.Errorf("pod or templatePod must not be nil")
@@ -686,7 +727,8 @@ func (c *Controller) nodePlacementIsMatched(pod, templatePod *k8sv1.Pod) (bool, 
 		return false, fmt.Errorf("not found node %s", pod.Spec.NodeName)
 	}
 
-	requiredNodeSelectorAndAffinity := affinity.GetRequiredNodeAffinity(templatePod)
+	// requiredNodeSelectorAndAffinity := affinity.GetRequiredNodeAffinity(templatePod)
+	requiredNodeSelectorAndAffinity := getRequiredNodeAffinityExcludingSchedulableLabel(templatePod)
 	match, err := requiredNodeSelectorAndAffinity.Match(node)
 	if err != nil {
 		return false, fmt.Errorf("failed to match required node selector and affinity: %w", err)
