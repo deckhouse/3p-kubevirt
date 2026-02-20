@@ -642,6 +642,7 @@ type Controller struct {
 	Type      string            `xml:"type,attr"`
 	Index     string            `xml:"index,attr"`
 	Model     string            `xml:"model,attr,omitempty"`
+	Ports     *uint             `xml:"ports,attr,omitempty"`
 	Driver    *ControllerDriver `xml:"driver,omitempty"`
 	Alias     *Alias            `xml:"alias,omitempty"`
 	Address   *Address          `xml:"address,omitempty"`
