@@ -801,7 +801,9 @@ func (c *VirtualMachineController) updateDRAHostDeviceStatusesFromDomain(vmi *v1
 			if hd.Address != nil {
 				switch hd.Type {
 				case "usb":
-					draHostDeviceMap[hd.Alias.GetName()] = fmt.Sprintf("%s:%s", hd.Address.Bus, hd.Address.Port)
+					name := hd.Alias.GetName()
+					name = strings.TrimPrefix(name, "dra-hotplug-hostdevice-")
+					draHostDeviceMap[name] = fmt.Sprintf("%s:%s", hd.Address.Bus, hd.Address.Port)
 				}
 			}
 		}
