@@ -43,8 +43,6 @@ import (
 
 	cdiv1 "kubevirt.io/containerized-data-importer-api/pkg/apis/core/v1beta1"
 
-	gocmp "github.com/google/go-cmp/cmp"
-
 	virtv1 "kubevirt.io/api/core/v1"
 
 	"kubevirt.io/kubevirt/pkg/util/affinity"
@@ -608,11 +606,6 @@ func (c *Controller) syncNodePlacementCondition(vmi *virtv1.VirtualMachineInstan
 		}
 		if !matched {
 			status = k8sv1.ConditionTrue
-			if pod != nil {
-				log.Log.Object(vmi).Infof("NodePlacementNotMatched set to True for pod %s/%s on node %s", pod.Namespace, pod.Name, pod.Spec.NodeName)
-			} else {
-				log.Log.Object(vmi).Infof("NodePlacementNotMatched set to True (pod is nil)")
-			}
 		}
 	}
 	c.syncNodePlacementNotMatchedCondition(vmi, status)
@@ -655,20 +648,8 @@ func (c *Controller) isChangedNodePlacement(pod, templatePod *k8sv1.Pod) (bool, 
 		}
 	}
 
-	nodeSelectorEqual := equality.Semantic.DeepEqual(pod.Spec.NodeSelector, templatePod.Spec.NodeSelector)
-	affinityEqual := equality.Semantic.DeepEqual(pod.Spec.Affinity, templatePod.Spec.Affinity)
-	changed := !nodeSelectorEqual || !affinityEqual
-	if changed {
-		log.Log.Object(pod).Infof(
-			"NodePlacement changed: podName=[ %s ] nodeSelectorEqual=[ %t ] affinityEqual=[ %t ] nodeSelectorDiff=[ %s ] affinityDiff=[ %s ]",
-			pod.Name,
-			nodeSelectorEqual,
-			affinityEqual,
-			gocmp.Diff(pod.Spec.NodeSelector, templatePod.Spec.NodeSelector),
-			gocmp.Diff(pod.Spec.Affinity, templatePod.Spec.Affinity),
-		)
-	}
-	return changed, nil
+	return !equality.Semantic.DeepEqual(pod.Spec.NodeSelector, templatePod.Spec.NodeSelector) ||
+		!equality.Semantic.DeepEqual(pod.Spec.Affinity, templatePod.Spec.Affinity), nil
 }
 
 // getRequiredNodeAffinityExcludingSchedulableLabel returns required node affinity from the pod
@@ -727,19 +708,12 @@ func (c *Controller) nodePlacementIsMatched(pod, templatePod *k8sv1.Pod) (bool, 
 		return false, fmt.Errorf("not found node %s", pod.Spec.NodeName)
 	}
 
-	// requiredNodeSelectorAndAffinity := affinity.GetRequiredNodeAffinity(templatePod)
 	requiredNodeSelectorAndAffinity := getRequiredNodeAffinityExcludingSchedulableLabel(templatePod)
 	match, err := requiredNodeSelectorAndAffinity.Match(node)
 	if err != nil {
 		return false, fmt.Errorf("failed to match required node selector and affinity: %w", err)
 	}
 	if !match {
-		log.Log.Object(pod).Infof(
-			"NodePlacement required node affinity mismatch: podNode=[ %s ] nodeLabels=[ %v ] requiredNodeSelectorAndAffinity=[ %v ]",
-			pod.Spec.NodeName,
-			node.Labels,
-			requiredNodeSelectorAndAffinity,
-		)
 		return false, nil
 	}
 
@@ -789,22 +763,10 @@ func (c *Controller) nodePlacementIsMatched(pod, templatePod *k8sv1.Pod) (bool, 
 		}
 		// If at least one matches the podAntiAffinity, then node placement is not suitable. return false
 		if affinity.MatchPodAntiAffinityTerms(podAntiAffinityTerms, p, nsLabels) {
-			log.Log.Object(pod).Infof(
-				"NodePlacement podAntiAffinity matched by pod %s/%s labels=%v nsLabels=%v",
-				p.GetNamespace(),
-				p.GetName(),
-				p.GetLabels(),
-				nsLabels,
-			)
 			return false, nil
 		}
 	}
 
-	log.Log.Object(pod).Infof(
-		"NodePlacement match result: podAffinityMatched=[ %t ] checkedPods=[ %d ]",
-		podMatchedByPodAffinityFound,
-		len(pods),
-	)
 	return podMatchedByPodAffinityFound, nil
 }
 
