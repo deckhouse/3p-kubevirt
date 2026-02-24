@@ -128,11 +128,11 @@ var (
 	}
 
 	mkdirAllCommand = func(path string, perm os.FileMode) error {
-		return os.MkdirAll(filepath.Join(util.HostRootMount, path), perm)
+		return os.MkdirAll(path, perm)
 	}
 
 	removeAllCommand = func(path string) error {
-		return os.RemoveAll(filepath.Join(util.HostRootMount, path))
+		return os.RemoveAll(path)
 	}
 )
 
