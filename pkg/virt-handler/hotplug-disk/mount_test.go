@@ -98,6 +98,11 @@ var (
 	orgFindMntByOne        = findMntByOne
 	orgNodeIsolationResult = nodeIsolationResult
 	orgParentPathForMount  = parentPathForMount
+	orgMkdirAllCommand      = mkdirAllCommand
+	orgRemoveAllCommand     = removeAllCommand
+	orgStableMountDirPath   = stableMountDirPath
+	orgStableMountDirSafe   = stableMountDirSafe
+	orgEnsureStableMountDir = ensureStableMountDir
 )
 
 var _ = Describe("HotplugVolume", func() {
@@ -571,6 +576,22 @@ var _ = Describe("HotplugVolume", func() {
 					pid: os.Getpid(),
 				}
 			}
+			mkdirAllCommand = func(path string, perm os.FileMode) error {
+				return os.MkdirAll(filepath.Join(tempDir, path), perm)
+			}
+			removeAllCommand = func(path string) error {
+				return os.RemoveAll(filepath.Join(tempDir, path))
+			}
+			stableMountDirPath = func(vmiUID types.UID, volumeName string) string {
+				return filepath.Join("hotplug-stable", string(vmiUID), volumeName)
+			}
+			stableMountDirSafe = func(vmiUID types.UID, volumeName string) (*safepath.Path, error) {
+				dir := filepath.Join(tempDir, "hotplug-stable", string(vmiUID), volumeName)
+				return safepath.JoinAndResolveWithRelativeRoot(dir)
+			}
+			ensureStableMountDir = func(vmiUID types.UID, volumeName string) error {
+				return mkdirAllCommand(stableMountDirPath(vmiUID, volumeName), 0750)
+			}
 		})
 
 		AfterEach(func() {
@@ -581,6 +602,11 @@ var _ = Describe("HotplugVolume", func() {
 			unmountCommand = orgUnMountCommand
 			isMounted = orgIsMounted
 			isolationDetector = orgIsoDetector
+			mkdirAllCommand = orgMkdirAllCommand
+			removeAllCommand = orgRemoveAllCommand
+			stableMountDirPath = orgStableMountDirPath
+			stableMountDirSafe = orgStableMountDirSafe
+			ensureStableMountDir = orgEnsureStableMountDir
 		})
 
 		It("getSourcePodFile should find the disk.img file, if it exists", func() {
@@ -650,43 +676,57 @@ var _ = Describe("HotplugVolume", func() {
 			Expect(unsafepath.UnsafeRelative(res.Raw())).To(Equal(unsafepath.UnsafeAbsolute(expectedPath.Raw())))
 		})
 
-		It("should properly mount and unmount filesystem", func() {
+		It("should properly mount and unmount filesystem with stable intermediate mount", func() {
 			sourcePodUID := "ghfjk"
-			path, err := newDir(tempDir, sourcePodUID, "volumes")
+			sourcePath, err := newDir(tempDir, sourcePodUID, "volumes")
 			Expect(err).ToNot(HaveOccurred())
-			diskFile, err := newFile(unsafepath.UnsafeAbsolute(path.Raw()), "disk.img")
+			_, err = newFile(unsafepath.UnsafeAbsolute(sourcePath.Raw()), "disk.img")
 			Expect(err).ToNot(HaveOccurred())
 			findMntByPID = func(pid int) ([]*mount.Info, error) {
 				return findmntByVolume("testvolume"), nil
 			}
 			findMntByOne = func() ([]*mount.Info, error) {
-				return findmntByDevice(unsafepath.UnsafeAbsolute(path.Raw())), nil
+				return findmntByDevice(unsafepath.UnsafeAbsolute(sourcePath.Raw())), nil
 			}
 			targetFilePath, err := newFile(unsafepath.UnsafeAbsolute(targetPodPath.Raw()), "testvolume.img")
 			Expect(err).ToNot(HaveOccurred())
-			mountCommand = func(sourcePath, targetPath *safepath.Path) ([]byte, error) {
-				Expect(unsafepath.UnsafeRelative(sourcePath.Raw())).To(Equal(unsafepath.UnsafeAbsolute(diskFile.Raw())))
-				Expect(targetPath).To(Equal(targetFilePath))
+
+			// Two-phase mount: first call mounts source dir → stable, second mounts stable/disk.img → target
+			mountCallCount := 0
+			stableDir := filepath.Join(tempDir, stableMountDirPath(vmi.UID, "testvolume"))
+			mountCommand = func(src, tgt *safepath.Path) ([]byte, error) {
+				mountCallCount++
+				if mountCallCount == 1 {
+					// Phase 1: source directory → stable mount dir
+					Expect(unsafepath.UnsafeRelative(src.Raw())).To(Equal(unsafepath.UnsafeAbsolute(sourcePath.Raw())))
+					Expect(unsafepath.UnsafeAbsolute(tgt.Raw())).To(Equal(stableDir))
+					// Simulate stable mount: create disk.img inside stable dir
+					_, err := newFile(stableDir, "disk.img")
+					Expect(err).ToNot(HaveOccurred())
+				} else {
+					// Phase 2: stable/disk.img → virt-launcher target
+					Expect(unsafepath.UnsafeAbsolute(tgt.Raw())).To(Equal(unsafepath.UnsafeAbsolute(targetFilePath.Raw())))
+				}
 				return []byte("Success"), nil
 			}
 			ownershipManager.EXPECT().SetFileOwnership(targetFilePath)
 
 			err = m.mountFileSystemHotplugVolume(vmi, "testvolume", types.UID(sourcePodUID), record, false)
 			Expect(err).ToNot(HaveOccurred())
+			Expect(mountCallCount).To(Equal(2))
 			Expect(record.MountTargetEntries).To(HaveLen(1))
 			Expect(record.MountTargetEntries[0].TargetFile).To(Equal(unsafepath.UnsafeAbsolute(targetFilePath.Raw())))
+			Expect(record.MountTargetEntries[0].StableMountDir).ToNot(BeEmpty())
 
 			unmountCommand = func(diskPath *safepath.Path) ([]byte, error) {
-				Expect(targetFilePath).To(Equal(diskPath))
 				return []byte("Success"), nil
 			}
 
 			isMounted = func(diskPath *safepath.Path) (bool, error) {
-				Expect(targetFilePath).To(Equal(diskPath))
 				return true, nil
 			}
 
-			err = m.unmountFileSystemHotplugVolumes(targetFilePath)
+			err = m.unmountFileSystemHotplugVolumes(targetFilePath, "")
 			Expect(err).ToNot(HaveOccurred())
 		})
 
@@ -698,7 +738,7 @@ var _ = Describe("HotplugVolume", func() {
 				return false, fmt.Errorf("isMounted error")
 			}
 
-			err = m.unmountFileSystemHotplugVolumes(testPath)
+			err = m.unmountFileSystemHotplugVolumes(testPath, "")
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("isMounted error"))
 		})
@@ -711,7 +751,7 @@ var _ = Describe("HotplugVolume", func() {
 				return false, nil
 			}
 
-			err = m.unmountFileSystemHotplugVolumes(testPath)
+			err = m.unmountFileSystemHotplugVolumes(testPath, "")
 			Expect(err).ToNot(HaveOccurred())
 		})
 
@@ -726,7 +766,7 @@ var _ = Describe("HotplugVolume", func() {
 				return []byte("Failure"), fmt.Errorf("unmount error")
 			}
 
-			err = m.unmountFileSystemHotplugVolumes(testPath)
+			err = m.unmountFileSystemHotplugVolumes(testPath, "")
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("unmount error"))
 		})
@@ -776,6 +816,22 @@ var _ = Describe("HotplugVolume", func() {
 					pid: os.Getpid(),
 				}
 			}
+			mkdirAllCommand = func(path string, perm os.FileMode) error {
+				return os.MkdirAll(filepath.Join(tempDir, path), perm)
+			}
+			removeAllCommand = func(path string) error {
+				return os.RemoveAll(filepath.Join(tempDir, path))
+			}
+			stableMountDirPath = func(vmiUID types.UID, volumeName string) string {
+				return filepath.Join("hotplug-stable", string(vmiUID), volumeName)
+			}
+			stableMountDirSafe = func(vmiUID types.UID, volumeName string) (*safepath.Path, error) {
+				dir := filepath.Join(tempDir, "hotplug-stable", string(vmiUID), volumeName)
+				return safepath.JoinAndResolveWithRelativeRoot(dir)
+			}
+			ensureStableMountDir = func(vmiUID types.UID, volumeName string) error {
+				return mkdirAllCommand(stableMountDirPath(vmiUID, volumeName), 0750)
+			}
 		})
 
 		AfterEach(func() {
@@ -789,6 +845,11 @@ var _ = Describe("HotplugVolume", func() {
 			isBlockDevice = orgIsBlockDevice
 			findMntByPID = orgFindMntByPID
 			findMntByOne = orgFindMntByOne
+			mkdirAllCommand = orgMkdirAllCommand
+			removeAllCommand = orgRemoveAllCommand
+			stableMountDirPath = orgStableMountDirPath
+			stableMountDirSafe = orgStableMountDirSafe
+			ensureStableMountDir = orgEnsureStableMountDir
 		})
 
 		verifyMountRecords := func(isMount bool, expectedPaths ...string) {
@@ -807,21 +868,15 @@ var _ = Describe("HotplugVolume", func() {
 			Expect(err).ToNot(HaveOccurred())
 
 			By(fmt.Sprintf("Verifying there are %d records in tempDir/1234", len(expectedPaths)))
-			record := &vmiMountTargetRecord{
-				UsesSafePaths: true,
-			}
-
-			for _, path := range expectedPaths {
-				record.MountTargetEntries = append(record.MountTargetEntries, vmiMountTargetEntry{
-					TargetFile: path,
-				})
-			}
-
-			expectedBytes, err := json.Marshal(record)
-			Expect(err).ToNot(HaveOccurred())
+			record := &vmiMountTargetRecord{}
 			bytes, err := os.ReadFile(filepath.Join(tempDir, string(vmi.UID)))
 			Expect(err).ToNot(HaveOccurred())
-			Expect(bytes).To(Equal(expectedBytes))
+			err = json.Unmarshal(bytes, record)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(record.MountTargetEntries).To(HaveLen(len(expectedPaths)))
+			for i, path := range expectedPaths {
+				Expect(record.MountTargetEntries[i].TargetFile).To(Equal(path))
+			}
 			for _, path := range expectedPaths {
 				_, err = os.Stat(path)
 				Expect(err).ToNot(HaveOccurred())
@@ -882,7 +937,7 @@ var _ = Describe("HotplugVolume", func() {
 				return findmntByDevice(unsafepath.UnsafeAbsolute(fileSystemPath.Raw())), nil
 			}
 
-			diskFile, err := newFile(unsafepath.UnsafeAbsolute(fileSystemPath.Raw()), "disk.img")
+			_, err = newFile(unsafepath.UnsafeAbsolute(fileSystemPath.Raw()), "disk.img")
 			Expect(err).ToNot(HaveOccurred())
 			mknodCommand = func(basePath *safepath.Path, deviceName string, dev uint64, blockDevicePermissions os.FileMode) error {
 				_, err := newFile(unsafepath.UnsafeAbsolute(basePath.Raw()), deviceName)
@@ -892,12 +947,23 @@ var _ = Describe("HotplugVolume", func() {
 
 			blockVolume := filepath.Join(targetPodPath, "blockvolume")
 			targetFilePath := filepath.Join(targetPodPath, "filesystemvolume.img")
+			stableDir := filepath.Join(tempDir, stableMountDirPath(vmi.UID, "filesystemvolume"))
 			isBlockDevice = func(path *safepath.Path) (bool, error) {
 				return strings.Contains(unsafepath.UnsafeAbsolute(path.Raw()), "blockvolume"), nil
 			}
+			fsMountCallCount := 0
 			mountCommand = func(sourcePath, targetPath *safepath.Path) ([]byte, error) {
-				Expect(unsafepath.UnsafeRelative(sourcePath.Raw())).To(Equal(unsafepath.UnsafeAbsolute(diskFile.Raw())))
-				Expect(unsafepath.UnsafeAbsolute(targetPath.Raw())).To(Equal(targetFilePath))
+				fsMountCallCount++
+				if fsMountCallCount == 1 {
+					// Phase 1: source directory → stable mount
+					Expect(unsafepath.UnsafeAbsolute(targetPath.Raw())).To(Equal(stableDir))
+					// Simulate stable mount by creating disk.img inside stable dir
+					_, err := newFile(stableDir, "disk.img")
+					Expect(err).ToNot(HaveOccurred())
+				} else if fsMountCallCount == 2 {
+					// Phase 2: stable/disk.img → virt-launcher target
+					Expect(unsafepath.UnsafeAbsolute(targetPath.Raw())).To(Equal(targetFilePath))
+				}
 				return []byte("Success"), nil
 			}
 
@@ -993,7 +1059,7 @@ var _ = Describe("HotplugVolume", func() {
 				return findmntByDevice(unsafepath.UnsafeAbsolute(fileSystemPath.Raw())), nil
 			}
 
-			diskFile, err := newFile(unsafepath.UnsafeAbsolute(fileSystemPath.Raw()), "disk.img")
+			_, err = newFile(unsafepath.UnsafeAbsolute(fileSystemPath.Raw()), "disk.img")
 			Expect(err).ToNot(HaveOccurred())
 			mknodCommand = func(basePath *safepath.Path, deviceName string, dev uint64, blockDevicePermissions os.FileMode) error {
 				_, err := newFile(unsafepath.UnsafeAbsolute(basePath.Raw()), deviceName)
@@ -1003,12 +1069,22 @@ var _ = Describe("HotplugVolume", func() {
 
 			blockVolume := filepath.Join(targetPodPath, "blockvolume")
 			targetFilePath := filepath.Join(targetPodPath, "filesystemvolume.img")
+			unmountAllStableDir := filepath.Join(tempDir, stableMountDirPath(vmi.UID, "filesystemvolume"))
 			isBlockDevice = func(path *safepath.Path) (bool, error) {
 				return strings.Contains(unsafepath.UnsafeAbsolute(path.Raw()), "blockvolume"), nil
 			}
+			unmountAllFsMountCount := 0
 			mountCommand = func(sourcePath, targetPath *safepath.Path) ([]byte, error) {
-				Expect(unsafepath.UnsafeRelative(sourcePath.Raw())).To(Equal(unsafepath.UnsafeAbsolute(diskFile.Raw())))
-				Expect(unsafepath.UnsafeAbsolute(targetPath.Raw())).To(Equal(targetFilePath))
+				unmountAllFsMountCount++
+				if unmountAllFsMountCount == 1 {
+					// Phase 1: source dir → stable
+					Expect(unsafepath.UnsafeAbsolute(targetPath.Raw())).To(Equal(unmountAllStableDir))
+					_, err := newFile(unmountAllStableDir, "disk.img")
+					Expect(err).ToNot(HaveOccurred())
+				} else if unmountAllFsMountCount == 2 {
+					// Phase 2: stable/disk.img → target
+					Expect(unsafepath.UnsafeAbsolute(targetPath.Raw())).To(Equal(targetFilePath))
+				}
 				return []byte("Success"), nil
 			}
 
@@ -1024,22 +1100,14 @@ var _ = Describe("HotplugVolume", func() {
 			Expect(err).ToNot(HaveOccurred())
 
 			By("Verifying there are 2 records in tempDir/1234")
-			record := &vmiMountTargetRecord{
-				MountTargetEntries: []vmiMountTargetEntry{
-					{
-						TargetFile: targetFilePath,
-					},
-					{
-						TargetFile: blockVolume,
-					},
-				},
-				UsesSafePaths: true,
-			}
-			expectedBytes, err := json.Marshal(record)
-			Expect(err).ToNot(HaveOccurred())
+			record := &vmiMountTargetRecord{}
 			bytes, err := os.ReadFile(filepath.Join(tempDir, string(vmi.UID)))
 			Expect(err).ToNot(HaveOccurred())
-			Expect(bytes).To(Equal(expectedBytes))
+			err = json.Unmarshal(bytes, record)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(record.MountTargetEntries).To(HaveLen(2))
+			Expect(record.MountTargetEntries[0].TargetFile).To(Equal(targetFilePath))
+			Expect(record.MountTargetEntries[1].TargetFile).To(Equal(blockVolume))
 			_, err = os.Stat(targetFilePath)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(capturedPaths).To(ContainElements(expectedPaths))

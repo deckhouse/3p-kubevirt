@@ -11,6 +11,7 @@ import (
 	"kubevirt.io/kubevirt/pkg/checkpoint"
 	hostdisk "kubevirt.io/kubevirt/pkg/host-disk"
 	"kubevirt.io/kubevirt/pkg/unsafepath"
+	"kubevirt.io/kubevirt/pkg/util"
 
 	"golang.org/x/sys/unix"
 
@@ -125,6 +126,28 @@ var (
 	) (*safepath.Path, error) {
 		return isolation.ParentPathForMount(parent, child, findmntInfo.Source, findmntInfo.Target)
 	}
+
+	mkdirAllCommand = func(path string, perm os.FileMode) error {
+		return os.MkdirAll(filepath.Join(util.HostRootMount, path), perm)
+	}
+
+	removeAllCommand = func(path string) error {
+		return os.RemoveAll(filepath.Join(util.HostRootMount, path))
+	}
+)
+
+var (
+	stableMountDirPath = func(vmiUID types.UID, volumeName string) string {
+		return filepath.Join(util.HotplugStableDir, string(vmiUID), volumeName)
+	}
+
+	stableMountDirSafe = func(vmiUID types.UID, volumeName string) (*safepath.Path, error) {
+		return safepath.JoinAndResolveWithRelativeRoot("/proc/1/root", stableMountDirPath(vmiUID, volumeName))
+	}
+
+	ensureStableMountDir = func(vmiUID types.UID, volumeName string) error {
+		return mkdirAllCommand(stableMountDirPath(vmiUID, volumeName), 0750)
+	}
 )
 
 type volumeMounter struct {
@@ -154,7 +177,8 @@ type VolumeMounter interface {
 }
 
 type vmiMountTargetEntry struct {
-	TargetFile string `json:"targetFile"`
+	TargetFile     string `json:"targetFile"`
+	StableMountDir string `json:"stableMountDir,omitempty"`
 }
 
 type vmiMountTargetRecord struct {
@@ -206,6 +230,12 @@ func (m *volumeMounter) deleteMountTargetRecord(vmi *v1.VirtualMachineInstance) 
 		if err := m.checkpointManager.Delete(string(vmi.UID)); err != nil {
 			return fmt.Errorf("failed to delete checkpoint %s, %w", vmi.UID, err)
 		}
+	}
+
+	// Clean up the entire per-VMI stable mount directory tree
+	vmiStableDir := filepath.Join(util.HotplugStableDir, string(vmi.UID))
+	if err := removeAllCommand(vmiStableDir); err != nil && !errors.Is(err, os.ErrNotExist) {
+		log.DefaultLogger().V(3).Infof("failed to clean up stable mount dir for VMI %s: %v", vmi.UID, err)
 	}
 
 	m.mountRecordsLock.Lock()
@@ -562,11 +592,32 @@ func (m *volumeMounter) mountFileSystemHotplugVolume(vmi *v1.VirtualMachineInsta
 		return err
 	}
 
-	isMounted, err := isMounted(target)
+	// If the virt-launcher target is already mounted, nothing to do.
+	targetMounted, err := isMounted(target)
 	if err != nil {
 		return fmt.Errorf("failed to determine if %s is already mounted: %v", target, err)
 	}
-	if !isMounted {
+	if targetMounted {
+		return m.ownershipManager.SetFileOwnership(target)
+	}
+
+	// === Phase 1: Ensure stable intermediate mount exists ===
+	stableDir := stableMountDirPath(vmi.UID, volume)
+	if err := ensureStableMountDir(vmi.UID, volume); err != nil {
+		return fmt.Errorf("failed to create stable mount dir %s: %v", stableDir, err)
+	}
+
+	stablePath, err := stableMountDirSafe(vmi.UID, volume)
+	if err != nil {
+		return fmt.Errorf("failed to resolve stable mount path: %v", err)
+	}
+
+	stableMounted, err := isMounted(stablePath)
+	if err != nil {
+		return fmt.Errorf("failed to check stable mount at %s: %v", stablePath, err)
+	}
+
+	if !stableMounted {
 		sourcePath, err := m.getSourcePodFilePath(sourceUID, vmi, volume)
 		if err != nil {
 			log.DefaultLogger().V(3).Infof("Error getting source path: %v", err)
@@ -574,29 +625,48 @@ func (m *volumeMounter) mountFileSystemHotplugVolume(vmi *v1.VirtualMachineInsta
 			// to get mounted on the node, and this will error until the volume is mounted.
 			return nil
 		}
-		if err := m.writePathToMountRecord(unsafepath.UnsafeAbsolute(target.Raw()), vmi, record); err != nil {
-			return err
-		}
-		if !mountDirectory {
-			if m.newPVCDiskCreator != nil {
-				dir := unsafepath.UnsafeAbsolute(sourcePath.Raw())
-				diskPath := filepath.Join(dir, "disk.img")
-				err = m.newPVCDiskCreator().Create(vmi, volume, diskPath)
-				if err != nil {
-					return err
-				}
-			}
 
-			sourcePath, err = sourcePath.AppendAndResolveWithRelativeRoot("disk.img")
-			if err != nil {
+		// Create disk.img in source directory if needed (before stable mount so it's visible through it)
+		if !mountDirectory && m.newPVCDiskCreator != nil {
+			dir := unsafepath.UnsafeAbsolute(sourcePath.Raw())
+			diskPath := filepath.Join(dir, "disk.img")
+			if err = m.newPVCDiskCreator().Create(vmi, volume, diskPath); err != nil {
 				return err
 			}
 		}
-		if out, err := mountCommand(sourcePath, target); err != nil {
-			return fmt.Errorf("failed to bindmount hotplug volume source from %v to %v: %v : %v", sourcePath, target, err, string(out))
+
+		// Bind mount the source DIRECTORY to the stable location
+		if out, err := mountCommand(sourcePath, stablePath); err != nil {
+			return fmt.Errorf("failed to bind mount source dir %v to stable %v: %v : %v", sourcePath, stablePath, err, string(out))
 		}
-		log.DefaultLogger().V(1).Infof("successfully mounted %v", volume)
+		log.DefaultLogger().V(1).Infof("created stable mount for volume %v at %v", volume, stablePath)
 	}
+
+	// === Phase 2: Bind mount from stable location to virt-launcher target ===
+
+	// Record both target and stable paths for cleanup
+	record.MountTargetEntries = append(record.MountTargetEntries, vmiMountTargetEntry{
+		TargetFile:     unsafepath.UnsafeAbsolute(target.Raw()),
+		StableMountDir: stableDir,
+	})
+	if err := m.setMountTargetRecord(vmi, record); err != nil {
+		return err
+	}
+
+	var fileSource *safepath.Path
+	if mountDirectory {
+		fileSource = stablePath
+	} else {
+		fileSource, err = stablePath.AppendAndResolveWithRelativeRoot("disk.img")
+		if err != nil {
+			return fmt.Errorf("failed to resolve disk.img in stable mount: %v", err)
+		}
+	}
+
+	if out, err := mountCommand(fileSource, target); err != nil {
+		return fmt.Errorf("failed to bind mount from stable %v to target %v: %v : %v", fileSource, target, err, string(out))
+	}
+	log.DefaultLogger().V(1).Infof("successfully mounted volume %v from stable location", volume)
 
 	return m.ownershipManager.SetFileOwnership(target)
 }
@@ -758,13 +828,14 @@ func (m *volumeMounter) Unmount(vmi *v1.VirtualMachineInstance, cgroupManager cg
 					if deviceRule != nil {
 						deviceRules = append(deviceRules, deviceRule)
 					}
-				} else if err := m.unmountFileSystemHotplugVolumes(diskPath); err != nil {
+				} else if err := m.unmountFileSystemHotplugVolumes(diskPath, entry.StableMountDir); err != nil {
 					return err
 				}
 				log.Log.Object(vmi).V(3).Infof("Unmounted hotplug volume path %s", diskPath)
 			} else {
 				newRecord.MountTargetEntries = append(newRecord.MountTargetEntries, vmiMountTargetEntry{
-					TargetFile: unsafepath.UnsafeAbsolute(diskPath.Raw()),
+					TargetFile:     unsafepath.UnsafeAbsolute(diskPath.Raw()),
+					StableMountDir: entry.StableMountDir,
 				})
 			}
 		}
@@ -799,7 +870,8 @@ func (m *volumeMounter) Unmount(vmi *v1.VirtualMachineInstance, cgroupManager cg
 	return nil
 }
 
-func (m *volumeMounter) unmountFileSystemHotplugVolumes(diskPath *safepath.Path) error {
+func (m *volumeMounter) unmountFileSystemHotplugVolumes(diskPath *safepath.Path, stableMountPath string) error {
+	// Step 1: Unmount the virt-launcher target
 	if mounted, err := isMounted(diskPath); err != nil {
 		return fmt.Errorf("failed to check mount point for hotplug disk %v: %v", diskPath, err)
 	} else if mounted {
@@ -811,8 +883,30 @@ func (m *volumeMounter) unmountFileSystemHotplugVolumes(diskPath *safepath.Path)
 		if err != nil {
 			return fmt.Errorf("failed to remove hotplug disk directory %v: %v : %v", diskPath, string(out), err)
 		}
-
 	}
+
+	// Step 2: Unmount and remove the stable intermediate mount
+	if stableMountPath != "" {
+		stablePath, err := safepath.JoinAndResolveWithRelativeRoot("/proc/1/root", stableMountPath)
+		if err != nil {
+			if !errors.Is(err, os.ErrNotExist) {
+				return fmt.Errorf("failed to resolve stable mount path %s: %v", stableMountPath, err)
+			}
+			// Already gone, nothing to clean up
+		} else {
+			if mounted, err := isMounted(stablePath); err != nil {
+				return fmt.Errorf("failed to check stable mount at %s: %v", stableMountPath, err)
+			} else if mounted {
+				if out, err := unmountCommand(stablePath); err != nil {
+					return fmt.Errorf("failed to unmount stable mount %s: %v : %v", stableMountPath, string(out), err)
+				}
+			}
+			if err := removeAllCommand(stableMountPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+				log.DefaultLogger().V(3).Infof("failed to remove stable mount dir %s: %v", stableMountPath, err)
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -878,7 +972,7 @@ func (m *volumeMounter) UnmountAll(vmi *v1.VirtualMachineInstance, cgroupManager
 					deviceRules = append(deviceRules, deviceRule)
 				}
 			} else {
-				if err := m.unmountFileSystemHotplugVolumes(diskPath.Path()); err != nil {
+				if err := m.unmountFileSystemHotplugVolumes(diskPath.Path(), entry.StableMountDir); err != nil {
 					logger.Warningf("Unable to unmount volume at path %s: %v", diskPath, err)
 					// Don't return error, try next.
 				}
