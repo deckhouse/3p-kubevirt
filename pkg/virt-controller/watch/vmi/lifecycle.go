@@ -595,12 +595,13 @@ func (c *Controller) syncNodePlacementCondition(vmi *virtv1.VirtualMachineInstan
 	if err != nil {
 		return fmt.Errorf("failed to render pod manifest: %w", err)
 	}
-	changed, err := c.isChangedNodePlacement(pod, templatePod)
+	copyPod := pod.DeepCopy()
+	changed, err := c.isChangedNodePlacement(copyPod, templatePod)
 	if err != nil {
 		return fmt.Errorf("could not verify if NodePlacement update is required: %w", err)
 	}
 	if changed {
-		matched, err := c.nodePlacementIsMatched(pod, templatePod)
+		matched, err := c.nodePlacementIsMatched(copyPod, templatePod)
 		if err != nil {
 			return fmt.Errorf("failed to verify if NodePlacement update is matched: %w", err)
 		}
@@ -650,12 +651,10 @@ func (c *Controller) isChangedNodePlacement(pod, templatePod *k8sv1.Pod) (bool, 
 
 	// Exclude kubevirt.io/schedulable from NodeSelector comparison - it is added by the
 	// cluster for scheduling and should not affect NodePlacement condition.
-	podNodeSelector := maps.Clone(pod.Spec.NodeSelector)
-	delete(podNodeSelector, virtv1.NodeSchedulable)
-	templateNodeSelector := maps.Clone(templatePod.Spec.NodeSelector)
-	delete(templateNodeSelector, virtv1.NodeSchedulable)
+	delete(pod.Spec.NodeSelector, virtv1.NodeSchedulable)
+	delete(templatePod.Spec.NodeSelector, virtv1.NodeSchedulable)
 
-	return !equality.Semantic.DeepEqual(podNodeSelector, templateNodeSelector) ||
+	return !equality.Semantic.DeepEqual(pod.Spec.NodeSelector, templatePod.Spec.NodeSelector) ||
 		!equality.Semantic.DeepEqual(pod.Spec.Affinity, templatePod.Spec.Affinity), nil
 }
 
