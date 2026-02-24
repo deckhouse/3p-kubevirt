@@ -744,9 +744,8 @@ func (c *Controller) nodePlacementIsMatched(pod, templatePod *k8sv1.Pod) (bool, 
 		return false, err
 	}
 
-	var (
-		podMatchedByPodAffinityFound bool
-	)
+	// When there are no required pod affinity terms, placement is suitable from pod affinity perspective.
+	podMatchedByPodAffinityFound := len(podAffinityTerms) == 0
 
 	for _, p := range pods {
 		if p.GetUID() == pod.GetUID() {
