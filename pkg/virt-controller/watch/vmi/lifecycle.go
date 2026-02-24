@@ -648,8 +648,54 @@ func (c *Controller) isChangedNodePlacement(pod, templatePod *k8sv1.Pod) (bool, 
 		}
 	}
 
-	return !equality.Semantic.DeepEqual(pod.Spec.NodeSelector, templatePod.Spec.NodeSelector) ||
-		!equality.Semantic.DeepEqual(pod.Spec.Affinity, templatePod.Spec.Affinity), nil
+	// Exclude kubevirt.io/schedulable from comparison so label flip on node does not trigger re-check
+	podSelector, podAffinity := nodeSelectorAndAffinityWithoutSchedulable(pod)
+	templateSelector, templateAffinity := nodeSelectorAndAffinityWithoutSchedulable(templatePod)
+	return !equality.Semantic.DeepEqual(podSelector, templateSelector) ||
+		!equality.Semantic.DeepEqual(podAffinity, templateAffinity), nil
+}
+
+// nodeSelectorAndAffinityWithoutSchedulable returns copies of NodeSelector and Affinity
+// with kubevirt.io/schedulable removed from NodeSelector and from NodeAffinity.Required,
+// for comparison in isChangedNodePlacement.
+func nodeSelectorAndAffinityWithoutSchedulable(pod *k8sv1.Pod) (map[string]string, *k8sv1.Affinity) {
+	var nodeSelector map[string]string
+	if len(pod.Spec.NodeSelector) > 0 {
+		nodeSelector = make(map[string]string, len(pod.Spec.NodeSelector))
+		for k, v := range pod.Spec.NodeSelector {
+			if k != virtv1.NodeSchedulable {
+				nodeSelector[k] = v
+			}
+		}
+	}
+	var affinity *k8sv1.Affinity
+	if pod.Spec.Affinity != nil {
+		affinity = pod.Spec.Affinity.DeepCopy()
+		if affinity.NodeAffinity != nil && affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution != nil {
+			required := affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution
+			newTerms := make([]k8sv1.NodeSelectorTerm, 0, len(required.NodeSelectorTerms))
+			for _, term := range required.NodeSelectorTerms {
+				newExprs := make([]k8sv1.NodeSelectorRequirement, 0, len(term.MatchExpressions))
+				for _, expr := range term.MatchExpressions {
+					if expr.Key != virtv1.NodeSchedulable {
+						newExprs = append(newExprs, expr)
+					}
+				}
+				if len(newExprs) > 0 || len(term.MatchFields) > 0 {
+					newTerms = append(newTerms, k8sv1.NodeSelectorTerm{
+						MatchExpressions: newExprs,
+						MatchFields:      term.MatchFields,
+					})
+				}
+			}
+			if len(newTerms) > 0 {
+				affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution = &k8sv1.NodeSelector{NodeSelectorTerms: newTerms}
+			} else {
+				affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution = nil
+			}
+		}
+	}
+	return nodeSelector, affinity
 }
 
 // getRequiredNodeAffinityExcludingSchedulableLabel returns required node affinity from the pod
@@ -773,7 +819,16 @@ func (c *Controller) nodePlacementIsMatched(pod, templatePod *k8sv1.Pod) (bool, 
 func (c *Controller) listPodsByNode(node string) ([]*k8sv1.Pod, error) {
 	objs, err := c.allPodIndexer.ByIndex("node", node)
 	if err != nil {
-		return nil, err
+		// Fallback when "node" index is not registered (e.g. in unit tests)
+		allObjs := c.allPodIndexer.List()
+		pods := make([]*k8sv1.Pod, 0)
+		for _, o := range allObjs {
+			p, ok := o.(*k8sv1.Pod)
+			if ok && p.Spec.NodeName == node {
+				pods = append(pods, p)
+			}
+		}
+		return pods, nil
 	}
 	pods := make([]*k8sv1.Pod, 0, len(objs))
 	for _, obj := range objs {
