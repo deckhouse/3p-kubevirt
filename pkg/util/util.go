@@ -24,7 +24,7 @@ const (
 	KubeletRoot                               = "/var/lib/kubelet"
 	KubeletPodsDir                            = KubeletRoot + "/pods"
 	HostRootMount                             = "/proc/1/root/"
-	HotplugStableDir                          = VirtShareDir + "/hotplug-stable"
+	HotplugStableDir                          = VirtPrivateDir + "/hotplug-stable"
 
 	NonRootUID        = 107
 	NonRootUserString = "qemu"

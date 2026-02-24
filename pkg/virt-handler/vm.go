@@ -184,11 +184,6 @@ func NewVirtualMachineController(
 		return nil, err
 	}
 
-	hotplugStableDir := filepath.Join(util.HostRootMount, util.HotplugStableDir)
-	if err := os.MkdirAll(hotplugStableDir, 0750); err != nil {
-		return nil, err
-	}
-
 	c := &VirtualMachineController{
 		BaseController:           baseCtrl,
 		capabilities:             capabilities,
