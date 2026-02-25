@@ -225,7 +225,19 @@ var _ = Describe("VirtualMachineInstance watcher", func() {
 		cdiConfigInformer, _ := testutils.NewFakeInformerFor(&cdiv1.CDIConfig{})
 		kubeVirtInformer, _ := testutils.NewFakeInformerFor(&virtv1.KubeVirt{})
 		rqInformer, _ := testutils.NewFakeInformerFor(&k8sv1.ResourceQuota{})
-		podInformer, _ = testutils.NewFakeInformerFor(&k8sv1.Pod{})
+		podInformer, _ = testutils.NewFakeInformerWithIndexersFor(&k8sv1.Pod{}, cache.Indexers{
+			cache.NamespaceIndex: cache.MetaNamespaceIndexFunc,
+			"node": func(obj interface{}) ([]string, error) {
+				pod, ok := obj.(*k8sv1.Pod)
+				if !ok {
+					return nil, nil
+				}
+				if pod.Spec.NodeName == "" {
+					return nil, nil
+				}
+				return []string{pod.Spec.NodeName}, nil
+			},
+		})
 		nsInformer, _ := testutils.NewFakeInformerFor(&k8sv1.Namespace{})
 		nodeInformer, _ = testutils.NewFakeInformerFor(&k8sv1.Node{})
 		var qemuGid int64 = 107
