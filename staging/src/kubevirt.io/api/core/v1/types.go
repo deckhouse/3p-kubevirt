@@ -226,6 +226,10 @@ type VirtualMachineInstanceResourceClaim struct {
 	// Exactly one of ResourceClaimName and ResourceClaimTemplateName must
 	// be set.
 	ResourceClaimTemplateName *string `json:"resourceClaimTemplateName,omitempty"`
+	// Hotpluggable marks a claim that is attached to a running VMI through an attachment pod
+	// instead of the virt-launcher pod.
+	// +optional
+	Hotpluggable bool `json:"hotpluggable,omitempty"`
 }
 
 func (vmiSpec *VirtualMachineInstanceSpec) UnmarshalJSON(data []byte) error {
@@ -388,9 +392,14 @@ type DeviceStatus struct {
 
 type DeviceStatusInfo struct {
 	// Name of the device as specified in spec.domain.devices.gpus.name or spec.domain.devices.hostDevices.name
-	Name string `json:"name"`
+	Name    string       `json:"name"`
+	Address string       `json:"address,omitempty"`
+	Phase   DevicePhase  `json:"phase,omitempty"`
+	Reason  DeviceReason `json:"reason,omitempty"`
+	Message string       `json:"message,omitempty"`
 	// DeviceResourceClaimStatus reflects the DRA related information for the device
 	DeviceResourceClaimStatus *DeviceResourceClaimStatus `json:"deviceResourceClaimStatus,omitempty"`
+	Hotplug                   *HotplugDeviceStatus       `json:"hotplug,omitempty"`
 }
 
 // DeviceResourceClaimStatus has to be before SyncVMI call from virt-handler to virt-launcher
@@ -426,6 +435,29 @@ type USBAddress struct {
 	// +required
 	DeviceNumber int64 `json:"deviceNumber"`
 }
+
+// DevicePhase indicates the current phase of the hotplug process.
+type DevicePhase string
+
+const (
+	DevicePending         DevicePhase = "Pending"
+	DeviceAttachedToNode  DevicePhase = "AttachedToNode"
+	DeviceAttachedToPod   DevicePhase = "AttachedToPod"
+	DeviceReady           DevicePhase = "Ready"
+	DeviceDetaching       DevicePhase = "Detaching"
+	DeviceDetachedFromPod DevicePhase = "DettachedFromPod"
+)
+
+type DeviceReason string
+
+const (
+	HostDeviceAttachmentPodNotFound DeviceReason = "HostDeviceAttachmentPodNotFound"
+	HostDeviceAttachedToNodeReason  DeviceReason = "HostDeviceAttachedToNode"
+	HostDeviceAttachedToPodReason   DeviceReason = "HostDeviceAttachedToPod"
+	HostDeviceDetachedFromPodReason DeviceReason = "HostDeviceDetachedFromPod"
+	HostDeviceUnpluggedReason       DeviceReason = "HostDeviceUnplugged"
+	HostDeviceReadyReason           DeviceReason = "HostDeviceReady"
+)
 
 // StorageMigratedVolumeInfo tracks the information about the source and destination volumes during the volume migration
 type StorageMigratedVolumeInfo struct {
@@ -540,6 +572,13 @@ type HotplugVolumeStatus struct {
 	// AttachPodName is the name of the pod used to attach the volume to the node.
 	AttachPodName string `json:"attachPodName,omitempty"`
 	// AttachPodUID is the UID of the pod used to attach the volume to the node.
+	AttachPodUID types.UID `json:"attachPodUID,omitempty"`
+}
+
+type HotplugDeviceStatus struct {
+	// AttachPodName is the name of the pod used to attach the device to the node.
+	AttachPodName string `json:"attachPodName,omitempty"`
+	// AttachPodUID is the UID of the pod used to attach the device to the node.
 	AttachPodUID types.UID `json:"attachPodUID,omitempty"`
 }
 
@@ -2219,6 +2258,10 @@ type VirtualMachineStatus struct {
 	// hotplug on an active running VMI.
 	// +listType=atomic
 	VolumeRequests []VirtualMachineVolumeRequest `json:"volumeRequests,omitempty" optional:"true"`
+	// ResourceClaimRequests indicates a list of resource claims add or remove from the VMI template and
+	// hotplug on an active running VMI.
+	// +listType=atomic
+	ResourceClaimRequests []VirtualMachineResourceClaimRequest `json:"resourceClaimRequests,omitempty" optional:"true"`
 
 	// VolumeSnapshotStatuses indicates a list of statuses whether snapshotting is
 	// supported by each volume.
@@ -2383,6 +2426,14 @@ type VolumeSnapshotStatus struct {
 	Reason string `json:"reason,omitempty" optional:"true"`
 }
 
+type VirtualMachineResourceClaimRequest struct {
+	// AddResourceClaimOptions when set indicates a resource claim should be added.
+	// The details within this field specify how to add the resource claim
+	AddResourceClaimOptions *AddResourceClaimOptions `json:"addResourceClaimOptions,omitempty" optional:"true"`
+	// RemoveResourceClaimOptions when set indicates a resource claim should be removed.
+	// The details within this field specify how to remove the resource claim
+	RemoveResourceClaimOptions *RemoveResourceClaimOptions `json:"removeResourceClaimOptions,omitempty" optional:"true"`
+}
 type VirtualMachineVolumeRequest struct {
 	// AddVolumeOptions when set indicates a volume should be added. The details
 	// within this field specify how to add the volume
@@ -3106,6 +3157,37 @@ type AddVolumeOptions struct {
 	Disk *Disk `json:"disk"`
 	// VolumeSource represents the source of the volume to map to the disk.
 	VolumeSource *HotplugVolumeSource `json:"volumeSource"`
+	// When present, indicates that modifications should not be
+	// persisted. An invalid or unrecognized dryRun directive will
+	// result in an error response and no further processing of the
+	// request. Valid values are:
+	// - All: all dry run stages will be processed
+	// +optional
+	// +listType=atomic
+	DryRun []string `json:"dryRun,omitempty"`
+}
+
+type AddResourceClaimOptions struct {
+	// Name represents the name that will be used to map the
+	// device to the corresponding resource claim. This overrides any name
+	// that is set in the Device struct itself.
+	Name string `json:"name"`
+	// HostDevice represents the host device that will be plugged into the running VMI
+	HostDevice *HostDevice `json:"hostDevice"`
+	// ResourceClaim represents the resource claim to map to the host device
+	ResourceClaim *VirtualMachineInstanceResourceClaim `json:"resourceClaim"`
+	// When present, indicates that modifications should not be
+	// persisted. An invalid or unrecognized dryRun directive will
+	// result in an error response and no further processing of the
+	// request. Valid values are:
+	// - All: all dry run stages will be processed
+	// +optional
+	// +listType=atomic
+	DryRun []string `json:"dryRun,omitempty"`
+}
+
+type RemoveResourceClaimOptions struct {
+	Name string `json:"name"`
 	// When present, indicates that modifications should not be
 	// persisted. An invalid or unrecognized dryRun directive will
 	// result in an error response and no further processing of the

@@ -330,7 +330,7 @@ var _ = Describe("Resource pod spec renderer", func() {
 			}
 			hostDevices := []v1.HostDevice{devicePluginHostDev, draHostDev}
 
-			rr = NewResourceRenderer(nil, nil, WithHostDevicesDevicePlugins(hostDevices), WithHostDevicesDRA(hostDevices))
+			rr = NewResourceRenderer(nil, nil, WithHostDevicesDevicePlugins(hostDevices), WithHostDevicesDRA(hostDevices, nil))
 
 			Expect(rr.Limits()).To(HaveKeyWithValue(kubev1.ResourceName("pci-device"), *resource.NewQuantity(1, resource.DecimalSI)))
 			Expect(rr.Requests()).To(HaveKeyWithValue(kubev1.ResourceName("pci-device"), *resource.NewQuantity(1, resource.DecimalSI)))
@@ -384,7 +384,7 @@ var _ = Describe("Resource pod spec renderer", func() {
 				},
 			}
 
-			rr = NewResourceRenderer(nil, nil, WithHostDevicesDRA(hostDevices))
+			rr = NewResourceRenderer(nil, nil, WithHostDevicesDRA(hostDevices, nil))
 
 			claims := rr.Claims()
 			Expect(claims).To(Equal([]kubev1.ResourceClaim{
@@ -441,7 +441,7 @@ var _ = Describe("Resource pod spec renderer", func() {
 				},
 			}
 
-			rr = NewResourceRenderer(nil, nil, WithGPUsDRA(gpus), WithHostDevicesDRA(hostDevices))
+			rr = NewResourceRenderer(nil, nil, WithGPUsDRA(gpus), WithHostDevicesDRA(hostDevices, nil))
 
 			claims := rr.Claims()
 			Expect(claims).To(Equal([]kubev1.ResourceClaim{
@@ -538,7 +538,7 @@ var _ = Describe("Resource pod spec renderer", func() {
 
 			rr = NewResourceRenderer(limits, requests,
 				WithGPUsDRA(gpus),
-				WithHostDevicesDRA(hostDevices),
+				WithHostDevicesDRA(hostDevices, nil),
 				WithNetworksDRA(networks),
 			)
 

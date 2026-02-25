@@ -29,7 +29,7 @@ func (VirtualMachineInstanceSpec) SwaggerDoc() map[string]string {
 		"topologySpreadConstraints":     "TopologySpreadConstraints describes how a group of VMIs will be spread across a given topology\ndomains. K8s scheduler will schedule VMI pods in a way which abides by the constraints.\n+optional\n+patchMergeKey=topologyKey\n+patchStrategy=merge\n+listType=map\n+listMapKey=topologyKey\n+listMapKey=whenUnsatisfiable",
 		"evictionStrategy":              "EvictionStrategy describes the strategy to follow when a node drain occurs.\nThe possible options are:\n- \"None\": No action will be taken, according to the specified 'RunStrategy' the VirtualMachine will be restarted or shutdown.\n- \"LiveMigrate\": the VirtualMachineInstance will be migrated instead of being shutdown.\n- \"LiveMigrateIfPossible\": the same as \"LiveMigrate\" but only if the VirtualMachine is Live-Migratable, otherwise it will behave as \"None\".\n- \"External\": the VirtualMachineInstance will be protected and `vmi.Status.EvacuationNodeName` will be set on eviction. This is mainly useful for cluster-api-provider-kubevirt (capk) which needs a way for VMI's to be blocked from eviction, yet signal capk that eviction has been called on the VMI so the capk controller can handle tearing the VMI down. Details can be found in the commit description https://github.com/kubevirt/kubevirt/commit/c1d77face705c8b126696bac9a3ee3825f27f1fa.\n+optional",
 		"startStrategy":                 "StartStrategy can be set to \"Paused\" if Virtual Machine should be started in paused state.\n\n+optional",
-		"terminationGracePeriodSeconds": "Grace period observed after signalling a VirtualMachineInstance to stop after which the VirtualMachineInstance is force terminated.",
+		"terminationGracePeriodSeconds": "Grace period observed after signaling a VirtualMachineInstance to stop after which the VirtualMachineInstance is force terminated.",
 		"volumes":                       "List of volumes that can be mounted by disks belonging to the vmi.\n+kubebuilder:validation:MaxItems:=256",
 		"livenessProbe":                 "Periodic probe of VirtualMachineInstance liveness.\nVirtualmachineInstances will be stopped if the probe fails.\nCannot be updated.\nMore info: https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle#container-probes\n+optional",
 		"readinessProbe":                "Periodic probe of VirtualMachineInstance service readiness.\nVirtualmachineInstances will be removed from service endpoints if the probe fails.\nCannot be updated.\nMore info: https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle#container-probes\n+optional",
@@ -50,6 +50,7 @@ func (VirtualMachineInstanceResourceClaim) SwaggerDoc() map[string]string {
 		"name":                      "Name uniquely identifies this resource claim inside the VMI.\nThis field is required and must be a DNS_LABEL.",
 		"resourceClaimName":         "ResourceClaimName is the name of a ResourceClaim object in the same\nnamespace as this VMI.\n\nExactly one of ResourceClaimName and ResourceClaimTemplateName must\nbe set.",
 		"resourceClaimTemplateName": "ResourceClaimTemplateName is the name of a ResourceClaimTemplate\nobject in the same namespace as this VMI.\n\nThe template name is passed through to the generated virt-launcher Pod\nspec. From the Pod spec, the template is used to create a new\nResourceClaim, which is bound to the virt-launcher Pod. When the\nvirt-launcher Pod is deleted, the ResourceClaim is also deleted. The\ngenerated ResourceClaim name is unique and is recorded in\npod.status.resourceClaimStatuses.\n\nExactly one of ResourceClaimName and ResourceClaimTemplateName must\nbe set.",
+		"hotpluggable":              "Hotpluggable marks a claim that is attached to a running VMI through an attachment pod\ninstead of the virt-launcher pod.\n+optional",
 	}
 }
 
@@ -214,6 +215,13 @@ func (HotplugVolumeStatus) SwaggerDoc() map[string]string {
 		"":              "HotplugVolumeStatus represents the hotplug status of the volume",
 		"attachPodName": "AttachPodName is the name of the pod used to attach the volume to the node.",
 		"attachPodUID":  "AttachPodUID is the UID of the pod used to attach the volume to the node.",
+	}
+}
+
+func (HotplugDeviceStatus) SwaggerDoc() map[string]string {
+	return map[string]string{
+		"attachPodName": "AttachPodName is the name of the pod used to attach the device to the node.",
+		"attachPodUID":  "AttachPodUID is the UID of the pod used to attach the device to the node.",
 	}
 }
 
@@ -510,6 +518,7 @@ func (VirtualMachineStatus) SwaggerDoc() map[string]string {
 		"conditions":             "Hold the state information of the VirtualMachine and its VirtualMachineInstance",
 		"stateChangeRequests":    "StateChangeRequests indicates a list of actions that should be taken on a VMI\ne.g. stop a specific VMI then start a new one.",
 		"volumeRequests":         "VolumeRequests indicates a list of volumes add or remove from the VMI template and\nhotplug on an active running VMI.\n+listType=atomic",
+		"resourceClaimRequests":  "ResourceClaimRequests indicates a list of resource claims add or remove from the VMI template and\nhotplug on an active running VMI.\n+listType=atomic",
 		"volumeSnapshotStatuses": "VolumeSnapshotStatuses indicates a list of statuses whether snapshotting is\nsupported by each volume.",
 		"startFailure":           "StartFailure tracks consecutive VMI startup failures for the purposes of\ncrash loop backoffs\n+nullable\n+optional",
 		"memoryDumpRequest":      "MemoryDumpRequest tracks memory dump request phase and info of getting a memory\ndump to the given pvc\n+nullable\n+optional",
@@ -579,6 +588,13 @@ func (VolumeSnapshotStatus) SwaggerDoc() map[string]string {
 		"name":    "Volume name",
 		"enabled": "True if the volume supports snapshotting",
 		"reason":  "Empty if snapshotting is enabled, contains reason otherwise",
+	}
+}
+
+func (VirtualMachineResourceClaimRequest) SwaggerDoc() map[string]string {
+	return map[string]string{
+		"addResourceClaimOptions":    "AddResourceClaimOptions when set indicates a resource claim should be added.\nThe details within this field specify how to add the resource claim",
+		"removeResourceClaimOptions": "RemoveResourceClaimOptions when set indicates a resource claim should be removed.\nThe details within this field specify how to remove the resource claim",
 	}
 }
 
@@ -877,6 +893,21 @@ func (AddVolumeOptions) SwaggerDoc() map[string]string {
 	}
 }
 
+func (AddResourceClaimOptions) SwaggerDoc() map[string]string {
+	return map[string]string{
+		"name":          "Name represents the name that will be used to map the\ndevice to the corresponding resource claim. This overrides any name\nthat is set in the Device struct itself.",
+		"hostDevice":    "HostDevice represents the host device that will be plugged into the running VMI",
+		"resourceClaim": "ResourceClaim represents the resource claim to map to the host device",
+		"dryRun":        "When present, indicates that modifications should not be\npersisted. An invalid or unrecognized dryRun directive will\nresult in an error response and no further processing of the\nrequest. Valid values are:\n- All: all dry run stages will be processed\n+optional\n+listType=atomic",
+	}
+}
+
+func (RemoveResourceClaimOptions) SwaggerDoc() map[string]string {
+	return map[string]string{
+		"dryRun": "When present, indicates that modifications should not be\npersisted. An invalid or unrecognized dryRun directive will\nresult in an error response and no further processing of the\nrequest. Valid values are:\n- All: all dry run stages will be processed\n+optional\n+listType=atomic",
+	}
+}
+
 func (ScreenshotOptions) SwaggerDoc() map[string]string {
 	return map[string]string{}
 }
@@ -1088,9 +1119,9 @@ func (VMIMConfigurationOptions) SwaggerDoc() map[string]string {
 		"parallelMigrationsPerCluster":      "ParallelMigrationsPerCluster is the total number of concurrent live migrations\nallowed cluster-wide. Defaults to 5",
 		"allowAutoConverge":                 "AllowAutoConverge allows the platform to compromise performance/availability of VMIs to\nguarantee successful VMI live migrations. Defaults to false",
 		"bandwidthPerMigration":             "BandwidthPerMigration limits the amount of network bandwidth live migrations are allowed to use.\nThe value is in quantity per second. Defaults to 0 (no limit)",
-		"completionTimeoutPerGiB":           "CompletionTimeoutPerGiB is the maximum number of seconds per GiB a migration is allowed to take.\nIf the timeout is reached, the migration will be either paused, switched\nto post-copy or cancelled depending on other settings. Defaults to 150",
+		"completionTimeoutPerGiB":           "CompletionTimeoutPerGiB is the maximum number of seconds per GiB a migration is allowed to take.\nIf the timeout is reached, the migration will be either paused, switched\nto post-copy or canceled depending on other settings. Defaults to 150",
 		"maxDowntimeMs":                     "MaxDowntimeMs specifies the maximum tolerable downtime (in milliseconds) during switchover.\nDefaults to 900\n+kubebuilder:validation:Minimum=1\n+kubebuilder:validation:Maximum=2000000",
-		"progressTimeout":                   "ProgressTimeout is the maximum number of seconds a live migration is allowed to make no progress.\nHitting this timeout means a migration transferred 0 data for that many seconds. The migration is\nthen considered stuck and therefore cancelled. Defaults to 150",
+		"progressTimeout":                   "ProgressTimeout is the maximum number of seconds a live migration is allowed to make no progress.\nHitting this timeout means a migration transferred 0 data for that many seconds. The migration is\nthen considered stuck and therefore canceled. Defaults to 150",
 		"utilityVolumesTimeout":             "UtilityVolumesTimeout is the maximum number of seconds a migration can wait in Pending state\nfor utility volumes to be detached. If utility volumes are still present after this timeout,\nthe migration will be marked as Failed. Defaults to 150",
 		"unsafeMigrationOverride":           "UnsafeMigrationOverride allows live migrations to occur even if the compatibility check\nindicates the migration will be unsafe to the guest. Defaults to false",
 		"allowPostCopy":                     "AllowPostCopy enables post-copy live migrations. Such migrations allow even the busiest VMIs\nto successfully live-migrate. However, events like a network failure can cause a VMI crash.\nIf set to true, migrations will still start in pre-copy, but switch to post-copy when\nCompletionTimeoutPerGiB triggers. Defaults to false",
@@ -1110,9 +1141,9 @@ func (MigrationConfiguration) SwaggerDoc() map[string]string {
 		"parallelMigrationsPerCluster":      "ParallelMigrationsPerCluster is the total number of concurrent live migrations\nallowed cluster-wide. Defaults to 5",
 		"allowAutoConverge":                 "AllowAutoConverge allows the platform to compromise performance/availability of VMIs to\nguarantee successful VMI live migrations. Defaults to false",
 		"bandwidthPerMigration":             "BandwidthPerMigration limits the amount of network bandwidth live migrations are allowed to use.\nThe value is in quantity per second. Defaults to 0 (no limit)",
-		"completionTimeoutPerGiB":           "CompletionTimeoutPerGiB is the maximum number of seconds per GiB a migration is allowed to take.\nIf the timeout is reached, the migration will be either paused, switched\nto post-copy or cancelled depending on other settings. Defaults to 150",
+		"completionTimeoutPerGiB":           "CompletionTimeoutPerGiB is the maximum number of seconds per GiB a migration is allowed to take.\nIf the timeout is reached, the migration will be either paused, switched\nto post-copy or canceled depending on other settings. Defaults to 150",
 		"maxDowntimeMs":                     "MaxDowntimeMs specifies the maximum tolerable downtime (in milliseconds) during switchover.\nDefaults to 900\n+kubebuilder:validation:Minimum=1\n+kubebuilder:validation:Maximum=2000000",
-		"progressTimeout":                   "ProgressTimeout is the maximum number of seconds a live migration is allowed to make no progress.\nHitting this timeout means a migration transferred 0 data for that many seconds. The migration is\nthen considered stuck and therefore cancelled. Defaults to 150",
+		"progressTimeout":                   "ProgressTimeout is the maximum number of seconds a live migration is allowed to make no progress.\nHitting this timeout means a migration transferred 0 data for that many seconds. The migration is\nthen considered stuck and therefore canceled. Defaults to 150",
 		"utilityVolumesTimeout":             "UtilityVolumesTimeout is the maximum number of seconds a migration can wait in Pending state\nfor utility volumes to be detached. If utility volumes are still present after this timeout,\nthe migration will be marked as Failed. Defaults to 150",
 		"unsafeMigrationOverride":           "UnsafeMigrationOverride allows live migrations to occur even if the compatibility check\nindicates the migration will be unsafe to the guest. Defaults to false",
 		"allowPostCopy":                     "AllowPostCopy enables post-copy live migrations. Such migrations allow even the busiest VMIs\nto successfully live-migrate. However, events like a network failure can cause a VMI crash.\nIf set to true, migrations will still start in pre-copy, but switch to post-copy when\nCompletionTimeoutPerGiB triggers. Defaults to false",

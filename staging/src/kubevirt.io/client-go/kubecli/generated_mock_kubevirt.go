@@ -1449,6 +1449,20 @@ func (m *MockVirtualMachineInstanceInterface) EXPECT() *MockVirtualMachineInstan
 	return m.recorder
 }
 
+// AddResourceClaim mocks base method.
+func (m *MockVirtualMachineInstanceInterface) AddResourceClaim(ctx context.Context, name string, addResourceClaimOptions *v122.AddResourceClaimOptions) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "AddResourceClaim", ctx, name, addResourceClaimOptions)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// AddResourceClaim indicates an expected call of AddResourceClaim.
+func (mr *MockVirtualMachineInstanceInterfaceMockRecorder) AddResourceClaim(ctx, name, addResourceClaimOptions any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AddResourceClaim", reflect.TypeOf((*MockVirtualMachineInstanceInterface)(nil).AddResourceClaim), ctx, name, addResourceClaimOptions)
+}
+
 // AddVolume mocks base method.
 func (m *MockVirtualMachineInstanceInterface) AddVolume(ctx context.Context, name string, addVolumeOptions *v122.AddVolumeOptions) error {
 	m.ctrl.T.Helper()
@@ -1684,6 +1698,20 @@ func (m *MockVirtualMachineInstanceInterface) RedefineCheckpoint(ctx context.Con
 func (mr *MockVirtualMachineInstanceInterfaceMockRecorder) RedefineCheckpoint(ctx, name, checkpoint any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RedefineCheckpoint", reflect.TypeOf((*MockVirtualMachineInstanceInterface)(nil).RedefineCheckpoint), ctx, name, checkpoint)
+}
+
+// RemoveResourceClaim mocks base method.
+func (m *MockVirtualMachineInstanceInterface) RemoveResourceClaim(ctx context.Context, name string, removeResourceClaimOptions *v122.RemoveResourceClaimOptions) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "RemoveResourceClaim", ctx, name, removeResourceClaimOptions)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// RemoveResourceClaim indicates an expected call of RemoveResourceClaim.
+func (mr *MockVirtualMachineInstanceInterfaceMockRecorder) RemoveResourceClaim(ctx, name, removeResourceClaimOptions any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RemoveResourceClaim", reflect.TypeOf((*MockVirtualMachineInstanceInterface)(nil).RemoveResourceClaim), ctx, name, removeResourceClaimOptions)
 }
 
 // RemoveVolume mocks base method.
@@ -2312,6 +2340,20 @@ func (m *MockVirtualMachineInterface) EXPECT() *MockVirtualMachineInterfaceMockR
 	return m.recorder
 }
 
+// AddResourceClaim mocks base method.
+func (m *MockVirtualMachineInterface) AddResourceClaim(ctx context.Context, name string, addResourceClaimOptions *v122.AddResourceClaimOptions) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "AddResourceClaim", ctx, name, addResourceClaimOptions)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// AddResourceClaim indicates an expected call of AddResourceClaim.
+func (mr *MockVirtualMachineInterfaceMockRecorder) AddResourceClaim(ctx, name, addResourceClaimOptions any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AddResourceClaim", reflect.TypeOf((*MockVirtualMachineInterface)(nil).AddResourceClaim), ctx, name, addResourceClaimOptions)
+}
+
 // AddVolume mocks base method.
 func (m *MockVirtualMachineInterface) AddVolume(ctx context.Context, name string, addVolumeOptions *v122.AddVolumeOptions) error {
 	m.ctrl.T.Helper()
@@ -2533,6 +2575,20 @@ func (m *MockVirtualMachineInterface) RemoveMemoryDump(ctx context.Context, name
 func (mr *MockVirtualMachineInterfaceMockRecorder) RemoveMemoryDump(ctx, name any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RemoveMemoryDump", reflect.TypeOf((*MockVirtualMachineInterface)(nil).RemoveMemoryDump), ctx, name)
+}
+
+// RemoveResourceClaim mocks base method.
+func (m *MockVirtualMachineInterface) RemoveResourceClaim(ctx context.Context, name string, removeResourceClaimOptions *v122.RemoveResourceClaimOptions) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "RemoveResourceClaim", ctx, name, removeResourceClaimOptions)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// RemoveResourceClaim indicates an expected call of RemoveResourceClaim.
+func (mr *MockVirtualMachineInterfaceMockRecorder) RemoveResourceClaim(ctx, name, removeResourceClaimOptions any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RemoveResourceClaim", reflect.TypeOf((*MockVirtualMachineInterface)(nil).RemoveResourceClaim), ctx, name, removeResourceClaimOptions)
 }
 
 // RemoveVolume mocks base method.

@@ -112,17 +112,19 @@ func ControllersWithVirtioSerialModel(model string) controllersOption {
 }
 
 func newUSBController(usbNeeded bool) api.Controller {
-	usbControllerModel := "none"
-
-	if usbNeeded {
-		usbControllerModel = "qemu-xhci"
-	}
-
-	return api.Controller{
+	controller := api.Controller{
 		Type:  "usb",
 		Index: "0",
-		Model: usbControllerModel,
+		Model: "none",
 	}
+
+	if usbNeeded {
+		controller.Model = "qemu-xhci"
+		// Reserve ports for USB host devices hotplugged through DRA.
+		controller.Ports = pointer.P(uint(15))
+	}
+
+	return controller
 }
 
 func newSCSIController(controllerModel string, controllerDriver *api.ControllerDriver) api.Controller {

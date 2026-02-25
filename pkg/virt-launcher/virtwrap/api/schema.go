@@ -776,6 +776,7 @@ type Controller struct {
 	Type      string            `xml:"type,attr"`
 	Index     string            `xml:"index,attr"`
 	Model     string            `xml:"model,attr,omitempty"`
+	Ports     *uint             `xml:"ports,attr,omitempty"`
 	Driver    *ControllerDriver `xml:"driver,omitempty"`
 	Alias     *Alias            `xml:"alias,omitempty"`
 	Address   *Address          `xml:"address,omitempty"`
@@ -1366,6 +1367,7 @@ type Address struct {
 	CSSID      string `xml:"cssid,attr,omitempty"`
 	SSID       string `xml:"ssid,attr,omitempty"`
 	DevNo      string `xml:"devno,attr,omitempty"`
+	Port       string `xml:"port,attr,omitempty"`
 }
 
 //END Video -------------------

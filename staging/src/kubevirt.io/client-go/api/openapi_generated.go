@@ -350,6 +350,7 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		"kubevirt.io/api/core/v1.ACPI":                                                                    schema_kubevirtio_api_core_v1_ACPI(ref),
 		"kubevirt.io/api/core/v1.AccessCredential":                                                        schema_kubevirtio_api_core_v1_AccessCredential(ref),
 		"kubevirt.io/api/core/v1.AccessCredentialSecretSource":                                            schema_kubevirtio_api_core_v1_AccessCredentialSecretSource(ref),
+		"kubevirt.io/api/core/v1.AddResourceClaimOptions":                                                 schema_kubevirtio_api_core_v1_AddResourceClaimOptions(ref),
 		"kubevirt.io/api/core/v1.AddVolumeOptions":                                                        schema_kubevirtio_api_core_v1_AddVolumeOptions(ref),
 		"kubevirt.io/api/core/v1.ArchConfiguration":                                                       schema_kubevirtio_api_core_v1_ArchConfiguration(ref),
 		"kubevirt.io/api/core/v1.ArchSpecificConfiguration":                                               schema_kubevirtio_api_core_v1_ArchSpecificConfiguration(ref),
@@ -439,6 +440,7 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		"kubevirt.io/api/core/v1.Handler":                                                                 schema_kubevirtio_api_core_v1_Handler(ref),
 		"kubevirt.io/api/core/v1.HostDevice":                                                              schema_kubevirtio_api_core_v1_HostDevice(ref),
 		"kubevirt.io/api/core/v1.HostDisk":                                                                schema_kubevirtio_api_core_v1_HostDisk(ref),
+		"kubevirt.io/api/core/v1.HotplugDeviceStatus":                                                     schema_kubevirtio_api_core_v1_HotplugDeviceStatus(ref),
 		"kubevirt.io/api/core/v1.HotplugVolumeSource":                                                     schema_kubevirtio_api_core_v1_HotplugVolumeSource(ref),
 		"kubevirt.io/api/core/v1.HotplugVolumeStatus":                                                     schema_kubevirtio_api_core_v1_HotplugVolumeStatus(ref),
 		"kubevirt.io/api/core/v1.Hugepages":                                                               schema_kubevirtio_api_core_v1_Hugepages(ref),
@@ -519,6 +521,7 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		"kubevirt.io/api/core/v1.RateLimiter":                                                             schema_kubevirtio_api_core_v1_RateLimiter(ref),
 		"kubevirt.io/api/core/v1.Realtime":                                                                schema_kubevirtio_api_core_v1_Realtime(ref),
 		"kubevirt.io/api/core/v1.ReloadableComponentConfiguration":                                        schema_kubevirtio_api_core_v1_ReloadableComponentConfiguration(ref),
+		"kubevirt.io/api/core/v1.RemoveResourceClaimOptions":                                              schema_kubevirtio_api_core_v1_RemoveResourceClaimOptions(ref),
 		"kubevirt.io/api/core/v1.RemoveVolumeOptions":                                                     schema_kubevirtio_api_core_v1_RemoveVolumeOptions(ref),
 		"kubevirt.io/api/core/v1.ReservedOverhead":                                                        schema_kubevirtio_api_core_v1_ReservedOverhead(ref),
 		"kubevirt.io/api/core/v1.ResourceRequirements":                                                    schema_kubevirtio_api_core_v1_ResourceRequirements(ref),
@@ -617,6 +620,7 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		"kubevirt.io/api/core/v1.VirtualMachineList":                                                      schema_kubevirtio_api_core_v1_VirtualMachineList(ref),
 		"kubevirt.io/api/core/v1.VirtualMachineMemoryDumpRequest":                                         schema_kubevirtio_api_core_v1_VirtualMachineMemoryDumpRequest(ref),
 		"kubevirt.io/api/core/v1.VirtualMachineOptions":                                                   schema_kubevirtio_api_core_v1_VirtualMachineOptions(ref),
+		"kubevirt.io/api/core/v1.VirtualMachineResourceClaimRequest":                                      schema_kubevirtio_api_core_v1_VirtualMachineResourceClaimRequest(ref),
 		"kubevirt.io/api/core/v1.VirtualMachineSpec":                                                      schema_kubevirtio_api_core_v1_VirtualMachineSpec(ref),
 		"kubevirt.io/api/core/v1.VirtualMachineStartFailure":                                              schema_kubevirtio_api_core_v1_VirtualMachineStartFailure(ref),
 		"kubevirt.io/api/core/v1.VirtualMachineStateChangeRequest":                                        schema_kubevirtio_api_core_v1_VirtualMachineStateChangeRequest(ref),
@@ -17554,7 +17558,7 @@ func schema_kubevirtio_api_backup_v1alpha1_VirtualMachineBackupSpec(ref common.R
 					},
 					"mode": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Mode specifies the way the backup output will be recieved",
+							Description: "Mode specifies the way the backup output will be received",
 							Type:        []string{"string"},
 							Format:      "",
 						},
@@ -18665,6 +18669,61 @@ func schema_kubevirtio_api_core_v1_AccessCredentialSecretSource(ref common.Refer
 	}
 }
 
+func schema_kubevirtio_api_core_v1_AddResourceClaimOptions(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Type: []string{"object"},
+				Properties: map[string]spec.Schema{
+					"name": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Name represents the name that will be used to map the device to the corresponding resource claim. This overrides any name that is set in the Device struct itself.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"hostDevice": {
+						SchemaProps: spec.SchemaProps{
+							Description: "HostDevice represents the host device that will be plugged into the running VMI",
+							Ref:         ref("kubevirt.io/api/core/v1.HostDevice"),
+						},
+					},
+					"resourceClaim": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ResourceClaim represents the resource claim to map to the host device",
+							Ref:         ref("kubevirt.io/api/core/v1.VirtualMachineInstanceResourceClaim"),
+						},
+					},
+					"dryRun": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type": "atomic",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "When present, indicates that modifications should not be persisted. An invalid or unrecognized dryRun directive will result in an error response and no further processing of the request. Valid values are: - All: all dry run stages will be processed",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: "",
+										Type:    []string{"string"},
+										Format:  "",
+									},
+								},
+							},
+						},
+					},
+				},
+				Required: []string{"name", "hostDevice", "resourceClaim"},
+			},
+		},
+		Dependencies: []string{
+			"kubevirt.io/api/core/v1.HostDevice", "kubevirt.io/api/core/v1.VirtualMachineInstanceResourceClaim"},
+	}
+}
+
 func schema_kubevirtio_api_core_v1_AddVolumeOptions(ref common.ReferenceCallback) common.OpenAPIDefinition {
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
@@ -18814,7 +18873,7 @@ func schema_kubevirtio_api_core_v1_AuthorizedKeysFile(ref common.ReferenceCallba
 				Properties: map[string]spec.Schema{
 					"filePath": {
 						SchemaProps: spec.SchemaProps{
-							Description: "FilePath represents the place on the guest that the authorized_keys file should be writen to. This is expected to be a full path including both the base directory and file name.",
+							Description: "FilePath represents the place on the guest that the authorized_keys file should be written to. This is expected to be a full path including both the base directory and file name.",
 							Default:     "",
 							Type:        []string{"string"},
 							Format:      "",
@@ -20344,10 +20403,39 @@ func schema_kubevirtio_api_core_v1_DeviceStatusInfo(ref common.ReferenceCallback
 							Format:      "",
 						},
 					},
+					"address": {
+						SchemaProps: spec.SchemaProps{
+							Type:   []string{"string"},
+							Format: "",
+						},
+					},
+					"phase": {
+						SchemaProps: spec.SchemaProps{
+							Type:   []string{"string"},
+							Format: "",
+						},
+					},
+					"reason": {
+						SchemaProps: spec.SchemaProps{
+							Type:   []string{"string"},
+							Format: "",
+						},
+					},
+					"message": {
+						SchemaProps: spec.SchemaProps{
+							Type:   []string{"string"},
+							Format: "",
+						},
+					},
 					"deviceResourceClaimStatus": {
 						SchemaProps: spec.SchemaProps{
 							Description: "DeviceResourceClaimStatus reflects the DRA related information for the device",
 							Ref:         ref("kubevirt.io/api/core/v1.DeviceResourceClaimStatus"),
+						},
+					},
+					"hotplug": {
+						SchemaProps: spec.SchemaProps{
+							Ref: ref("kubevirt.io/api/core/v1.HotplugDeviceStatus"),
 						},
 					},
 				},
@@ -20355,7 +20443,7 @@ func schema_kubevirtio_api_core_v1_DeviceStatusInfo(ref common.ReferenceCallback
 			},
 		},
 		Dependencies: []string{
-			"kubevirt.io/api/core/v1.DeviceResourceClaimStatus"},
+			"kubevirt.io/api/core/v1.DeviceResourceClaimStatus", "kubevirt.io/api/core/v1.HotplugDeviceStatus"},
 	}
 }
 
@@ -21956,6 +22044,32 @@ func schema_kubevirtio_api_core_v1_HostDisk(ref common.ReferenceCallback) common
 	}
 }
 
+func schema_kubevirtio_api_core_v1_HotplugDeviceStatus(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Type: []string{"object"},
+				Properties: map[string]spec.Schema{
+					"attachPodName": {
+						SchemaProps: spec.SchemaProps{
+							Description: "AttachPodName is the name of the pod used to attach the device to the node.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"attachPodUID": {
+						SchemaProps: spec.SchemaProps{
+							Description: "AttachPodUID is the UID of the pod used to attach the device to the node.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
 func schema_kubevirtio_api_core_v1_HotplugVolumeSource(ref common.ReferenceCallback) common.OpenAPIDefinition {
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
@@ -22664,7 +22778,7 @@ func schema_kubevirtio_api_core_v1_KernelBoot(ref common.ReferenceCallback) comm
 					},
 					"container": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Container defines the container that containes kernel artifacts",
+							Description: "Container defines the container that contains kernel artifacts",
 							Ref:         ref("kubevirt.io/api/core/v1.KernelBootContainer"),
 						},
 					},
@@ -24165,7 +24279,7 @@ func schema_kubevirtio_api_core_v1_MigrationConfiguration(ref common.ReferenceCa
 					},
 					"completionTimeoutPerGiB": {
 						SchemaProps: spec.SchemaProps{
-							Description: "CompletionTimeoutPerGiB is the maximum number of seconds per GiB a migration is allowed to take. If the timeout is reached, the migration will be either paused, switched to post-copy or cancelled depending on other settings. Defaults to 150",
+							Description: "CompletionTimeoutPerGiB is the maximum number of seconds per GiB a migration is allowed to take. If the timeout is reached, the migration will be either paused, switched to post-copy or canceled depending on other settings. Defaults to 150",
 							Type:        []string{"integer"},
 							Format:      "int64",
 						},
@@ -24179,7 +24293,7 @@ func schema_kubevirtio_api_core_v1_MigrationConfiguration(ref common.ReferenceCa
 					},
 					"progressTimeout": {
 						SchemaProps: spec.SchemaProps{
-							Description: "ProgressTimeout is the maximum number of seconds a live migration is allowed to make no progress. Hitting this timeout means a migration transferred 0 data for that many seconds. The migration is then considered stuck and therefore cancelled. Defaults to 150",
+							Description: "ProgressTimeout is the maximum number of seconds a live migration is allowed to make no progress. Hitting this timeout means a migration transferred 0 data for that many seconds. The migration is then considered stuck and therefore canceled. Defaults to 150",
 							Type:        []string{"integer"},
 							Format:      "int64",
 						},
@@ -25427,6 +25541,46 @@ func schema_kubevirtio_api_core_v1_ReloadableComponentConfiguration(ref common.R
 	}
 }
 
+func schema_kubevirtio_api_core_v1_RemoveResourceClaimOptions(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Type: []string{"object"},
+				Properties: map[string]spec.Schema{
+					"name": {
+						SchemaProps: spec.SchemaProps{
+							Default: "",
+							Type:    []string{"string"},
+							Format:  "",
+						},
+					},
+					"dryRun": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type": "atomic",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "When present, indicates that modifications should not be persisted. An invalid or unrecognized dryRun directive will result in an error response and no further processing of the request. Valid values are: - All: all dry run stages will be processed",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: "",
+										Type:    []string{"string"},
+										Format:  "",
+									},
+								},
+							},
+						},
+					},
+				},
+				Required: []string{"name"},
+			},
+		},
+	}
+}
+
 func schema_kubevirtio_api_core_v1_RemoveVolumeOptions(ref common.ReferenceCallback) common.OpenAPIDefinition {
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
@@ -26583,7 +26737,7 @@ func schema_kubevirtio_api_core_v1_TPMDevice(ref common.ReferenceCallback) commo
 					},
 					"persistent": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Persistent indicates the state of the TPM device should be kept accross reboots Defaults to false",
+							Description: "Persistent indicates the state of the TPM device should be kept across reboots Defaults to false",
 							Type:        []string{"boolean"},
 							Format:      "",
 						},
@@ -27039,7 +27193,7 @@ func schema_kubevirtio_api_core_v1_VMIMConfigurationOptions(ref common.Reference
 					},
 					"completionTimeoutPerGiB": {
 						SchemaProps: spec.SchemaProps{
-							Description: "CompletionTimeoutPerGiB is the maximum number of seconds per GiB a migration is allowed to take. If the timeout is reached, the migration will be either paused, switched to post-copy or cancelled depending on other settings. Defaults to 150",
+							Description: "CompletionTimeoutPerGiB is the maximum number of seconds per GiB a migration is allowed to take. If the timeout is reached, the migration will be either paused, switched to post-copy or canceled depending on other settings. Defaults to 150",
 							Type:        []string{"integer"},
 							Format:      "int64",
 						},
@@ -27053,7 +27207,7 @@ func schema_kubevirtio_api_core_v1_VMIMConfigurationOptions(ref common.Reference
 					},
 					"progressTimeout": {
 						SchemaProps: spec.SchemaProps{
-							Description: "ProgressTimeout is the maximum number of seconds a live migration is allowed to make no progress. Hitting this timeout means a migration transferred 0 data for that many seconds. The migration is then considered stuck and therefore cancelled. Defaults to 150",
+							Description: "ProgressTimeout is the maximum number of seconds a live migration is allowed to make no progress. Hitting this timeout means a migration transferred 0 data for that many seconds. The migration is then considered stuck and therefore canceled. Defaults to 150",
 							Type:        []string{"integer"},
 							Format:      "int64",
 						},
@@ -29384,6 +29538,13 @@ func schema_kubevirtio_api_core_v1_VirtualMachineInstanceResourceClaim(ref commo
 							Format:      "",
 						},
 					},
+					"hotpluggable": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Hotpluggable marks a claim that is attached to a running VMI through an attachment pod instead of the virt-launcher pod.",
+							Type:        []string{"boolean"},
+							Format:      "",
+						},
+					},
 				},
 				Required: []string{"name"},
 			},
@@ -29503,7 +29664,7 @@ func schema_kubevirtio_api_core_v1_VirtualMachineInstanceSpec(ref common.Referen
 					},
 					"terminationGracePeriodSeconds": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Grace period observed after signalling a VirtualMachineInstance to stop after which the VirtualMachineInstance is force terminated.",
+							Description: "Grace period observed after signaling a VirtualMachineInstance to stop after which the VirtualMachineInstance is force terminated.",
 							Type:        []string{"integer"},
 							Format:      "int64",
 						},
@@ -30085,6 +30246,32 @@ func schema_kubevirtio_api_core_v1_VirtualMachineOptions(ref common.ReferenceCal
 	}
 }
 
+func schema_kubevirtio_api_core_v1_VirtualMachineResourceClaimRequest(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Type: []string{"object"},
+				Properties: map[string]spec.Schema{
+					"addResourceClaimOptions": {
+						SchemaProps: spec.SchemaProps{
+							Description: "AddResourceClaimOptions when set indicates a resource claim should be added. The details within this field specify how to add the resource claim",
+							Ref:         ref("kubevirt.io/api/core/v1.AddResourceClaimOptions"),
+						},
+					},
+					"removeResourceClaimOptions": {
+						SchemaProps: spec.SchemaProps{
+							Description: "RemoveResourceClaimOptions when set indicates a resource claim should be removed. The details within this field specify how to remove the resource claim",
+							Ref:         ref("kubevirt.io/api/core/v1.RemoveResourceClaimOptions"),
+						},
+					},
+				},
+			},
+		},
+		Dependencies: []string{
+			"kubevirt.io/api/core/v1.AddResourceClaimOptions", "kubevirt.io/api/core/v1.RemoveResourceClaimOptions"},
+	}
+}
+
 func schema_kubevirtio_api_core_v1_VirtualMachineSpec(ref common.ReferenceCallback) common.OpenAPIDefinition {
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
@@ -30319,6 +30506,25 @@ func schema_kubevirtio_api_core_v1_VirtualMachineStatus(ref common.ReferenceCall
 							},
 						},
 					},
+					"resourceClaimRequests": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type": "atomic",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "ResourceClaimRequests indicates a list of resource claims add or remove from the VMI template and hotplug on an active running VMI.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref("kubevirt.io/api/core/v1.VirtualMachineResourceClaimRequest"),
+									},
+								},
+							},
+						},
+					},
 					"volumeSnapshotStatuses": {
 						SchemaProps: spec.SchemaProps{
 							Description: "VolumeSnapshotStatuses indicates a list of statuses whether snapshotting is supported by each volume.",
@@ -30394,7 +30600,7 @@ func schema_kubevirtio_api_core_v1_VirtualMachineStatus(ref common.ReferenceCall
 			},
 		},
 		Dependencies: []string{
-			"kubevirt.io/api/core/v1.ChangedBlockTrackingStatus", "kubevirt.io/api/core/v1.InstancetypeStatusRef", "kubevirt.io/api/core/v1.VirtualMachineCondition", "kubevirt.io/api/core/v1.VirtualMachineMemoryDumpRequest", "kubevirt.io/api/core/v1.VirtualMachineStartFailure", "kubevirt.io/api/core/v1.VirtualMachineStateChangeRequest", "kubevirt.io/api/core/v1.VirtualMachineVolumeRequest", "kubevirt.io/api/core/v1.VolumeSnapshotStatus", "kubevirt.io/api/core/v1.VolumeUpdateState"},
+			"kubevirt.io/api/core/v1.ChangedBlockTrackingStatus", "kubevirt.io/api/core/v1.InstancetypeStatusRef", "kubevirt.io/api/core/v1.VirtualMachineCondition", "kubevirt.io/api/core/v1.VirtualMachineMemoryDumpRequest", "kubevirt.io/api/core/v1.VirtualMachineResourceClaimRequest", "kubevirt.io/api/core/v1.VirtualMachineStartFailure", "kubevirt.io/api/core/v1.VirtualMachineStateChangeRequest", "kubevirt.io/api/core/v1.VirtualMachineVolumeRequest", "kubevirt.io/api/core/v1.VolumeSnapshotStatus", "kubevirt.io/api/core/v1.VolumeUpdateState"},
 	}
 }
 
@@ -33147,7 +33353,7 @@ func schema_kubevirtio_api_instancetype_v1beta1_VirtualMachinePreferenceSpec(ref
 					},
 					"preferredTerminationGracePeriodSeconds": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Grace period observed after signalling a VirtualMachineInstance to stop after which the VirtualMachineInstance is force terminated.",
+							Description: "Grace period observed after signaling a VirtualMachineInstance to stop after which the VirtualMachineInstance is force terminated.",
 							Type:        []string{"integer"},
 							Format:      "int64",
 						},

@@ -21,7 +21,6 @@ package dra
 
 import (
 	"fmt"
-	"strconv"
 
 	v1 "kubevirt.io/api/core/v1"
 	"kubevirt.io/client-go/log"
@@ -95,15 +94,6 @@ func usbHostDeviceFromStatus(name string, statusAttrs *v1.DeviceAttribute) *api.
 		return nil
 	}
 	log.Log.V(2).Infof("Adding DRA USB HostDevice for %s", name)
-	return &api.HostDevice{
-		Type:  api.HostDeviceUSB,
-		Mode:  "subsystem",
-		Alias: api.NewUserDefinedAlias(DRAHostDeviceAliasPrefix + name),
-		Source: api.HostDeviceSource{
-			Address: &api.Address{
-				Bus:    strconv.FormatInt(statusAttrs.USBAddress.Bus, 10),
-				Device: strconv.FormatInt(statusAttrs.USBAddress.DeviceNumber, 10),
-			},
-		},
-	}
+	hostDevice := newUSBHostDevice(statusAttrs.USBAddress, name, false)
+	return &hostDevice
 }

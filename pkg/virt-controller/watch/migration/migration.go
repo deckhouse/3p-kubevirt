@@ -112,7 +112,7 @@ var migrationBackoffError = errors.New(controller.MigrationBackoffReason)
 type templateService interface {
 	RenderMigrationManifest(vmi *virtv1.VirtualMachineInstance, migration *virtv1.VirtualMachineInstanceMigration, sourcePod *k8sv1.Pod) (*k8sv1.Pod, error)
 	RenderLaunchManifest(vmi *virtv1.VirtualMachineInstance) (*k8sv1.Pod, error)
-	RenderHotplugAttachmentPodTemplate(volumes []*virtv1.Volume, ownerPod *k8sv1.Pod, vmi *virtv1.VirtualMachineInstance, claimMap map[string]*k8sv1.PersistentVolumeClaim) (*k8sv1.Pod, error)
+	RenderHotplugAttachmentPodTemplate(volumes []*virtv1.Volume, resourceClaims []*virtv1.VirtualMachineInstanceResourceClaim, ownerPod *k8sv1.Pod, vmi *virtv1.VirtualMachineInstance, claimMap map[string]*k8sv1.PersistentVolumeClaim) (*k8sv1.Pod, error)
 	GetLauncherImage() string
 }
 
@@ -1507,6 +1507,7 @@ func (c *Controller) createAttachmentPod(migration *virtv1.VirtualMachineInstanc
 	}
 
 	volumes := storagetypes.GetHotplugVolumes(vmi, sourcePod)
+	resourceClaims := controller.GetHotplugResourceClaims(vmi)
 
 	volumeNamesPVCMap, err := storagetypes.VirtVolumesToPVCMap(volumes, c.pvcStore, virtLauncherPod.Namespace)
 	if err != nil {
@@ -1516,7 +1517,7 @@ func (c *Controller) createAttachmentPod(migration *virtv1.VirtualMachineInstanc
 	// Reset the hotplug volume statuses to enforce mount
 	vmiCopy := vmi.DeepCopy()
 	vmiCopy.Status.VolumeStatus = []virtv1.VolumeStatus{}
-	attachmentPodTemplate, err := c.templateService.RenderHotplugAttachmentPodTemplate(volumes, virtLauncherPod, vmiCopy, volumeNamesPVCMap)
+	attachmentPodTemplate, err := c.templateService.RenderHotplugAttachmentPodTemplate(volumes, resourceClaims, virtLauncherPod, vmiCopy, volumeNamesPVCMap)
 	if err != nil {
 		return fmt.Errorf("failed to render attachment pod template: %v", err)
 	}

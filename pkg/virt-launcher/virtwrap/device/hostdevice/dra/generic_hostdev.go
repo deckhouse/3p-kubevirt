@@ -33,6 +33,7 @@ import (
 const (
 	failedCreateGenericHostDevicesFmt = "failed to create dra generic host-devices: %v"
 	DRAHostDeviceAliasPrefix          = "dra-hostdevice-"
+	DRAHotplugHostDeviceAliasPrefix   = "dra-hotplug-hostdevice-"
 )
 
 // CreateDRAHostDevices creates host devices for HostDevices allocated via DRA.
@@ -42,8 +43,14 @@ func CreateDRAHostDevices(vmi *v1.VirtualMachineInstance, basePath string) ([]ap
 		return hostDevices, nil
 	}
 
+	// Devices of hotpluggable claims are attached to the running domain by HotplugHostDevices.
+	hotpluggable := hotpluggableResourceClaimNames(vmi)
+
 	for _, hd := range vmi.Spec.Domain.Devices.HostDevices {
 		if !drautil.IsHostDeviceDRA(hd) {
+			continue
+		}
+		if _, ok := hotpluggable[hd.Name]; ok {
 			continue
 		}
 
@@ -56,7 +63,7 @@ func CreateDRAHostDevices(vmi *v1.VirtualMachineInstance, basePath string) ([]ap
 		}
 	}
 
-	if err := validateCreationOfDRAHostDevices(vmi.Spec.Domain.Devices.HostDevices, hostDevices); err != nil {
+	if err := validateCreationOfDRAHostDevices(vmi.Spec.Domain.Devices.HostDevices, hostDevices, hotpluggable); err != nil {
 		return nil, fmt.Errorf(failedCreateGenericHostDevicesFmt, err)
 	}
 
@@ -117,10 +124,10 @@ func createHostDeviceForHostDevice(hd v1.HostDevice, statusAttrs *v1.DeviceAttri
 	return nil, fmt.Errorf("HostDevice %s has no mdevUUID or pciBusID in metadata for claim %s request %s (mdev: %v, pci: %v)", hd.Name, claimName, requestName, mdevErr, pciErr)
 }
 
-func validateCreationOfDRAHostDevices(genericHostDevices []v1.HostDevice, hostDevices []api.HostDevice) error {
+func validateCreationOfDRAHostDevices(genericHostDevices []v1.HostDevice, hostDevices []api.HostDevice, hotpluggable map[string]struct{}) error {
 	var hostDevsWithDRA []v1.HostDevice
 	for _, hd := range genericHostDevices {
-		if drautil.IsHostDeviceDRA(hd) {
+		if _, ok := hotpluggable[hd.Name]; !ok && drautil.IsHostDeviceDRA(hd) {
 			hostDevsWithDRA = append(hostDevsWithDRA, hd)
 		}
 	}
@@ -138,4 +145,14 @@ func hasHostDevicesWithDRA(vmi *v1.VirtualMachineInstance) bool {
 		}
 	}
 	return false
+}
+
+func hotpluggableResourceClaimNames(vmi *v1.VirtualMachineInstance) map[string]struct{} {
+	names := make(map[string]struct{})
+	for _, resourceClaim := range vmi.Spec.ResourceClaims {
+		if resourceClaim.Hotpluggable {
+			names[resourceClaim.Name] = struct{}{}
+		}
+	}
+	return names
 }

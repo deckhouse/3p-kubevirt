@@ -48,7 +48,7 @@ import (
 	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/cli"
 	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/converter/vcpu"
 	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/cpudedicated"
-	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/device/hostdevice"
+	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/device/hostdevice/dra"
 	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/device/hostdevice/sriov"
 	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/disksource"
 	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/stats"
@@ -151,19 +151,16 @@ func hotUnplugHostDevices(virConn cli.Connection, dom cli.VirDomain) error {
 		return err
 	}
 
-	eventChan := make(chan interface{}, hostdevice.MaxConcurrentHotPlugDevicesEvents)
-	var callback libvirt.DomainEventDeviceRemovedCallback = func(c *libvirt.Connect, d *libvirt.Domain, event *libvirt.DomainEventDeviceRemoved) {
-		eventChan <- event.DevAlias
-	}
+	var hostDevices []api.HostDevice
 
-	if domainEvent := cli.NewDomainEventDeviceRemoved(virConn, dom, callback, eventChan); domainEvent != nil {
-		const waitForDetachTimeout = 30 * time.Second
-		err := sriov.SafelyDetachHostDevices(domainSpec, domainEvent, dom, waitForDetachTimeout)
-		if err != nil {
-			return err
-		}
-	}
-	return nil
+	sriovDevices := sriov.FilterSRIOVHostDevicesByAlias(domainSpec.Devices.HostDevices)
+	hostDevices = append(hostDevices, sriovDevices...)
+
+	usbDevices := dra.FilterUSBHostDevicesByAlias(domainSpec.Devices.HostDevices, true)
+	hostDevices = append(hostDevices, usbDevices...)
+
+	err = safelyDetachHostDevices(hostDevices, virConn, dom)
+	return err
 }
 
 // This returns domain xml without the metadata section, as it is only relevant to the source domain

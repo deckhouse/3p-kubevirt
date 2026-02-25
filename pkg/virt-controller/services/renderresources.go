@@ -11,6 +11,7 @@ import (
 
 	k8sv1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+
 	v1 "kubevirt.io/api/core/v1"
 
 	"kubevirt.io/kubevirt/pkg/hypervisor/kvm"
@@ -189,9 +190,20 @@ func WithHostDevicesDevicePlugins(hostDevices []v1.HostDevice) ResourceRendererO
 }
 
 // WithHostDevicesDRA adds ResourceClaims for HostDevices provisioned via DRA.
-func WithHostDevicesDRA(hostDevices []v1.HostDevice) ResourceRendererOption {
+func WithHostDevicesDRA(hostDevices []v1.HostDevice, resourceClaims []v1.VirtualMachineInstanceResourceClaim) ResourceRendererOption {
+	hotpluggable := make(map[string]struct{})
+	for _, claim := range resourceClaims {
+		if claim.Hotpluggable {
+			hotpluggable[claim.Name] = struct{}{}
+		}
+	}
+
 	return func(r *ResourceRenderer) {
 		for _, hd := range hostDevices {
+			if _, ok := hotpluggable[hd.Name]; ok {
+				// Hotpluggable devices are claimed by the attachment pod, not by the compute container.
+				continue
+			}
 			if hd.DeviceName == "" && hd.ClaimRequest != nil {
 				claim := k8sv1.ResourceClaim{
 					Name:    hd.ClaimRequest.ClaimName,

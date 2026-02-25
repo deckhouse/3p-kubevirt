@@ -1404,7 +1404,7 @@ var CRDsValidation map[string]string = map[string]string{
                   description: |-
                     CompletionTimeoutPerGiB is the maximum number of seconds per GiB a migration is allowed to take.
                     If the timeout is reached, the migration will be either paused, switched
-                    to post-copy or cancelled depending on other settings. Defaults to 150
+                    to post-copy or canceled depending on other settings. Defaults to 150
                   format: int64
                   type: integer
                 disableTLS:
@@ -1453,7 +1453,7 @@ var CRDsValidation map[string]string = map[string]string{
                   description: |-
                     ProgressTimeout is the maximum number of seconds a live migration is allowed to make no progress.
                     Hitting this timeout means a migration transferred 0 data for that many seconds. The migration is
-                    then considered stuck and therefore cancelled. Defaults to 150
+                    then considered stuck and therefore canceled. Defaults to 150
                   format: int64
                   type: integer
                 unsafeMigrationOverride:
@@ -7089,7 +7089,7 @@ var CRDsValidation map[string]string = map[string]string{
                               type: boolean
                             persistent:
                               description: |-
-                                Persistent indicates the state of the TPM device should be kept accross reboots
+                                Persistent indicates the state of the TPM device should be kept across reboots
                                 Defaults to false
                               type: boolean
                           type: object
@@ -7462,7 +7462,7 @@ var CRDsValidation map[string]string = map[string]string{
                           description: Settings to set the kernel for booting.
                           properties:
                             container:
-                              description: Container defines the container that containes
+                              description: Container defines the container that contains
                                 kernel artifacts
                               properties:
                                 image:
@@ -8069,6 +8069,11 @@ var CRDsValidation map[string]string = map[string]string{
                     This feature is in alpha.
                   items:
                     properties:
+                      hotpluggable:
+                        description: |-
+                          Hotpluggable marks a claim that is attached to a running VMI through an attachment pod
+                          instead of the virt-launcher pod.
+                        type: boolean
                       name:
                         description: |-
                           Name uniquely identifies this resource claim inside the VMI.
@@ -8127,7 +8132,7 @@ var CRDsValidation map[string]string = map[string]string{
                     no matter if the vmi itself can pick up a hostname.
                   type: string
                 terminationGracePeriodSeconds:
-                  description: Grace period observed after signalling a VirtualMachineInstance
+                  description: Grace period observed after signaling a VirtualMachineInstance
                     to stop after which the VirtualMachineInstance is force terminated.
                   format: int64
                   type: integer
@@ -9108,6 +9113,133 @@ var CRDsValidation map[string]string = map[string]string{
         ready:
           description: Ready indicates if the virtual machine is running and ready
           type: boolean
+        resourceClaimRequests:
+          description: |-
+            ResourceClaimRequests indicates a list of resource claims add or remove from the VMI template and
+            hotplug on an active running VMI.
+          items:
+            properties:
+              addResourceClaimOptions:
+                description: |-
+                  AddResourceClaimOptions when set indicates a resource claim should be added.
+                  The details within this field specify how to add the resource claim
+                properties:
+                  dryRun:
+                    description: |-
+                      When present, indicates that modifications should not be
+                      persisted. An invalid or unrecognized dryRun directive will
+                      result in an error response and no further processing of the
+                      request. Valid values are:
+                      - All: all dry run stages will be processed
+                    items:
+                      type: string
+                    type: array
+                    x-kubernetes-list-type: atomic
+                  hostDevice:
+                    description: HostDevice represents the host device that will be
+                      plugged into the running VMI
+                    properties:
+                      claimName:
+                        description: |-
+                          ClaimName references the name of an entry in the
+                          VMI's spec.resourceClaims[] array. The referenced
+                          entry may use either resourceClaimName or
+                          resourceClaimTemplateName.
+                        type: string
+                      deviceName:
+                        description: DeviceName is the name of the device provisioned
+                          by device-plugins
+                        type: string
+                      name:
+                        type: string
+                      requestName:
+                        description: |-
+                          RequestName specifies which request from the
+                          ResourceClaim/ResourceClaimTemplate spec.devices.requests array this
+                          claim request corresponds to.
+                        type: string
+                      tag:
+                        description: If specified, the virtual network interface address
+                          and its tag will be provided to the guest via config drive
+                        type: string
+                    required:
+                    - name
+                    type: object
+                  name:
+                    description: |-
+                      Name represents the name that will be used to map the
+                      device to the corresponding resource claim. This overrides any name
+                      that is set in the Device struct itself.
+                    type: string
+                  resourceClaim:
+                    description: ResourceClaim represents the resource claim to map
+                      to the host device
+                    properties:
+                      hotpluggable:
+                        description: |-
+                          Hotpluggable marks a claim that is attached to a running VMI through an attachment pod
+                          instead of the virt-launcher pod.
+                        type: boolean
+                      name:
+                        description: |-
+                          Name uniquely identifies this resource claim inside the VMI.
+                          This field is required and must be a DNS_LABEL.
+                        type: string
+                      resourceClaimName:
+                        description: |-
+                          ResourceClaimName is the name of a ResourceClaim object in the same
+                          namespace as this VMI.
+
+                          Exactly one of ResourceClaimName and ResourceClaimTemplateName must
+                          be set.
+                        type: string
+                      resourceClaimTemplateName:
+                        description: |-
+                          ResourceClaimTemplateName is the name of a ResourceClaimTemplate
+                          object in the same namespace as this VMI.
+
+                          The template name is passed through to the generated virt-launcher Pod
+                          spec. From the Pod spec, the template is used to create a new
+                          ResourceClaim, which is bound to the virt-launcher Pod. When the
+                          virt-launcher Pod is deleted, the ResourceClaim is also deleted. The
+                          generated ResourceClaim name is unique and is recorded in
+                          pod.status.resourceClaimStatuses.
+
+                          Exactly one of ResourceClaimName and ResourceClaimTemplateName must
+                          be set.
+                        type: string
+                    required:
+                    - name
+                    type: object
+                required:
+                - hostDevice
+                - name
+                - resourceClaim
+                type: object
+              removeResourceClaimOptions:
+                description: |-
+                  RemoveResourceClaimOptions when set indicates a resource claim should be removed.
+                  The details within this field specify how to remove the resource claim
+                properties:
+                  dryRun:
+                    description: |-
+                      When present, indicates that modifications should not be
+                      persisted. An invalid or unrecognized dryRun directive will
+                      result in an error response and no further processing of the
+                      request. Valid values are:
+                      - All: all dry run stages will be processed
+                    items:
+                      type: string
+                    type: array
+                    x-kubernetes-list-type: atomic
+                  name:
+                    type: string
+                required:
+                - name
+                type: object
+            type: object
+          type: array
+          x-kubernetes-list-type: atomic
         restoreInProgress:
           description: RestoreInProgress is the name of the VirtualMachineRestore
             currently executing
@@ -9615,7 +9747,7 @@ var CRDsValidation map[string]string = map[string]string{
           description: ForceFullBackup indicates that a full backup is desired
           type: boolean
         mode:
-          description: Mode specifies the way the backup output will be recieved
+          description: Mode specifies the way the backup output will be received
           enum:
           - Push
           - Pull
@@ -10692,7 +10824,7 @@ var CRDsValidation map[string]string = map[string]string{
                   type: boolean
                 persistent:
                   description: |-
-                    Persistent indicates the state of the TPM device should be kept accross reboots
+                    Persistent indicates the state of the TPM device should be kept across reboots
                     Defaults to false
                   type: boolean
               type: object
@@ -11084,7 +11216,7 @@ var CRDsValidation map[string]string = map[string]string{
           description: Subdomain of the VirtualMachineInstance
           type: string
         preferredTerminationGracePeriodSeconds:
-          description: Grace period observed after signalling a VirtualMachineInstance
+          description: Grace period observed after signaling a VirtualMachineInstance
             to stop after which the VirtualMachineInstance is force terminated.
           format: int64
           type: integer
@@ -13348,7 +13480,7 @@ var CRDsValidation map[string]string = map[string]string{
                       type: boolean
                     persistent:
                       description: |-
-                        Persistent indicates the state of the TPM device should be kept accross reboots
+                        Persistent indicates the state of the TPM device should be kept across reboots
                         Defaults to false
                       type: boolean
                   type: object
@@ -13716,8 +13848,8 @@ var CRDsValidation map[string]string = map[string]string{
                   description: Settings to set the kernel for booting.
                   properties:
                     container:
-                      description: Container defines the container that containes
-                        kernel artifacts
+                      description: Container defines the container that contains kernel
+                        artifacts
                       properties:
                         image:
                           description: Image that contains initrd / kernel files.
@@ -14318,6 +14450,11 @@ var CRDsValidation map[string]string = map[string]string{
             This feature is in alpha.
           items:
             properties:
+              hotpluggable:
+                description: |-
+                  Hotpluggable marks a claim that is attached to a running VMI through an attachment pod
+                  instead of the virt-launcher pod.
+                type: boolean
               name:
                 description: |-
                   Name uniquely identifies this resource claim inside the VMI.
@@ -14376,7 +14513,7 @@ var CRDsValidation map[string]string = map[string]string{
             no matter if the vmi itself can pick up a hostname.
           type: string
         terminationGracePeriodSeconds:
-          description: Grace period observed after signalling a VirtualMachineInstance
+          description: Grace period observed after signaling a VirtualMachineInstance
             to stop after which the VirtualMachineInstance is force terminated.
           format: int64
           type: integer
@@ -15266,6 +15403,8 @@ var CRDsValidation map[string]string = map[string]string{
               description: GPUStatuses reflects the state of GPUs requested in spec.domain.devices.gpus
               items:
                 properties:
+                  address:
+                    type: string
                   deviceResourceClaimStatus:
                     description: DeviceResourceClaimStatus reflects the DRA related
                       information for the device
@@ -15307,9 +15446,28 @@ var CRDsValidation map[string]string = map[string]string{
                           claims object used to provision this resource
                         type: string
                     type: object
+                  hotplug:
+                    properties:
+                      attachPodName:
+                        description: AttachPodName is the name of the pod used to
+                          attach the device to the node.
+                        type: string
+                      attachPodUID:
+                        description: AttachPodUID is the UID of the pod used to attach
+                          the device to the node.
+                        type: string
+                    type: object
+                  message:
+                    type: string
                   name:
                     description: Name of the device as specified in spec.domain.devices.gpus.name
                       or spec.domain.devices.hostDevices.name
+                    type: string
+                  phase:
+                    description: DevicePhase indicates the current phase of the hotplug
+                      process.
+                    type: string
+                  reason:
                     type: string
                 required:
                 - name
@@ -15322,6 +15480,8 @@ var CRDsValidation map[string]string = map[string]string{
                 DRA
               items:
                 properties:
+                  address:
+                    type: string
                   deviceResourceClaimStatus:
                     description: DeviceResourceClaimStatus reflects the DRA related
                       information for the device
@@ -15363,9 +15523,28 @@ var CRDsValidation map[string]string = map[string]string{
                           claims object used to provision this resource
                         type: string
                     type: object
+                  hotplug:
+                    properties:
+                      attachPodName:
+                        description: AttachPodName is the name of the pod used to
+                          attach the device to the node.
+                        type: string
+                      attachPodUID:
+                        description: AttachPodUID is the UID of the pod used to attach
+                          the device to the node.
+                        type: string
+                    type: object
+                  message:
+                    type: string
                   name:
                     description: Name of the device as specified in spec.domain.devices.gpus.name
                       or spec.domain.devices.hostDevices.name
+                    type: string
+                  phase:
+                    description: DevicePhase indicates the current phase of the hotplug
+                      process.
+                    type: string
+                  reason:
                     type: string
                 required:
                 - name
@@ -15706,7 +15885,7 @@ var CRDsValidation map[string]string = map[string]string{
                   description: |-
                     CompletionTimeoutPerGiB is the maximum number of seconds per GiB a migration is allowed to take.
                     If the timeout is reached, the migration will be either paused, switched
-                    to post-copy or cancelled depending on other settings. Defaults to 150
+                    to post-copy or canceled depending on other settings. Defaults to 150
                   format: int64
                   type: integer
                 disableTLS:
@@ -15832,7 +16011,7 @@ var CRDsValidation map[string]string = map[string]string{
                   description: |-
                     ProgressTimeout is the maximum number of seconds a live migration is allowed to make no progress.
                     Hitting this timeout means a migration transferred 0 data for that many seconds. The migration is
-                    then considered stuck and therefore cancelled. Defaults to 150
+                    then considered stuck and therefore canceled. Defaults to 150
                   format: int64
                   type: integer
                 unsafeMigrationOverride:
@@ -16394,7 +16573,7 @@ var CRDsValidation map[string]string = map[string]string{
                   description: |-
                     CompletionTimeoutPerGiB is the maximum number of seconds per GiB a migration is allowed to take.
                     If the timeout is reached, the migration will be either paused, switched
-                    to post-copy or cancelled depending on other settings. Defaults to 150
+                    to post-copy or canceled depending on other settings. Defaults to 150
                   format: int64
                   type: integer
                 disableTLS:
@@ -16520,7 +16699,7 @@ var CRDsValidation map[string]string = map[string]string{
                   description: |-
                     ProgressTimeout is the maximum number of seconds a live migration is allowed to make no progress.
                     Hitting this timeout means a migration transferred 0 data for that many seconds. The migration is
-                    then considered stuck and therefore cancelled. Defaults to 150
+                    then considered stuck and therefore canceled. Defaults to 150
                   format: int64
                   type: integer
                 unsafeMigrationOverride:
@@ -17579,7 +17758,7 @@ var CRDsValidation map[string]string = map[string]string{
                       type: boolean
                     persistent:
                       description: |-
-                        Persistent indicates the state of the TPM device should be kept accross reboots
+                        Persistent indicates the state of the TPM device should be kept across reboots
                         Defaults to false
                       type: boolean
                   type: object
@@ -17947,8 +18126,8 @@ var CRDsValidation map[string]string = map[string]string{
                   description: Settings to set the kernel for booting.
                   properties:
                     container:
-                      description: Container defines the container that containes
-                        kernel artifacts
+                      description: Container defines the container that contains kernel
+                        artifacts
                       properties:
                         image:
                           description: Image that contains initrd / kernel files.
@@ -20177,7 +20356,7 @@ var CRDsValidation map[string]string = map[string]string{
                               type: boolean
                             persistent:
                               description: |-
-                                Persistent indicates the state of the TPM device should be kept accross reboots
+                                Persistent indicates the state of the TPM device should be kept across reboots
                                 Defaults to false
                               type: boolean
                           type: object
@@ -20550,7 +20729,7 @@ var CRDsValidation map[string]string = map[string]string{
                           description: Settings to set the kernel for booting.
                           properties:
                             container:
-                              description: Container defines the container that containes
+                              description: Container defines the container that contains
                                 kernel artifacts
                               properties:
                                 image:
@@ -21157,6 +21336,11 @@ var CRDsValidation map[string]string = map[string]string{
                     This feature is in alpha.
                   items:
                     properties:
+                      hotpluggable:
+                        description: |-
+                          Hotpluggable marks a claim that is attached to a running VMI through an attachment pod
+                          instead of the virt-launcher pod.
+                        type: boolean
                       name:
                         description: |-
                           Name uniquely identifies this resource claim inside the VMI.
@@ -21215,7 +21399,7 @@ var CRDsValidation map[string]string = map[string]string{
                     no matter if the vmi itself can pick up a hostname.
                   type: string
                 terminationGracePeriodSeconds:
-                  description: Grace period observed after signalling a VirtualMachineInstance
+                  description: Grace period observed after signaling a VirtualMachineInstance
                     to stop after which the VirtualMachineInstance is force terminated.
                   format: int64
                   type: integer
@@ -25365,7 +25549,7 @@ var CRDsValidation map[string]string = map[string]string{
                                       type: boolean
                                     persistent:
                                       description: |-
-                                        Persistent indicates the state of the TPM device should be kept accross reboots
+                                        Persistent indicates the state of the TPM device should be kept across reboots
                                         Defaults to false
                                       type: boolean
                                   type: object
@@ -25742,7 +25926,7 @@ var CRDsValidation map[string]string = map[string]string{
                                   properties:
                                     container:
                                       description: Container defines the container
-                                        that containes kernel artifacts
+                                        that contains kernel artifacts
                                       properties:
                                         image:
                                           description: Image that contains initrd
@@ -26355,6 +26539,11 @@ var CRDsValidation map[string]string = map[string]string{
                             This feature is in alpha.
                           items:
                             properties:
+                              hotpluggable:
+                                description: |-
+                                  Hotpluggable marks a claim that is attached to a running VMI through an attachment pod
+                                  instead of the virt-launcher pod.
+                                type: boolean
                               name:
                                 description: |-
                                   Name uniquely identifies this resource claim inside the VMI.
@@ -26413,7 +26602,7 @@ var CRDsValidation map[string]string = map[string]string{
                             no matter if the vmi itself can pick up a hostname.
                           type: string
                         terminationGracePeriodSeconds:
-                          description: Grace period observed after signalling a VirtualMachineInstance
+                          description: Grace period observed after signaling a VirtualMachineInstance
                             to stop after which the VirtualMachineInstance is force
                             terminated.
                           format: int64
@@ -27532,7 +27721,7 @@ var CRDsValidation map[string]string = map[string]string{
                   type: boolean
                 persistent:
                   description: |-
-                    Persistent indicates the state of the TPM device should be kept accross reboots
+                    Persistent indicates the state of the TPM device should be kept across reboots
                     Defaults to false
                   type: boolean
               type: object
@@ -27924,7 +28113,7 @@ var CRDsValidation map[string]string = map[string]string{
           description: Subdomain of the VirtualMachineInstance
           type: string
         preferredTerminationGracePeriodSeconds:
-          description: Grace period observed after signalling a VirtualMachineInstance
+          description: Grace period observed after signaling a VirtualMachineInstance
             to stop after which the VirtualMachineInstance is force terminated.
           format: int64
           type: integer
@@ -31051,7 +31240,7 @@ var CRDsValidation map[string]string = map[string]string{
                                           type: boolean
                                         persistent:
                                           description: |-
-                                            Persistent indicates the state of the TPM device should be kept accross reboots
+                                            Persistent indicates the state of the TPM device should be kept across reboots
                                             Defaults to false
                                           type: boolean
                                       type: object
@@ -31430,7 +31619,7 @@ var CRDsValidation map[string]string = map[string]string{
                                       properties:
                                         container:
                                           description: Container defines the container
-                                            that containes kernel artifacts
+                                            that contains kernel artifacts
                                           properties:
                                             image:
                                               description: Image that contains initrd
@@ -32046,6 +32235,11 @@ var CRDsValidation map[string]string = map[string]string{
                                 This feature is in alpha.
                               items:
                                 properties:
+                                  hotpluggable:
+                                    description: |-
+                                      Hotpluggable marks a claim that is attached to a running VMI through an attachment pod
+                                      instead of the virt-launcher pod.
+                                    type: boolean
                                   name:
                                     description: |-
                                       Name uniquely identifies this resource claim inside the VMI.
@@ -32104,8 +32298,8 @@ var CRDsValidation map[string]string = map[string]string{
                                 no matter if the vmi itself can pick up a hostname.
                               type: string
                             terminationGracePeriodSeconds:
-                              description: Grace period observed after signalling
-                                a VirtualMachineInstance to stop after which the VirtualMachineInstance
+                              description: Grace period observed after signaling a
+                                VirtualMachineInstance to stop after which the VirtualMachineInstance
                                 is force terminated.
                               format: int64
                               type: integer
@@ -33119,6 +33313,134 @@ var CRDsValidation map[string]string = map[string]string{
                       description: Ready indicates if the virtual machine is running
                         and ready
                       type: boolean
+                    resourceClaimRequests:
+                      description: |-
+                        ResourceClaimRequests indicates a list of resource claims add or remove from the VMI template and
+                        hotplug on an active running VMI.
+                      items:
+                        properties:
+                          addResourceClaimOptions:
+                            description: |-
+                              AddResourceClaimOptions when set indicates a resource claim should be added.
+                              The details within this field specify how to add the resource claim
+                            properties:
+                              dryRun:
+                                description: |-
+                                  When present, indicates that modifications should not be
+                                  persisted. An invalid or unrecognized dryRun directive will
+                                  result in an error response and no further processing of the
+                                  request. Valid values are:
+                                  - All: all dry run stages will be processed
+                                items:
+                                  type: string
+                                type: array
+                                x-kubernetes-list-type: atomic
+                              hostDevice:
+                                description: HostDevice represents the host device
+                                  that will be plugged into the running VMI
+                                properties:
+                                  claimName:
+                                    description: |-
+                                      ClaimName references the name of an entry in the
+                                      VMI's spec.resourceClaims[] array. The referenced
+                                      entry may use either resourceClaimName or
+                                      resourceClaimTemplateName.
+                                    type: string
+                                  deviceName:
+                                    description: DeviceName is the name of the device
+                                      provisioned by device-plugins
+                                    type: string
+                                  name:
+                                    type: string
+                                  requestName:
+                                    description: |-
+                                      RequestName specifies which request from the
+                                      ResourceClaim/ResourceClaimTemplate spec.devices.requests array this
+                                      claim request corresponds to.
+                                    type: string
+                                  tag:
+                                    description: If specified, the virtual network
+                                      interface address and its tag will be provided
+                                      to the guest via config drive
+                                    type: string
+                                required:
+                                - name
+                                type: object
+                              name:
+                                description: |-
+                                  Name represents the name that will be used to map the
+                                  device to the corresponding resource claim. This overrides any name
+                                  that is set in the Device struct itself.
+                                type: string
+                              resourceClaim:
+                                description: ResourceClaim represents the resource
+                                  claim to map to the host device
+                                properties:
+                                  hotpluggable:
+                                    description: |-
+                                      Hotpluggable marks a claim that is attached to a running VMI through an attachment pod
+                                      instead of the virt-launcher pod.
+                                    type: boolean
+                                  name:
+                                    description: |-
+                                      Name uniquely identifies this resource claim inside the VMI.
+                                      This field is required and must be a DNS_LABEL.
+                                    type: string
+                                  resourceClaimName:
+                                    description: |-
+                                      ResourceClaimName is the name of a ResourceClaim object in the same
+                                      namespace as this VMI.
+
+                                      Exactly one of ResourceClaimName and ResourceClaimTemplateName must
+                                      be set.
+                                    type: string
+                                  resourceClaimTemplateName:
+                                    description: |-
+                                      ResourceClaimTemplateName is the name of a ResourceClaimTemplate
+                                      object in the same namespace as this VMI.
+
+                                      The template name is passed through to the generated virt-launcher Pod
+                                      spec. From the Pod spec, the template is used to create a new
+                                      ResourceClaim, which is bound to the virt-launcher Pod. When the
+                                      virt-launcher Pod is deleted, the ResourceClaim is also deleted. The
+                                      generated ResourceClaim name is unique and is recorded in
+                                      pod.status.resourceClaimStatuses.
+
+                                      Exactly one of ResourceClaimName and ResourceClaimTemplateName must
+                                      be set.
+                                    type: string
+                                required:
+                                - name
+                                type: object
+                            required:
+                            - hostDevice
+                            - name
+                            - resourceClaim
+                            type: object
+                          removeResourceClaimOptions:
+                            description: |-
+                              RemoveResourceClaimOptions when set indicates a resource claim should be removed.
+                              The details within this field specify how to remove the resource claim
+                            properties:
+                              dryRun:
+                                description: |-
+                                  When present, indicates that modifications should not be
+                                  persisted. An invalid or unrecognized dryRun directive will
+                                  result in an error response and no further processing of the
+                                  request. Valid values are:
+                                  - All: all dry run stages will be processed
+                                items:
+                                  type: string
+                                type: array
+                                x-kubernetes-list-type: atomic
+                              name:
+                                type: string
+                            required:
+                            - name
+                            type: object
+                        type: object
+                      type: array
+                      x-kubernetes-list-type: atomic
                     restoreInProgress:
                       description: RestoreInProgress is the name of the VirtualMachineRestore
                         currently executing

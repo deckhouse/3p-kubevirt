@@ -287,6 +287,11 @@ const (
 	// PortRangesSpec enables the portRanges field, initially only on masquerade interfaces,
 	// allowing compact specification of contiguous port intervals to forward to the VM guest.
 	PortRangesSpec = "PortRangesSpec"
+
+	// Owner: @yaroslavborbat
+	// Alpha: v1.6.2
+	// HotplugHostDevicesWithDRAGate allows hotplug host devices with DRA to a VirtualMachineInstance.
+	HotplugHostDevicesWithDRAGate = "HotplugHostDevicesWithDRA"
 )
 
 func init() {
@@ -337,4 +342,5 @@ func init() {
 	RegisterFeatureGate(FeatureGate{Name: MigrationStallDetection, State: Alpha})
 	RegisterFeatureGate(FeatureGate{Name: CrossArchitectureVirtualization, State: Alpha})
 	RegisterFeatureGate(FeatureGate{Name: PortRangesSpec, State: Alpha})
+	RegisterFeatureGate(FeatureGate{Name: HotplugHostDevicesWithDRAGate, State: Alpha})
 }

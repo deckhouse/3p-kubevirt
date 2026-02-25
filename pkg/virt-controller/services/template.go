@@ -89,6 +89,7 @@ const (
 	varCacheLibvirt              = "/var/cache/libvirt"
 	tmp                          = "/tmp"
 	varLibSWTPMLocalCA           = "/var/lib/swtpm-localca"
+	devBusUsb                    = "/dev/bus/usb"
 	varLogVolumeName             = "var-log"
 	etcLibvirtVolumeName         = "etc-libvirt"
 	varLibLibvirtVolumeName      = "var-lib-libvirt"
@@ -96,6 +97,7 @@ const (
 	varRunVolumeName             = "var-run"
 	tmpVolumeName                = "tmp"
 	varLibSWTPMLocalCAVolumeName = "var-lib-swtpm-localca"
+	devBusUsbVolumeName          = "dev-bus-usb"
 )
 
 const K8sDevicePrefix = "devices.virtualization.deckhouse.io"
@@ -770,7 +772,7 @@ func (t *TemplateService) renderLaunchManifest(vmi *v1.VirtualMachineInstance, i
 			SchedulerName:                 vmi.Spec.SchedulerName,
 			Tolerations:                   vmi.Spec.Tolerations,
 			TopologySpreadConstraints:     vmi.Spec.TopologySpreadConstraints,
-			ResourceClaims:                drautil.ToPodResourceClaims(vmi.Spec.ResourceClaims),
+			ResourceClaims:                drautil.ToPodResourceClaims(withoutHotplugResourceClaims(vmi.Spec.ResourceClaims)),
 		},
 	}
 
@@ -1150,7 +1152,7 @@ func (t *TemplateService) containerForHotplugContainerDisk(ctrName, volName stri
 	}
 }
 
-func (t *TemplateService) RenderHotplugAttachmentPodTemplate(volumes []*v1.Volume, ownerPod *k8sv1.Pod, vmi *v1.VirtualMachineInstance, claimMap map[string]*k8sv1.PersistentVolumeClaim) (*k8sv1.Pod, error) {
+func (t *TemplateService) RenderHotplugAttachmentPodTemplate(volumes []*v1.Volume, resourceClaims []*v1.VirtualMachineInstanceResourceClaim, ownerPod *k8sv1.Pod, vmi *v1.VirtualMachineInstance, claimMap map[string]*k8sv1.PersistentVolumeClaim) (*k8sv1.Pod, error) {
 	zero := int64(0)
 	runUser := int64(util.NonRootUID)
 	sharedMount := k8sv1.MountPropagationHostToContainer
@@ -1239,6 +1241,9 @@ func (t *TemplateService) RenderHotplugAttachmentPodTemplate(volumes []*v1.Volum
 			DNSPolicy:                     k8sv1.DNSClusterFirstWithHostNet,
 		},
 	}
+
+	t.addHotplugDevices(vmi, pod, resourceClaims)
+
 	first := true
 	for i, vol := range vmi.Spec.Volumes {
 		if vol.ContainerDisk == nil || !vol.ContainerDisk.Hotpluggable {
@@ -1321,6 +1326,37 @@ func (t *TemplateService) RenderHotplugAttachmentPodTemplate(volumes []*v1.Volum
 	}
 
 	return pod, nil
+}
+
+func (t *TemplateService) addHotplugDevices(vmi *v1.VirtualMachineInstance, pod *k8sv1.Pod, resourceClaims []*v1.VirtualMachineInstanceResourceClaim) {
+	if !t.clusterConfig.HotplugHostDevicesWithDRAEnabled() {
+		return
+	}
+	claims := make([]v1.VirtualMachineInstanceResourceClaim, len(resourceClaims))
+	resourceClaimNames := make(map[string]struct{})
+	for i, resourceClaim := range resourceClaims {
+		claims[i] = *resourceClaim
+		resourceClaimNames[resourceClaim.Name] = struct{}{}
+	}
+	if podResourceClaims := drautil.ToPodResourceClaims(claims); len(podResourceClaims) > 0 {
+		pod.Spec.ResourceClaims = podResourceClaims
+	}
+
+	for _, device := range vmi.Spec.Domain.Devices.HostDevices {
+		if _, ok := resourceClaimNames[device.Name]; !ok {
+			continue
+		}
+
+		if device.ClaimRequest == nil || device.ClaimRequest.RequestName == "" {
+			log.Log.Error(fmt.Sprintf("Skipping device %s with no claim request with request name", device.Name))
+			continue
+		}
+
+		pod.Spec.Containers[0].Resources.Claims = append(pod.Spec.Containers[0].Resources.Claims, k8sv1.ResourceClaim{
+			Name:    device.Name,
+			Request: device.ClaimRequest.RequestName,
+		})
+	}
 }
 
 func (t *TemplateService) RenderHotplugAttachmentTriggerPodTemplate(volume *v1.Volume, ownerPod *k8sv1.Pod, vmi *v1.VirtualMachineInstance, pvcName string, isBlock bool, tempPod bool) (*k8sv1.Pod, error) {
@@ -1784,7 +1820,7 @@ func (t *TemplateService) VMIResourcePredicates(vmi *v1.VirtualMachineInstance, 
 			NewVMIResourceRule(isHostDevVMIDevicePlugins, WithHostDevicesDevicePlugins(vmi.Spec.Domain.Devices.HostDevices)),
 			NewVMIResourceRule(func(vmi *v1.VirtualMachineInstance) bool {
 				return t.clusterConfig.HostDevicesWithDRAEnabled() && isHostDevVMIDRA(vmi)
-			}, WithHostDevicesDRA(vmi.Spec.Domain.Devices.HostDevices)),
+			}, WithHostDevicesDRA(vmi.Spec.Domain.Devices.HostDevices, vmi.Spec.ResourceClaims)),
 			NewVMIResourceRule(func(vmi *v1.VirtualMachineInstance) bool {
 				return t.clusterConfig.NetworkDevicesWithDRAGateEnabled() && vmispec.HasDRANetwork(vmi.Spec.Networks)
 			}, WithNetworksDRA(vmi.Spec.Networks)),
@@ -1952,4 +1988,16 @@ func isHostDevVMIDRA(vmi *v1.VirtualMachineInstance) bool {
 func emptyMemoryRequest(vmi *v1.VirtualMachineInstance) bool {
 	resources := &vmi.Spec.Domain.Resources
 	return resources.Requests.Memory().IsZero()
+}
+
+// withoutHotplugResourceClaims drops the claims that are attached through an attachment pod:
+// the virt-launcher pod must not reference them.
+func withoutHotplugResourceClaims(claims []v1.VirtualMachineInstanceResourceClaim) []v1.VirtualMachineInstanceResourceClaim {
+	var result []v1.VirtualMachineInstanceResourceClaim
+	for _, claim := range claims {
+		if !claim.Hotpluggable {
+			result = append(result, claim)
+		}
+	}
+	return result
 }

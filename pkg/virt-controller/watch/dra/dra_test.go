@@ -78,6 +78,12 @@ var _ = Describe("DRA Status Controller", func() {
 		})
 
 		It("should return early if pod resource claim status is not filled", func() {
+			pod.Spec.ResourceClaims = []k8sv1.PodResourceClaim{
+				{
+					Name:                      "test-rc",
+					ResourceClaimTemplateName: ptr.To("test-rc"),
+				},
+			}
 			draController := testDRAStatusController(kubeClient, vmi, pod, nil, nil)
 
 			err := draController.updateStatus(logger, vmi, pod)

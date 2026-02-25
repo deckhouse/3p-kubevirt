@@ -429,6 +429,8 @@ func baseControllerClusterRole() *rbacv1.ClusterRole {
 				Resources: []string{
 					"virtualmachines/addvolume",
 					"virtualmachines/removevolume",
+					"virtualmachines/addresourceclaim",
+					"virtualmachines/removeresourceclaim",
 				},
 				Verbs: []string{
 					"update",
@@ -444,6 +446,8 @@ func baseControllerClusterRole() *rbacv1.ClusterRole {
 					"virtualmachineinstances/removevolume",
 					"virtualmachineinstances/backup",
 					"virtualmachineinstances/redefine-checkpoint",
+					"virtualmachineinstances/addresourceclaim",
+					"virtualmachineinstances/removeresourceclaim",
 					"virtualmachineinstances/freeze",
 					"virtualmachineinstances/unfreeze",
 					"virtualmachineinstances/reset",

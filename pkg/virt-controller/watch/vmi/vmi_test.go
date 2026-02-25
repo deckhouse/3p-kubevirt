@@ -3013,7 +3013,7 @@ var _ = Describe("VirtualMachineInstance watcher", func() {
 					ConfigMap: &virtv1.ConfigMapVolumeSource{},
 				},
 			}
-			pod, err := controller.createAttachmentPodTemplate(vmi, virtlauncherPod, []*virtv1.Volume{invalidVolume})
+			pod, err := controller.createAttachmentPodTemplate(vmi, virtlauncherPod, []*virtv1.Volume{invalidVolume}, nil)
 			Expect(pod).To(BeNil())
 			Expect(err).To(HaveOccurred())
 		})
@@ -3033,7 +3033,7 @@ var _ = Describe("VirtualMachineInstance watcher", func() {
 					},
 				},
 			}
-			pod, err := controller.createAttachmentPodTemplate(vmi, virtlauncherPod, []*virtv1.Volume{nopvcVolume})
+			pod, err := controller.createAttachmentPodTemplate(vmi, virtlauncherPod, []*virtv1.Volume{nopvcVolume}, nil)
 			Expect(pod).To(BeNil())
 			Expect(err).To(HaveOccurred())
 		})
@@ -3059,7 +3059,7 @@ var _ = Describe("VirtualMachineInstance watcher", func() {
 					},
 				},
 			}
-			pod, err := controller.createAttachmentPodTemplate(vmi, virtlauncherPod, []*virtv1.Volume{volume})
+			pod, err := controller.createAttachmentPodTemplate(vmi, virtlauncherPod, []*virtv1.Volume{volume}, nil)
 			Expect(pod).To(BeNil())
 			Expect(err).To(HaveOccurred())
 		})
@@ -3094,7 +3094,7 @@ var _ = Describe("VirtualMachineInstance watcher", func() {
 					},
 				},
 			}
-			pod, err := controller.createAttachmentPodTemplate(vmi, virtlauncherPod, []*virtv1.Volume{volume})
+			pod, err := controller.createAttachmentPodTemplate(vmi, virtlauncherPod, []*virtv1.Volume{volume}, nil)
 			Expect(pod).To(BeNil())
 			Expect(err).ToNot(HaveOccurred())
 		})
@@ -3136,7 +3136,7 @@ var _ = Describe("VirtualMachineInstance watcher", func() {
 					},
 				},
 			}
-			pod, err := controller.createAttachmentPodTemplate(vmi, virtlauncherPod, []*virtv1.Volume{volume})
+			pod, err := controller.createAttachmentPodTemplate(vmi, virtlauncherPod, []*virtv1.Volume{volume}, nil)
 			Expect(pod).To(BeNil())
 			Expect(err).ToNot(HaveOccurred())
 		})
@@ -3172,7 +3172,7 @@ var _ = Describe("VirtualMachineInstance watcher", func() {
 					},
 				},
 			}
-			pod, err := controller.createAttachmentPodTemplate(vmi, virtlauncherPod, []*virtv1.Volume{volume})
+			pod, err := controller.createAttachmentPodTemplate(vmi, virtlauncherPod, []*virtv1.Volume{volume}, nil)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(pod.GenerateName).To(Equal("d8v-hp-testvmi-"))
 			found := false
@@ -3342,7 +3342,7 @@ var _ = Describe("VirtualMachineInstance watcher", func() {
 			}
 		}
 
-		DescribeTable("handleHotplugVolumes should properly react to input", func(hotplugVolumes []*virtv1.Volume, hotplugAttachmentPods []*k8sv1.Pod, createPodReaction func(*k8sv1.Pod, ...int), pvcFunc func(...int), pvcIndexes []int, orgStatus []virtv1.VolumeStatus, expectedEvent string, expectedErr common.SyncError) {
+		DescribeTable("handleHotplugs should properly react to input", func(hotplugVolumes []*virtv1.Volume, hotplugAttachmentPods []*k8sv1.Pod, createPodReaction func(*k8sv1.Pod, ...int), pvcFunc func(...int), pvcIndexes []int, orgStatus []virtv1.VolumeStatus, expectedEvent string, expectedErr common.SyncError) {
 			vmi := newPendingVirtualMachine("testvmi")
 			vmi.Status.VolumeStatus = orgStatus
 			virtlauncherPod := newPodForVirtualMachine(vmi, k8sv1.PodRunning)
@@ -3363,7 +3363,7 @@ var _ = Describe("VirtualMachineInstance watcher", func() {
 			if createPodReaction != nil {
 				createPodReaction(virtlauncherPod, pvcIndexes...)
 			}
-			syncError := controller.handleHotplugVolumes(hotplugVolumes, hotplugAttachmentPods, vmi, virtlauncherPod, datavolumes)
+			syncError := controller.handleHotplugs(hotplugVolumes, nil, hotplugAttachmentPods, vmi, virtlauncherPod, datavolumes)
 			if expectedErr != nil {
 				Expect(syncError).To(BeEquivalentTo(expectedErr))
 			} else {
@@ -3384,8 +3384,8 @@ var _ = Describe("VirtualMachineInstance watcher", func() {
 				nil),
 		)
 
-		DescribeTable("needsHandleHotplug", func(hotplugVolumes []*virtv1.Volume, hotplugAttachmentPods []*k8sv1.Pod, expected bool) {
-			res := needsHandleHotplug(hotplugVolumes, hotplugAttachmentPods)
+		DescribeTable("needsHandleVolumeHotplug", func(hotplugVolumes []*virtv1.Volume, hotplugAttachmentPods []*k8sv1.Pod, expected bool) {
+			res := needsHandleVolumeHotplug(hotplugVolumes, hotplugAttachmentPods)
 			Expect(res).To(Equal(expected))
 		},
 			Entry("should return false if volumes and attachmentpods are empty", makeVolumes(), makePods(), false),
@@ -3609,7 +3609,7 @@ var _ = Describe("VirtualMachineInstance watcher", func() {
 		)
 
 		DescribeTable("Should properly calculate if it needs to handle hotplug volumes", func(hotplugVolumes []*virtv1.Volume, attachmentPods []*k8sv1.Pod, match gomegaTypes.GomegaMatcher) {
-			Expect(needsHandleHotplug(hotplugVolumes, attachmentPods)).To(match)
+			Expect(needsHandleVolumeHotplug(hotplugVolumes, attachmentPods)).To(match)
 		},
 			Entry("nil volumes, nil attachmentPods", nil, nil, BeFalse()),
 			Entry("empty volumes, empty attachmentPods", []*virtv1.Volume{}, []*k8sv1.Pod{}, BeFalse()),
@@ -3637,7 +3637,7 @@ var _ = Describe("VirtualMachineInstance watcher", func() {
 		)
 
 		DescribeTable("Should find active and old pods", func(hotplugVolumes []*virtv1.Volume, attachmentPods []*k8sv1.Pod, expectedActive *k8sv1.Pod, expectedOld []*k8sv1.Pod) {
-			active, old := getActiveAndOldAttachmentPods(hotplugVolumes, attachmentPods)
+			active, old := getActiveAndOldAttachmentPodsForVolumes(hotplugVolumes, attachmentPods)
 			Expect(active).To(Equal(expectedActive))
 			Expect(old).To(ContainElements(expectedOld))
 		},
@@ -4362,7 +4362,7 @@ var _ = Describe("VirtualMachineInstance watcher", func() {
 					}
 				}
 			}
-			err := controller.cleanupAttachmentPods(currentPod, oldPods, vmi, len(readyVolumes))
+			err := controller.cleanupAttachmentPods(currentPod, oldPods, vmi, len(readyVolumes), 0)
 			Expect(err).ToNot(HaveOccurred())
 			if expectDelete {
 				eventReasons := []string{}
@@ -4463,7 +4463,7 @@ var _ = Describe("VirtualMachineInstance watcher", func() {
 			}
 			addPod(oldPod)
 
-			err := controller.cleanupAttachmentPods(nil, []*k8sv1.Pod{oldPod}, vmi, len(readyVolumes))
+			err := controller.cleanupAttachmentPods(nil, []*k8sv1.Pod{oldPod}, vmi, len(readyVolumes), 0)
 			Expect(err).ToNot(HaveOccurred())
 			if expectDelete {
 				testutils.ExpectEvent(recorder, kvcontroller.SuccessfulDeletePodReason)
@@ -4536,7 +4536,7 @@ var _ = Describe("VirtualMachineInstance watcher", func() {
 			}
 			addPod(oldPod)
 
-			err := controller.cleanupAttachmentPods(nil, []*k8sv1.Pod{oldPod}, vmi, len(readyVolumes))
+			err := controller.cleanupAttachmentPods(nil, []*k8sv1.Pod{oldPod}, vmi, len(readyVolumes), 0)
 			Expect(err).ToNot(HaveOccurred())
 			expectPodExists(oldPod.Namespace, oldPod.Name)
 		})

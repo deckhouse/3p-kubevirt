@@ -70,7 +70,7 @@ var _ = Describe("Controllers Domain Configurator", func() {
 			usbNeeded,
 			0,
 			[]api.Controller{
-				{Type: "usb", Index: "0", Model: "qemu-xhci"},
+				{Type: "usb", Index: "0", Model: "qemu-xhci", Ports: pointer.P(uint(15))},
 				{Type: "virtio-serial", Index: "0", Model: "virtio-test-model"},
 			}),
 		Entry("when USB is NOT needed and disk hotplug is enabled",
@@ -87,7 +87,7 @@ var _ = Describe("Controllers Domain Configurator", func() {
 			usbNeeded,
 			0,
 			[]api.Controller{
-				{Type: "usb", Index: "0", Model: "qemu-xhci"},
+				{Type: "usb", Index: "0", Model: "qemu-xhci", Ports: pointer.P(uint(15))},
 				{Type: "scsi", Index: "0", Model: "test-model"},
 				{Type: "virtio-serial", Index: "0", Model: "virtio-test-model"},
 			}),
@@ -114,7 +114,7 @@ var _ = Describe("Controllers Domain Configurator", func() {
 			usbNeeded,
 			0,
 			[]api.Controller{
-				{Type: "usb", Index: "0", Model: "qemu-xhci"},
+				{Type: "usb", Index: "0", Model: "qemu-xhci", Ports: pointer.P(uint(15))},
 				{Type: "scsi", Index: "0", Model: "test-model"},
 				{Type: "virtio-serial", Index: "0", Model: "virtio-test-model"},
 			}),

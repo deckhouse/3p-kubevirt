@@ -118,3 +118,17 @@ func (c *fakeVirtualMachines) EvacuateCancel(ctx context.Context, name string, e
 
 	return err
 }
+
+func (c *fakeVirtualMachines) AddResourceClaim(ctx context.Context, name string, addResourceClaimOptions *v1.AddResourceClaimOptions) error {
+	_, err := c.Fake.
+		Invokes(fake2.NewPutSubresourceAction(c.Resource(), c.Namespace(), "addresourceclaim", name, addResourceClaimOptions), nil)
+
+	return err
+}
+
+func (c *fakeVirtualMachines) RemoveResourceClaim(ctx context.Context, name string, removeResourceClaimOptions *v1.RemoveResourceClaimOptions) error {
+	_, err := c.Fake.
+		Invokes(fake2.NewPutSubresourceAction(c.Resource(), c.Namespace(), "removeresourceclaim", name, removeResourceClaimOptions), nil)
+
+	return err
+}

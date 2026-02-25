@@ -284,7 +284,7 @@ func (c *Controller) updateVolumeStatus(vmi *virtv1.VirtualMachineInstance, virt
 		return err
 	}
 
-	attachmentPod, _ := getActiveAndOldAttachmentPods(hotplugVolumes, attachmentPods)
+	attachmentPod, _ := getActiveAndOldAttachmentPodsForVolumes(hotplugVolumes, attachmentPods)
 
 	newStatus := make([]virtv1.VolumeStatus, 0)
 
@@ -311,7 +311,7 @@ func (c *Controller) updateVolumeStatus(vmi *virtv1.VirtualMachineInstance, virt
 		} else {
 			status.Name = volume.Name
 		}
-		// Remove from map so I can detect existing volumes that have been removed from spec.
+		// Remove from the map, so I can detect existing volumes that have been removed from spec.
 		delete(oldStatusMap, volume.Name)
 
 		if volume.MemoryDump != nil && status.MemoryDumpVolume == nil {

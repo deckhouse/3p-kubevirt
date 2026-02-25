@@ -924,7 +924,8 @@
       {
         "name": "nameValue",
         "resourceClaimName": "resourceClaimNameValue",
-        "resourceClaimTemplateName": "resourceClaimTemplateNameValue"
+        "resourceClaimTemplateName": "resourceClaimTemplateNameValue",
+        "hotpluggable": true
       }
     ],
     "utilityVolumes": [
@@ -1193,6 +1194,10 @@
       "gpuStatuses": [
         {
           "name": "nameValue",
+          "address": "addressValue",
+          "phase": "phaseValue",
+          "reason": "reasonValue",
+          "message": "messageValue",
           "deviceResourceClaimStatus": {
             "name": "nameValue",
             "resourceClaimName": "resourceClaimNameValue",
@@ -1204,12 +1209,20 @@
                 "deviceNumber": -12
               }
             }
+          },
+          "hotplug": {
+            "attachPodName": "attachPodNameValue",
+            "attachPodUID": "attachPodUIDValue"
           }
         }
       ],
       "hostDeviceStatuses": [
         {
           "name": "nameValue",
+          "address": "addressValue",
+          "phase": "phaseValue",
+          "reason": "reasonValue",
+          "message": "messageValue",
           "deviceResourceClaimStatus": {
             "name": "nameValue",
             "resourceClaimName": "resourceClaimNameValue",
@@ -1221,6 +1234,10 @@
                 "deviceNumber": -12
               }
             }
+          },
+          "hotplug": {
+            "attachPodName": "attachPodNameValue",
+            "attachPodUID": "attachPodUIDValue"
           }
         }
       ]
