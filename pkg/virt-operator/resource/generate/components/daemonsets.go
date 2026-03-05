@@ -383,6 +383,7 @@ func NewHandlerDaemonSet(config *operatorutil.KubeVirtDeploymentConfig, productN
 		{"kubelet-pods", kubeletPodsPath, "/pods", nil},
 		{"kubelet", util.KubeletRoot, util.KubeletRoot, &hostToContainer},
 		{"node-labeller", nodeLabellerVolumePath, nodeLabellerVolumePath, nil},
+		{"cilium-run", "/var/run/cilium", "/var/run/cilium", nil},
 	}
 
 	for _, volume := range volumes {

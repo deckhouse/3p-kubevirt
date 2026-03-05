@@ -242,6 +242,7 @@ var _ = Describe("VirtualMachineInstance migration target", func() {
 			migrationTargetPasstRepairHandler,
 			nil,
 			nil,
+			nil, // conntrack sync
 		)
 
 		controller.hotplugVolumeMounter = mockHotplugVolumeMounter

@@ -206,6 +206,7 @@ var _ = Describe("VirtualMachineInstance migration target", func() {
 			migrationSourcePasstRepairHandler,
 			nil,
 			nil,
+			nil, // conntrack sync
 		)
 
 		vmiTestUUID = uuid.NewUUID()

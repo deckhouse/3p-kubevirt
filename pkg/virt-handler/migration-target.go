@@ -65,6 +65,7 @@ import (
 	"kubevirt.io/kubevirt/pkg/util/migrations"
 	virtconfig "kubevirt.io/kubevirt/pkg/virt-config"
 	cmdclient "kubevirt.io/kubevirt/pkg/virt-handler/cmd-client"
+	"kubevirt.io/kubevirt/pkg/virt-handler/conntrack"
 	containerdisk "kubevirt.io/kubevirt/pkg/virt-handler/container-disk"
 	hotplugvolume "kubevirt.io/kubevirt/pkg/virt-handler/hotplug-disk"
 	"kubevirt.io/kubevirt/pkg/virt-handler/isolation"
@@ -100,6 +101,7 @@ type MigrationTargetController struct {
 	vmiExpectations                  *controller.UIDTrackingControllerExpectations
 	hotplugContainerDiskMounter      containerdisk.HotplugMounter
 	checksumCtrl                     *checksum_controller.Controller
+	conntrackSync                    *conntrack.TargetHandler
 }
 
 func NewMigrationTargetController(
@@ -123,6 +125,7 @@ func NewMigrationTargetController(
 	passtRepairHandler passtRepairTargetHandler,
 	pluginStore cache.Store,
 	pluginExecutor plugins.NodeHookExecutor,
+	conntrackSync *conntrack.TargetHandler,
 ) (*MigrationTargetController, error) {
 	queue := workqueue.NewTypedRateLimitingQueueWithConfig[string](
 		workqueue.DefaultTypedControllerRateLimiter[string](),
@@ -175,6 +178,7 @@ func NewMigrationTargetController(
 		passtRepairHandler:               passtRepairHandler,
 		pluginExecutor:                   pluginExecutor,
 		vmiExpectations:                  controller.NewUIDTrackingControllerExpectations(controller.NewControllerExpectations()),
+		conntrackSync:                    conntrackSync,
 
 		hotplugContainerDiskMounter: containerdisk.NewHotplugMounter(
 			podIsolationDetector,
@@ -562,6 +566,9 @@ func (c *MigrationTargetController) finalCleanup(vmi *v1.VirtualMachineInstance,
 
 	defer c.migrationProxy.StopTargetListener(migrationProxyKey(vmi))
 	defer c.launcherClients.CloseLauncherClient(vmi)
+	if c.conntrackSync != nil {
+		defer c.conntrackSync.Cleanup(vmi.UID)
+	}
 	client, err := c.launcherClients.GetLauncherClient(vmi)
 	if err != nil {
 		return err
@@ -788,6 +795,14 @@ func (c *MigrationTargetController) handleTargetMigrationProxy(vmi *v1.VirtualMa
 		destSocketFile := migrationproxy.SourceUnixFile(baseDir, key)
 		migrationTargetSockets = append(migrationTargetSockets, destSocketFile)
 	}
+
+	// Add CT sync socket to migration proxy
+	if c.conntrackSync != nil {
+		ctSyncKey := migrationproxy.ConstructProxyKey(vmiUID, migrationproxy.ConntrackSyncPort)
+		ctSyncSocketFile := migrationproxy.SourceUnixFile(baseDir, ctSyncKey)
+		migrationTargetSockets = append(migrationTargetSockets, ctSyncSocketFile)
+	}
+
 	err = c.StartMigrationProxyInVirtLauncher(client)
 	if err != nil {
 		return err
@@ -1051,6 +1066,33 @@ func (c *MigrationTargetController) processVMI(vmi *v1.VirtualMachineInstance) (
 	err = c.handleTargetMigrationProxy(vmi, client)
 	if err != nil {
 		return fmt.Errorf("failed to handle post sync migration proxy: %v", err), false
+	}
+
+	// Start CT sync listeners for conntrack synchronization during migration
+	if c.conntrackSync != nil {
+		res, err := c.podIsolationDetector.Detect(vmi)
+		if err != nil {
+			log.Log.Object(vmi).Warningf("Conntrack sync: failed to detect pod isolation: %v", err)
+		} else {
+			vmiUID := migrationProxyKey(vmi)
+			baseDir := fmt.Sprintf(filepath.Join(c.virtLauncherFSRunDirPattern, "kubevirt"), res.Pid())
+			ctSyncKey := migrationproxy.ConstructProxyKey(vmiUID, migrationproxy.ConntrackSyncPort)
+			ctSyncSocketPath := migrationproxy.SourceUnixFile(baseDir, ctSyncKey)
+			if err := c.conntrackSync.StartProxyListener(vmi.UID, ctSyncSocketPath); err != nil {
+				log.Log.Object(vmi).Warningf("Conntrack sync: failed to start proxy listener: %v", err)
+			}
+		}
+
+		// Start hook listener for libvirt hook
+		podDir, err := cmdclient.FindPodDirOnHost(vmi, cmdclient.SocketDirectoryOnHost)
+		if err != nil {
+			log.Log.Object(vmi).Warningf("Conntrack sync: failed to find pod directory: %v", err)
+		} else {
+			hookSocketPath := filepath.Join(podDir, "conntrack-hook.sock")
+			if err := c.conntrackSync.StartHookListener(vmi.UID, hookSocketPath); err != nil {
+				log.Log.Object(vmi).Warningf("Conntrack sync: failed to start hook listener: %v", err)
+			}
+		}
 	}
 
 	c.recorder.Event(vmi, k8sv1.EventTypeNormal, v1.PreparingTarget.String(), VMIMigrationTargetPrepared)
