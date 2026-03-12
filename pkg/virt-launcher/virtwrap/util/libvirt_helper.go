@@ -219,7 +219,7 @@ func (l LibvirtWrapper) StartVirtqemud(stopChan chan struct{}) {
 			exitChan := make(chan struct{})
 			args := []string{"-f", "/var/run/libvirt/virtqemud.conf", "--no-admin-srv", "--no-ro-srv"}
 			cmd := exec.Command("/usr/sbin/virtqemud", args...)
-			cmd.Env = append(cmd.Env, fmt.Sprintf("LIBVIRT_UNIX_SOCKET_AUTH_PID=%d", os.Getpid()))
+			cmd.Env = append(os.Environ(), fmt.Sprintf("LIBVIRT_UNIX_SOCKET_AUTH_PID=%d", os.Getpid()))
 
 			// connect libvirt's stderr to our own stdout in order to see the logs in the container logs
 			reader, err := cmd.StderrPipe()
