@@ -354,6 +354,10 @@ func computePodSecurityContext(vmi *v1.VirtualMachineInstance, seccomp *k8sv1.Se
 		psc.RunAsUser = &nonRootUser
 		psc.RunAsGroup = &nonRootUser
 		psc.RunAsNonRoot = pointer.P(true)
+		psc.Sysctls = append(psc.Sysctls, k8sv1.Sysctl{
+			Name:  "net.ipv4.ip_unprivileged_port_start",
+			Value: "0",
+		})
 	} else {
 		rootUser := int64(util.RootUser)
 		psc.RunAsUser = &rootUser

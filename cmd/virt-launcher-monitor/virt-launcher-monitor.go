@@ -36,8 +36,6 @@ import (
 
 	"github.com/spf13/pflag"
 
-	"golang.org/x/sys/unix"
-
 	"kubevirt.io/client-go/log"
 )
 
@@ -102,9 +100,6 @@ func RunAndMonitor(containerDiskDir, uid string) (int, error) {
 	args := removeArg(os.Args[1:], "--keep-after-failure")
 
 	cmd := exec.Command("/usr/bin/virt-launcher", args...)
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		AmbientCaps: []uintptr{unix.CAP_NET_BIND_SERVICE},
-	}
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
