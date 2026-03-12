@@ -77,6 +77,29 @@ const (
 	StartStrategyPaused StartStrategy = "Paused"
 )
 
+// HostDeviceMigrationStrategy defines how non-migratable hotplug host devices
+// attached to a VMI are handled during live migration.
+//
+// Non-hotplug host devices must always be migratable. If a non-hotplug host
+// device cannot be migrated, the migration will be rejected regardless of
+// the selected strategy.
+type HostDeviceMigrationStrategy string
+
+const (
+	// HostDeviceMigrationStrategyPreventMigration blocks migration if a
+	// non-migratable hotplug host device is attached to the VMI.
+	HostDeviceMigrationStrategyPreventMigration HostDeviceMigrationStrategy = "PreventMigration"
+
+	// HostDeviceMigrationStrategyDetachBeforeMigration detaches
+	// non-migratable hotplug host devices before migration starts.
+	HostDeviceMigrationStrategyDetachBeforeMigration HostDeviceMigrationStrategy = "DetachHotplugDevicesBeforeMigration"
+
+	// HostDeviceMigrationStrategyIgnoreOnTarget excludes non-migratable
+	// hotplug host devices from the target domain XML and continues
+	// migration without them.
+	HostDeviceMigrationStrategyIgnoreOnTarget HostDeviceMigrationStrategy = "IgnoreHotplugDevicesOnTarget"
+)
+
 // VirtualMachineInstanceSpec is a description of a VirtualMachineInstance.
 type VirtualMachineInstanceSpec struct {
 
@@ -122,6 +145,13 @@ type VirtualMachineInstanceSpec struct {
 	//
 	// +optional
 	StartStrategy *StartStrategy `json:"startStrategy,omitempty"`
+	// HostDeviceMigrationStrategy defines how non-migratable hotplug host devices
+	// attached to the VMI are handled during live migration.
+	// Non-hotplug host devices must always be migratable and will block migration
+	// if they cannot be migrated.
+	//
+	// +optional
+	HostDeviceMigrationStrategy *HostDeviceMigrationStrategy `json:"hostDeviceMigrationStrategy,omitempty"`
 	// Grace period observed after signalling a VirtualMachineInstance to stop after which the VirtualMachineInstance is force terminated.
 	TerminationGracePeriodSeconds *int64 `json:"terminationGracePeriodSeconds,omitempty"`
 	// List of volumes that can be mounted by disks belonging to the vmi.
@@ -367,6 +397,10 @@ type DeviceResourceClaimStatus struct {
 	// about the device, like pciAddress or mdevUUID
 	// +optional
 	Attributes *DeviceAttribute `json:"attributes,omitempty"`
+	// AllowMultipleAllocations is a flag to allow multiple allocations of the same device
+	AllowMultipleAllocations bool `json:"allowMultipleAllocations,omitempty"`
+	// BindsToNode is a flag to bind the device to the node
+	BindsToNode bool `json:"bindsToNode,omitempty"`
 }
 
 // DeviceAttribute must have exactly one field set.

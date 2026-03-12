@@ -49,6 +49,10 @@ import (
 	migrationproxy "kubevirt.io/kubevirt/pkg/virt-handler/migration-proxy"
 	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/api"
 
+	"slices"
+
+	"k8s.io/utils/ptr"
+
 	hotplugdisk "kubevirt.io/kubevirt/pkg/hotplug-disk"
 	storagetypes "kubevirt.io/kubevirt/pkg/storage/types"
 	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/cli"
@@ -123,7 +127,7 @@ func generateMigrationFlags(isBlockMigration, migratePaused bool, options *cmdcl
 
 }
 
-func hotUnplugHostDevices(virConn cli.Connection, dom cli.VirDomain) error {
+func hotUnplugHostDevices(virConn cli.Connection, dom cli.VirDomain, hostDevicesForDetach map[string]struct{}) error {
 	domainSpec, err := util.GetDomainSpecWithFlags(dom, 0)
 	if err != nil {
 		return err
@@ -135,10 +139,20 @@ func hotUnplugHostDevices(virConn cli.Connection, dom cli.VirDomain) error {
 	hostDevices = append(hostDevices, sriovDevices...)
 
 	usbDevices := dra.FilterUSBHostDevicesByAlias(domainSpec.Devices.HostDevices, true)
+	usbDevices = retainDevicesForDetach(usbDevices, hostDevicesForDetach)
 	hostDevices = append(hostDevices, usbDevices...)
 
 	err = safelyDetachHostDevices(hostDevices, virConn, dom)
 	return err
+}
+
+func retainDevicesForDetach(devices []api.HostDevice, hostDevicesForDetach map[string]struct{}) []api.HostDevice {
+	devices = slices.DeleteFunc(devices, func(device api.HostDevice) bool {
+		name := strings.TrimPrefix(device.Alias.GetName(), dra.DRAHotplugHostDeviceAliasPrefix)
+		_, ok := hostDevicesForDetach[name]
+		return ok
+	})
+	return devices
 }
 
 func generateDomainForTargetCPUSetAndTopology(vmi *v1.VirtualMachineInstance, domSpec *api.DomainSpec) (*api.Domain, error) {
@@ -231,6 +245,8 @@ func migratableDomXML(dom cli.VirDomain, vmi *v1.VirtualMachineInstance, domSpec
 		log.Log.Object(vmi).Reason(err).Error("Failed to set size for local disk.")
 		return "", err
 	}
+
+	configureHotplugHostDevicesForMigrate(domcfg, vmi)
 
 	// Put back common model if specified in VMI.
 	vmiCPU := vmi.Spec.Domain.CPU
@@ -1089,6 +1105,35 @@ func configureLocalDiskToMigrate(dom *libvirtxml.Domain, vmi *v1.VirtualMachineI
 	return nil
 }
 
+func configureHotplugHostDevicesForMigrate(dom *libvirtxml.Domain, vmi *v1.VirtualMachineInstance) {
+	if dom == nil || dom.Devices == nil || vmi == nil || vmi.Status.DeviceStatus == nil {
+		return
+	}
+
+	if ptr.Deref(vmi.Spec.HostDeviceMigrationStrategy, v1.HostDeviceMigrationStrategyPreventMigration) != v1.HostDeviceMigrationStrategyIgnoreOnTarget {
+		return
+	}
+
+	nonMigratableHostDevices := make(map[string]struct{})
+
+	for _, status := range vmi.Status.DeviceStatus.HostDeviceStatuses {
+		if status.Hotplug != nil && status.DeviceResourceClaimStatus != nil {
+			if status.DeviceResourceClaimStatus.AllowMultipleAllocations && status.DeviceResourceClaimStatus.BindsToNode {
+				nonMigratableHostDevices[status.Name] = struct{}{}
+			}
+		}
+	}
+
+	dom.Devices.Hostdevs = slices.DeleteFunc(dom.Devices.Hostdevs, func(hd libvirtxml.DomainHostdev) bool {
+		if strings.HasPrefix(hd.Alias.Name, dra.DRAHotplugHostDeviceAliasPrefix) {
+			name := strings.TrimPrefix(hd.Alias.Name, dra.DRAHotplugHostDeviceAliasPrefix)
+			_, ok := nonMigratableHostDevices[name]
+			return ok
+		}
+		return false
+	})
+}
+
 func (l *LibvirtDomainManager) migrateHelper(vmi *v1.VirtualMachineInstance, options *cmdclient.MigrationOptions) error {
 
 	var err error
@@ -1113,7 +1158,9 @@ func (l *LibvirtDomainManager) migrateHelper(vmi *v1.VirtualMachineInstance, opt
 		l.domainModifyLock.Lock()
 		defer l.domainModifyLock.Unlock()
 
-		if err := prepareDomainForMigration(l.virConn, dom); err != nil {
+		hostDevicesForDetach := getHostDevicesForDetach(vmi)
+
+		if err := prepareDomainForMigration(l.virConn, dom, hostDevicesForDetach); err != nil {
 			return fmt.Errorf("error encountered during preparing domain for migration: %v", err)
 		}
 		domSpec, err := l.getDomainSpec(dom)
@@ -1153,10 +1200,36 @@ func (l *LibvirtDomainManager) migrateHelper(vmi *v1.VirtualMachineInstance, opt
 	return nil
 }
 
+func getHostDevicesForDetach(vmi *v1.VirtualMachineInstance) map[string]struct{} {
+	switch ptr.Deref(vmi.Spec.HostDeviceMigrationStrategy, v1.HostDeviceMigrationStrategyPreventMigration) {
+	case v1.HostDeviceMigrationStrategyPreventMigration, v1.HostDeviceMigrationStrategyIgnoreOnTarget:
+		return nil
+	}
+
+	hostDevices := make(map[string]struct{})
+
+	if vmi.Status.DeviceStatus != nil {
+		for _, deviceStatus := range vmi.Status.DeviceStatus.HostDeviceStatuses {
+			if shouldBeDetachedHostDevice(deviceStatus) {
+				hostDevices[deviceStatus.Name] = struct{}{}
+			}
+		}
+	}
+
+	return hostDevices
+}
+
+func shouldBeDetachedHostDevice(info v1.DeviceStatusInfo) bool {
+	if info.Hotplug != nil && info.DeviceResourceClaimStatus != nil {
+		return info.DeviceResourceClaimStatus.AllowMultipleAllocations && info.DeviceResourceClaimStatus.BindsToNode
+	}
+	return false
+}
+
 // prepareDomainForMigration perform necessary operation
 // on the source domain just before migration
-func prepareDomainForMigration(virtConn cli.Connection, domain cli.VirDomain) error {
-	return hotUnplugHostDevices(virtConn, domain)
+func prepareDomainForMigration(virtConn cli.Connection, domain cli.VirDomain, hostDevicesForDetach map[string]struct{}) error {
+	return hotUnplugHostDevices(virtConn, domain, hostDevicesForDetach)
 }
 
 func shouldImmediatelyFailMigration(vmi *v1.VirtualMachineInstance) bool {

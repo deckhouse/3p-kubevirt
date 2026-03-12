@@ -19582,6 +19582,20 @@ func schema_kubevirtio_api_core_v1_DeviceResourceClaimStatus(ref common.Referenc
 							Ref:         ref("kubevirt.io/api/core/v1.DeviceAttribute"),
 						},
 					},
+					"allowMultipleAllocations": {
+						SchemaProps: spec.SchemaProps{
+							Description: "AllowMultipleAllocations is a flag to allow multiple allocations of the same device",
+							Type:        []string{"boolean"},
+							Format:      "",
+						},
+					},
+					"bindsToNode": {
+						SchemaProps: spec.SchemaProps{
+							Description: "BindsToNode is a flag to bind the device to the node",
+							Type:        []string{"boolean"},
+							Format:      "",
+						},
+					},
 				},
 			},
 		},
@@ -28147,6 +28161,13 @@ func schema_kubevirtio_api_core_v1_VirtualMachineInstanceSpec(ref common.Referen
 					"startStrategy": {
 						SchemaProps: spec.SchemaProps{
 							Description: "StartStrategy can be set to \"Paused\" if Virtual Machine should be started in paused state.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"hostDeviceMigrationStrategy": {
+						SchemaProps: spec.SchemaProps{
+							Description: "HostDeviceMigrationStrategy defines how non-migratable hotplug host devices attached to the VMI are handled during live migration. Non-hotplug host devices must always be migratable and will block migration if they cannot be migrated.",
 							Type:        []string{"string"},
 							Format:      "",
 						},

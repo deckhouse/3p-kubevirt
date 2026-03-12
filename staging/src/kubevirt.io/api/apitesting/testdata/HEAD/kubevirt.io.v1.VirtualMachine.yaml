@@ -629,6 +629,7 @@ spec:
           requests:
             requestsKey: "0"
       evictionStrategy: evictionStrategyValue
+      hostDeviceMigrationStrategy: hostDeviceMigrationStrategyValue
       hostname: hostnameValue
       livenessProbe:
         exec:

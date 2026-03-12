@@ -46,6 +46,8 @@ import (
 	"kubevirt.io/client-go/kubecli"
 	"kubevirt.io/client-go/log"
 
+	"k8s.io/utils/ptr"
+
 	"kubevirt.io/kubevirt/pkg/apimachinery/patch"
 	"kubevirt.io/kubevirt/pkg/controller"
 	drautil "kubevirt.io/kubevirt/pkg/dra"
@@ -562,7 +564,7 @@ func (c *DRAStatusController) getGPUStatus(gpuInfo DeviceInfo, pod *k8sv1.Pod) (
 	}
 
 	gpuStatus.DeviceResourceClaimStatus.Name = &device.Device
-	pciAddress, mDevUUID, _, err := c.getDeviceAttributes(pod.Spec.NodeName, device.Device, device.Driver)
+	pciAddress, mDevUUID, _, allowMultipleAllocations, bindsToNode, err := c.getDeviceAttributes(pod.Spec.NodeName, device.Device, device.Driver)
 	if err != nil {
 		return gpuStatus, err
 	}
@@ -577,6 +579,8 @@ func (c *DRAStatusController) getGPUStatus(gpuInfo DeviceInfo, pod *k8sv1.Pod) (
 		attrs.MDevUUID = &mDevUUID
 	}
 	gpuStatus.DeviceResourceClaimStatus.Attributes = &attrs
+	gpuStatus.DeviceResourceClaimStatus.AllowMultipleAllocations = allowMultipleAllocations
+	gpuStatus.DeviceResourceClaimStatus.BindsToNode = bindsToNode
 
 	return gpuStatus, nil
 }
@@ -629,17 +633,16 @@ func (c *DRAStatusController) getUSBDeviceAttributeFromClaim(claim *resourcev1.R
 }
 
 // getDeviceAttributes returns the pciAddress, mdevUUID, usbAddress of the device. It will return all if found, otherwise it will return empty strings or nil.
-func (c *DRAStatusController) getDeviceAttributes(nodeName string, deviceName, driverName string) (string, string, *v1.USBAddress, error) {
+func (c *DRAStatusController) getDeviceAttributes(nodeName string, deviceName, driverName string) (string, string, *v1.USBAddress, bool, bool, error) {
 	resourceSlices, err := c.getResourceSlices(nodeName)
 	if err != nil {
-		return "", "", nil, err
+		return "", "", nil, false, false, err
 	}
 
 	for _, rs := range resourceSlices {
 		if rs.Spec.Driver == driverName {
 			for _, device := range rs.Spec.Devices {
 				if device.Name == deviceName {
-
 					var (
 						pciAddress string
 						mdevUUID   string
@@ -654,20 +657,20 @@ func (c *DRAStatusController) getDeviceAttributes(nodeName string, deviceName, d
 						} else if string(key) == USBAddressAttributeKey && value.StringValue != nil {
 							usbAddress, err = resolveUSBAddress(*value.StringValue)
 							if err != nil {
-								return "", "", nil, err
+								return "", "", nil, false, false, err
 							}
 						}
 					}
 					if pciAddress == "" && mdevUUID == "" && usbAddress == nil {
-						return "", "", nil, fmt.Errorf("neither %s,%s or %s valid attribute found for device %s", PCIAddressDeviceAttributeKey, MDevUUIDDeviceAttributeKey, USBAddressAttributeKey, deviceName)
+						return "", "", nil, false, false, fmt.Errorf("neither %s,%s or %s valid attribute found for device %s", PCIAddressDeviceAttributeKey, MDevUUIDDeviceAttributeKey, USBAddressAttributeKey, deviceName)
 					}
 
-					return pciAddress, mdevUUID, usbAddress, nil
+					return pciAddress, mdevUUID, usbAddress, ptr.Deref(device.AllowMultipleAllocations, false), ptr.Deref(device.BindsToNode, false), nil
 				}
 			}
 		}
 	}
-	return "", "", nil, nil
+	return "", "", nil, false, false, nil
 }
 
 func (c *DRAStatusController) getResourceSlices(nodeName string) ([]*resourcev1.ResourceSlice, error) {
@@ -854,7 +857,7 @@ func (c *DRAStatusController) fillResourceClaimStatus(vmi *v1.VirtualMachineInst
 
 	hostDeviceStatus.DeviceResourceClaimStatus.Name = &device.Device
 
-	pciAddress, mDevUUID, usbAddress, err := c.getDeviceAttributes(pod.Spec.NodeName, device.Device, device.Driver)
+	pciAddress, mDevUUID, usbAddress, allowMultipleAllocations, bindsToNode, err := c.getDeviceAttributes(pod.Spec.NodeName, device.Device, device.Driver)
 	if err != nil {
 		return hostDeviceStatus, err
 
@@ -884,6 +887,8 @@ func (c *DRAStatusController) fillResourceClaimStatus(vmi *v1.VirtualMachineInst
 		attrs.USBAddress = usbAddress
 	}
 	hostDeviceStatus.DeviceResourceClaimStatus.Attributes = &attrs
+	hostDeviceStatus.DeviceResourceClaimStatus.AllowMultipleAllocations = allowMultipleAllocations
+	hostDeviceStatus.DeviceResourceClaimStatus.BindsToNode = bindsToNode
 
 	return hostDeviceStatus, nil
 }

@@ -59,6 +59,8 @@ import (
 	"kubevirt.io/client-go/kubecli"
 	"kubevirt.io/client-go/log"
 
+	"k8s.io/utils/ptr"
+
 	"kubevirt.io/kubevirt/pkg/config"
 	"kubevirt.io/kubevirt/pkg/controller"
 	drautil "kubevirt.io/kubevirt/pkg/dra"
@@ -1486,8 +1488,12 @@ func (c *VirtualMachineController) calculateLiveMigrationCondition(vmi *v1.Virtu
 		return newNonMigratableCondition(err.Error(), v1.VirtualMachineInstanceReasonCPUModeNotMigratable), isBlockMigration
 	}
 
-	if vmiContainsPCIHostDevice(vmi) {
-		return newNonMigratableCondition("VMI uses a PCI host devices", v1.VirtualMachineInstanceReasonHostDeviceNotMigratable), isBlockMigration
+	if vmiContainsNonMigratableHostDevices(vmi) {
+		return newNonMigratableCondition("VMI uses non-migratable host devices", v1.VirtualMachineInstanceReasonHostDeviceNotMigratable), isBlockMigration
+	}
+
+	if vmiContainsNonMigratableGpuDevices(vmi) {
+		return newNonMigratableCondition("VMI uses non-migratable GPU devices", v1.VirtualMachineInstanceReasonHostDeviceNotMigratable), isBlockMigration
 	}
 
 	if util.IsSEVVMI(vmi) {
@@ -1522,6 +1528,53 @@ func (c *VirtualMachineController) calculateLiveMigrationCondition(vmi *v1.Virtu
 
 func vmiContainsPCIHostDevice(vmi *v1.VirtualMachineInstance) bool {
 	return len(vmi.Spec.Domain.Devices.HostDevices) > 0 || len(vmi.Spec.Domain.Devices.GPUs) > 0
+}
+
+func vmiContainsNonMigratableHostDevices(vmi *v1.VirtualMachineInstance) bool {
+	if len(vmi.Spec.Domain.Devices.HostDevices) == 0 {
+		return false
+	}
+
+	// cannot migrate if host devices exist, but device status is not set
+	if vmi.Status.DeviceStatus == nil {
+		return true
+	}
+
+	hostDevicesSet := make(map[string]struct{}, len(vmi.Spec.Domain.Devices.HostDevices))
+	for _, hd := range vmi.Spec.Domain.Devices.HostDevices {
+		hostDevicesSet[hd.Name] = struct{}{}
+	}
+
+	strategy := ptr.Deref(vmi.Spec.HostDeviceMigrationStrategy, v1.HostDeviceMigrationStrategyPreventMigration)
+
+	for _, hd := range vmi.Status.DeviceStatus.HostDeviceStatuses {
+		if !deviceResourceClaimIsMigratable(strategy, hd.DeviceResourceClaimStatus, hd.Hotplug != nil) {
+			return true
+		}
+		delete(hostDevicesSet, hd.Name)
+	}
+
+	return len(hostDevicesSet) > 0
+}
+
+func vmiContainsNonMigratableGpuDevices(vmi *v1.VirtualMachineInstance) bool {
+	return len(vmi.Spec.Domain.Devices.GPUs) > 0
+}
+
+func deviceResourceClaimIsMigratable(strategy v1.HostDeviceMigrationStrategy, status *v1.DeviceResourceClaimStatus, hotplug bool) bool {
+	if status == nil {
+		return false
+	}
+
+	switch strategy {
+	case v1.HostDeviceMigrationStrategyPreventMigration:
+	case v1.HostDeviceMigrationStrategyDetachBeforeMigration, v1.HostDeviceMigrationStrategyIgnoreOnTarget:
+		if hotplug {
+			return status.AllowMultipleAllocations
+		}
+	}
+
+	return status.AllowMultipleAllocations && !status.BindsToNode
 }
 
 type multipleNonMigratableCondition struct {
