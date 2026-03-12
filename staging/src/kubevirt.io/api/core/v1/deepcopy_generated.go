@@ -6228,6 +6228,11 @@ func (in *VirtualMachineInstanceSpec) DeepCopyInto(out *VirtualMachineInstanceSp
 		*out = new(StartStrategy)
 		**out = **in
 	}
+	if in.HostDeviceMigrationStrategy != nil {
+		in, out := &in.HostDeviceMigrationStrategy, &out.HostDeviceMigrationStrategy
+		*out = new(HostDeviceMigrationStrategy)
+		**out = **in
+	}
 	if in.TerminationGracePeriodSeconds != nil {
 		in, out := &in.TerminationGracePeriodSeconds, &out.TerminationGracePeriodSeconds
 		*out = new(int64)

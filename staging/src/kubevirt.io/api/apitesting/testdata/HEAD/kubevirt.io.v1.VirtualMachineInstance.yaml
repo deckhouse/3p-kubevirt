@@ -433,6 +433,7 @@ spec:
       requests:
         requestsKey: "0"
   evictionStrategy: evictionStrategyValue
+  hostDeviceMigrationStrategy: hostDeviceMigrationStrategyValue
   hostname: hostnameValue
   livenessProbe:
     exec:
@@ -614,12 +615,14 @@ status:
     gpuStatuses:
     - address: addressValue
       deviceResourceClaimStatus:
+        allowMultipleAllocations: true
         attributes:
           mDevUUID: mDevUUIDValue
           pciAddress: pciAddressValue
           usbAddress:
             bus: -3
             deviceNumber: -12
+        bindsToNode: true
         name: nameValue
         resourceClaimName: resourceClaimNameValue
       hotplug:
@@ -632,12 +635,14 @@ status:
     hostDeviceStatuses:
     - address: addressValue
       deviceResourceClaimStatus:
+        allowMultipleAllocations: true
         attributes:
           mDevUUID: mDevUUIDValue
           pciAddress: pciAddressValue
           usbAddress:
             bus: -3
             deviceNumber: -12
+        bindsToNode: true
         name: nameValue
         resourceClaimName: resourceClaimNameValue
       hotplug:

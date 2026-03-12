@@ -663,6 +663,7 @@
     ],
     "evictionStrategy": "evictionStrategyValue",
     "startStrategy": "startStrategyValue",
+    "hostDeviceMigrationStrategy": "hostDeviceMigrationStrategyValue",
     "terminationGracePeriodSeconds": -29,
     "volumes": [
       {
@@ -1151,7 +1152,9 @@
                 "bus": -3,
                 "deviceNumber": -12
               }
-            }
+            },
+            "allowMultipleAllocations": true,
+            "bindsToNode": true
           },
           "hotplug": {
             "attachPodName": "attachPodNameValue",
@@ -1176,7 +1179,9 @@
                 "bus": -3,
                 "deviceNumber": -12
               }
-            }
+            },
+            "allowMultipleAllocations": true,
+            "bindsToNode": true
           },
           "hotplug": {
             "attachPodName": "attachPodNameValue",
