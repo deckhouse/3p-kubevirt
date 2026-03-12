@@ -18,7 +18,6 @@ import (
 
 	"kubevirt.io/kubevirt/pkg/virt-controller/services"
 
-	"golang.org/x/sys/unix"
 	k8sv1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"libvirt.org/go/libvirt"
@@ -221,11 +220,6 @@ func (l LibvirtWrapper) StartVirtqemud(stopChan chan struct{}) {
 			args := []string{"-f", "/var/run/libvirt/virtqemud.conf", "--no-admin-srv", "--no-ro-srv"}
 			cmd := exec.Command("/usr/sbin/virtqemud", args...)
 			cmd.Env = append(cmd.Env, fmt.Sprintf("LIBVIRT_UNIX_SOCKET_AUTH_PID=%d", os.Getpid()))
-			if l.user != 0 {
-				cmd.SysProcAttr = &syscall.SysProcAttr{
-					AmbientCaps: []uintptr{unix.CAP_NET_BIND_SERVICE},
-				}
-			}
 
 			// connect libvirt's stderr to our own stdout in order to see the logs in the container logs
 			reader, err := cmd.StderrPipe()
