@@ -83,6 +83,10 @@ const (
 // Non-hotplug host devices must always be migratable. If a non-hotplug host
 // device cannot be migrated, the migration will be rejected regardless of
 // the selected strategy.
+// Possible values are:
+// - "PreventMigration": blocks migration if a non-migratable hotplug host device is attached to the VMI.
+// - "DetachHotplugDevicesBeforeMigration": detaches non-migratable hotplug host devices before migration starts.
+// - "IgnoreHotplugDevicesOnTarget": ignores non-migratable hotplug host devices on the target.
 type HostDeviceMigrationStrategy string
 
 const (
@@ -94,9 +98,8 @@ const (
 	// non-migratable hotplug host devices before migration starts.
 	HostDeviceMigrationStrategyDetachBeforeMigration HostDeviceMigrationStrategy = "DetachHotplugDevicesBeforeMigration"
 
-	// HostDeviceMigrationStrategyIgnoreOnTarget excludes non-migratable
-	// hotplug host devices from the target domain XML and continues
-	// migration without them.
+	// HostDeviceMigrationStrategyIgnoreOnTarget sets startupPolicy to "optional" for non-migratable hotplug host devices
+	// to target domain XML.
 	HostDeviceMigrationStrategyIgnoreOnTarget HostDeviceMigrationStrategy = "IgnoreHotplugDevicesOnTarget"
 )
 
