@@ -465,6 +465,10 @@ func defaultVolumes() []k8sv1.Volume {
 			VolumeSource: k8sv1.VolumeSource{EmptyDir: &k8sv1.EmptyDirVolumeSource{}},
 		},
 		{
+			Name:         devBusUsbVolumeName,
+			VolumeSource: k8sv1.VolumeSource{EmptyDir: &k8sv1.EmptyDirVolumeSource{}},
+		},
+		{
 			Name:         "private",
 			VolumeSource: k8sv1.VolumeSource{EmptyDir: &k8sv1.EmptyDirVolumeSource{}},
 		}, {
@@ -500,6 +504,7 @@ func defaultVolumeMounts() []k8sv1.VolumeMount {
 		{Name: varCacheLibvirtVolumeName, MountPath: varCacheLibvirt},
 		{Name: tmpVolumeName, MountPath: tmp},
 		{Name: varLibSWTPMLocalCAVolumeName, MountPath: varLibSWTPMLocalCA},
+		{Name: devBusUsbVolumeName, MountPath: devBusUsb},
 		{Name: "private", MountPath: "/var/run/kubevirt-private"},
 		{Name: "public", MountPath: "/var/run/kubevirt"},
 		{Name: "ephemeral-disks", MountPath: "disk1"},

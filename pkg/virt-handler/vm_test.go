@@ -2550,7 +2550,7 @@ var _ = Describe("VirtualMachineInstance", func() {
 					Expect(condition.Type).To(Equal(v1.VirtualMachineInstanceIsMigratable))
 					Expect(condition.Status).To(Equal(k8sv1.ConditionFalse))
 					Expect(condition.Reason).To(Equal(v1.VirtualMachineInstanceReasonHostDeviceNotMigratable))
-					Expect(condition.Message).To(Equal("VMI specifies non-migratable generic PCI host device"))
+					Expect(condition.Message).To(Equal("VMI uses non-migratable host devices"))
 				})
 
 				It("should not be allowed to live-migrate if the VMI uses passthrough PCI GPU", func() {

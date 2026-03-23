@@ -756,7 +756,8 @@ type HostDevice struct {
 }
 
 type HostDeviceSource struct {
-	Address *Address `xml:"address,omitempty"`
+	Address       *Address `xml:"address,omitempty"`
+	StartupPolicy string   `xml:"startupPolicy,attr,omitempty"`
 }
 
 type HostDevDriver struct {

@@ -1152,6 +1152,57 @@ func (t *TemplateService) containerForHotplugContainerDisk(ctrName, volName stri
 	}
 }
 
+func (t *TemplateService) RenderMigrationHotplugAttachmentPodTemplate(volumes []*v1.Volume, resourceClaims []*v1.VirtualMachineInstanceResourceClaim, ownerPod *k8sv1.Pod, vmi *v1.VirtualMachineInstance, claimMap map[string]*k8sv1.PersistentVolumeClaim) (*k8sv1.Pod, error) {
+	pod, err := t.RenderHotplugAttachmentPodTemplate(volumes, resourceClaims, ownerPod, vmi, claimMap)
+	if err != nil {
+		return nil, err
+	}
+
+	if vmi.Status.DeviceStatus == nil {
+		return pod, nil
+	}
+
+	strategy := v1.GetUSBMigrationStrategy(vmi)
+
+	switch strategy {
+	case v1.USBMigrationStrategyPrevent:
+		return pod, nil
+	case v1.USBMigrationStrategyDetach, v1.USBMigrationStrategyIgnore:
+	default:
+		return nil, fmt.Errorf("unknown host device migration strategy %v", strategy)
+	}
+
+	// delete non-migratable resource claims
+	deleteCandidates := make(map[string]struct{})
+	for _, deviceStatus := range vmi.Status.DeviceStatus.HostDeviceStatuses {
+		// skip non-usb devices
+		if deviceStatus.DeviceResourceClaimStatus == nil || deviceStatus.DeviceResourceClaimStatus.Attributes == nil || deviceStatus.DeviceResourceClaimStatus.Attributes.USBAddress == nil {
+			continue
+		}
+
+		if !deviceStatus.DeviceResourceClaimStatus.AllowMultipleAllocations || deviceStatus.DeviceResourceClaimStatus.BindsToNode {
+			deleteCandidates[deviceStatus.Name] = struct{}{}
+		}
+	}
+
+	if len(deleteCandidates) == 0 {
+		return pod, nil
+	}
+
+	if len(pod.Spec.ResourceClaims) > 0 {
+		pod.Spec.ResourceClaims = slices.DeleteFunc(pod.Spec.ResourceClaims, func(rc k8sv1.PodResourceClaim) bool {
+			_, ok := deleteCandidates[rc.Name]
+			return ok
+		})
+		pod.Spec.Containers[0].Resources.Claims = slices.DeleteFunc(pod.Spec.Containers[0].Resources.Claims, func(rc k8sv1.ResourceClaim) bool {
+			_, ok := deleteCandidates[rc.Name]
+			return ok
+		})
+	}
+
+	return pod, nil
+}
+
 func (t *TemplateService) RenderHotplugAttachmentPodTemplate(volumes []*v1.Volume, resourceClaims []*v1.VirtualMachineInstanceResourceClaim, ownerPod *k8sv1.Pod, vmi *v1.VirtualMachineInstance, claimMap map[string]*k8sv1.PersistentVolumeClaim) (*k8sv1.Pod, error) {
 	zero := int64(0)
 	runUser := int64(util.NonRootUID)

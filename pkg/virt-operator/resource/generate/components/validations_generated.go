@@ -15409,6 +15409,10 @@ var CRDsValidation map[string]string = map[string]string{
                     description: DeviceResourceClaimStatus reflects the DRA related
                       information for the device
                     properties:
+                      allowMultipleAllocations:
+                        description: AllowMultipleAllocations is a flag to allow multiple
+                          allocations of the same device
+                        type: boolean
                       attributes:
                         description: |-
                           Attributes are properties of the device that could be used by kubevirt and other copmonents to learn more
@@ -15437,6 +15441,10 @@ var CRDsValidation map[string]string = map[string]string{
                             - deviceNumber
                             type: object
                         type: object
+                      bindsToNode:
+                        description: BindsToNode is a flag to bind the device to the
+                          node
+                        type: boolean
                       name:
                         description: Name is the name of actual device on the host
                           provisioned by the driver as reflected in resourceclaim.status
@@ -15486,6 +15494,10 @@ var CRDsValidation map[string]string = map[string]string{
                     description: DeviceResourceClaimStatus reflects the DRA related
                       information for the device
                     properties:
+                      allowMultipleAllocations:
+                        description: AllowMultipleAllocations is a flag to allow multiple
+                          allocations of the same device
+                        type: boolean
                       attributes:
                         description: |-
                           Attributes are properties of the device that could be used by kubevirt and other copmonents to learn more
@@ -15514,6 +15526,10 @@ var CRDsValidation map[string]string = map[string]string{
                             - deviceNumber
                             type: object
                         type: object
+                      bindsToNode:
+                        description: BindsToNode is a flag to bind the device to the
+                          node
+                        type: boolean
                       name:
                         description: Name is the name of actual device on the host
                           provisioned by the driver as reflected in resourceclaim.status
