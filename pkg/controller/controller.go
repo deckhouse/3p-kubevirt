@@ -643,6 +643,22 @@ func SyncPodAnnotations(clientset kubecli.KubevirtClient, pod *k8sv1.Pod, newAnn
 	return patchedPod, nil
 }
 
+func VMIHasHotplugResourceClaims(vmi *v1.VirtualMachineInstance) bool {
+	if vmi.Status.DeviceStatus != nil {
+		for _, deviceStatus := range vmi.Status.DeviceStatus.HostDeviceStatuses {
+			if deviceStatus.Hotplug != nil {
+				return true
+			}
+		}
+	}
+	for _, resourceClaim := range vmi.Spec.ResourceClaims {
+		if resourceClaim.Hotpluggable {
+			return true
+		}
+	}
+	return false
+}
+
 func GetHotplugResourceClaims(vmi *v1.VirtualMachineInstance) []*v1.VirtualMachineInstanceResourceClaim {
 	var hotplugResourceClaims []*v1.VirtualMachineInstanceResourceClaim
 	for _, resourceClaim := range vmi.Spec.ResourceClaims {
