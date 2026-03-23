@@ -77,31 +77,26 @@ const (
 	StartStrategyPaused StartStrategy = "Paused"
 )
 
-// HostDeviceMigrationStrategy defines how non-migratable hotplug host devices
-// attached to a VMI are handled during live migration.
-//
-// Non-hotplug host devices must always be migratable. If a non-hotplug host
-// device cannot be migrated, the migration will be rejected regardless of
-// the selected strategy.
-// Possible values are:
-// - "PreventMigration": blocks migration if a non-migratable hotplug host device is attached to the VMI.
-// - "DetachHotplugDevicesBeforeMigration": detaches non-migratable hotplug host devices before migration starts.
-// - "IgnoreHotplugDevicesOnTarget": ignores non-migratable hotplug host devices on the target.
-type HostDeviceMigrationStrategy string
+type USBMigrationStrategy string
 
 const (
-	// HostDeviceMigrationStrategyPreventMigration blocks migration if a
-	// non-migratable hotplug host device is attached to the VMI.
-	HostDeviceMigrationStrategyPreventMigration HostDeviceMigrationStrategy = "PreventMigration"
-
-	// HostDeviceMigrationStrategyDetachBeforeMigration detaches
-	// non-migratable hotplug host devices before migration starts.
-	HostDeviceMigrationStrategyDetachBeforeMigration HostDeviceMigrationStrategy = "DetachHotplugDevicesBeforeMigration"
-
-	// HostDeviceMigrationStrategyIgnoreOnTarget sets startupPolicy to "optional" for non-migratable hotplug host devices
-	// to target domain XML.
-	HostDeviceMigrationStrategyIgnoreOnTarget HostDeviceMigrationStrategy = "IgnoreHotplugDevicesOnTarget"
+	// USBMigrationStrategyAnn is the annotation key for USB migration strategy
+	// The value of the annotation can be one of the following:
+	USBMigrationStrategyAnn                          = "usb.virtualization.deckhouse.io/migrationStrategy"
+	USBMigrationStrategyPrevent USBMigrationStrategy = "Prevent"
+	USBMigrationStrategyDetach  USBMigrationStrategy = "Detach"
+	USBMigrationStrategyIgnore  USBMigrationStrategy = "Ignore"
 )
+
+func GetUSBMigrationStrategy(vmi *VirtualMachineInstance) USBMigrationStrategy {
+	if val, ok := vmi.Annotations[USBMigrationStrategyAnn]; ok {
+		switch USBMigrationStrategy(val) {
+		case USBMigrationStrategyPrevent, USBMigrationStrategyDetach, USBMigrationStrategyIgnore:
+			return USBMigrationStrategy(val)
+		}
+	}
+	return USBMigrationStrategyPrevent
+}
 
 // VirtualMachineInstanceSpec is a description of a VirtualMachineInstance.
 type VirtualMachineInstanceSpec struct {
@@ -148,13 +143,6 @@ type VirtualMachineInstanceSpec struct {
 	//
 	// +optional
 	StartStrategy *StartStrategy `json:"startStrategy,omitempty"`
-	// HostDeviceMigrationStrategy defines how non-migratable hotplug host devices
-	// attached to the VMI are handled during live migration.
-	// Non-hotplug host devices must always be migratable and will block migration
-	// if they cannot be migrated.
-	//
-	// +optional
-	HostDeviceMigrationStrategy *HostDeviceMigrationStrategy `json:"hostDeviceMigrationStrategy,omitempty"`
 	// Grace period observed after signalling a VirtualMachineInstance to stop after which the VirtualMachineInstance is force terminated.
 	TerminationGracePeriodSeconds *int64 `json:"terminationGracePeriodSeconds,omitempty"`
 	// List of volumes that can be mounted by disks belonging to the vmi.

@@ -723,7 +723,6 @@
         ],
         "evictionStrategy": "evictionStrategyValue",
         "startStrategy": "startStrategyValue",
-        "hostDeviceMigrationStrategy": "hostDeviceMigrationStrategyValue",
         "terminationGracePeriodSeconds": -29,
         "volumes": [
           {

@@ -59,8 +59,6 @@ import (
 	"kubevirt.io/client-go/kubecli"
 	"kubevirt.io/client-go/log"
 
-	"k8s.io/utils/ptr"
-
 	"kubevirt.io/kubevirt/pkg/config"
 	"kubevirt.io/kubevirt/pkg/controller"
 	drautil "kubevirt.io/kubevirt/pkg/dra"
@@ -1541,10 +1539,10 @@ func vmiContainsNonMigratableHostDevices(vmi *v1.VirtualMachineInstance) bool {
 		hostDevicesSet[hd.Name] = struct{}{}
 	}
 
-	strategy := ptr.Deref(vmi.Spec.HostDeviceMigrationStrategy, v1.HostDeviceMigrationStrategyPreventMigration)
+	strategy := v1.GetUSBMigrationStrategy(vmi)
 
 	for _, hd := range vmi.Status.DeviceStatus.HostDeviceStatuses {
-		if !deviceResourceClaimIsMigratable(strategy, hd.DeviceResourceClaimStatus, hd.Hotplug != nil) {
+		if !deviceResourceClaimIsMigratable(hd, strategy) {
 			return true
 		}
 		delete(hostDevicesSet, hd.Name)
@@ -1557,20 +1555,22 @@ func vmiContainsNonMigratableGpuDevices(vmi *v1.VirtualMachineInstance) bool {
 	return len(vmi.Spec.Domain.Devices.GPUs) > 0
 }
 
-func deviceResourceClaimIsMigratable(strategy v1.HostDeviceMigrationStrategy, status *v1.DeviceResourceClaimStatus, hotplug bool) bool {
-	if status == nil {
+func deviceResourceClaimIsMigratable(hd v1.DeviceStatusInfo, strategy v1.USBMigrationStrategy) bool {
+	// only usb can be migrated
+	if hd.DeviceResourceClaimStatus == nil || hd.DeviceResourceClaimStatus.Attributes == nil || hd.DeviceResourceClaimStatus.Attributes.USBAddress == nil {
 		return false
 	}
 
 	switch strategy {
-	case v1.HostDeviceMigrationStrategyPreventMigration:
-	case v1.HostDeviceMigrationStrategyDetachBeforeMigration, v1.HostDeviceMigrationStrategyIgnoreOnTarget:
-		if hotplug {
-			return status.AllowMultipleAllocations
+	case v1.USBMigrationStrategyPrevent:
+	case v1.USBMigrationStrategyDetach, v1.USBMigrationStrategyIgnore:
+		if hd.Hotplug != nil {
+			return hd.DeviceResourceClaimStatus.AllowMultipleAllocations
 		}
 	}
 
-	return status.AllowMultipleAllocations && !status.BindsToNode
+	return hd.DeviceResourceClaimStatus.AllowMultipleAllocations && !hd.DeviceResourceClaimStatus.BindsToNode
+
 }
 
 type multipleNonMigratableCondition struct {

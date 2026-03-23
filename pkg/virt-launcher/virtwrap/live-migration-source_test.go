@@ -30,10 +30,11 @@ import (
 
 	v1 "kubevirt.io/api/core/v1"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 	"kubevirt.io/kubevirt/pkg/ephemeral-disk/fake"
 	"kubevirt.io/kubevirt/pkg/libvmi"
 	libvmistatus "kubevirt.io/kubevirt/pkg/libvmi/status"
-	"kubevirt.io/kubevirt/pkg/pointer"
 	virtconfig "kubevirt.io/kubevirt/pkg/virt-config"
 	"kubevirt.io/kubevirt/pkg/virt-launcher/metadata"
 	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/cli"
@@ -200,8 +201,10 @@ var _ = Describe("Live migration source", func() {
 		It("returns data unchanged when HostDeviceMigrationStrategy is not IgnoreOnTarget", func() {
 			data := "<domain><name>test</name>" + destXMLFragment + "</domain>"
 			vmi := &v1.VirtualMachineInstance{
-				Spec: v1.VirtualMachineInstanceSpec{
-					HostDeviceMigrationStrategy: pointer.P(v1.HostDeviceMigrationStrategyPreventMigration),
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						v1.USBMigrationStrategyAnn: string(v1.USBMigrationStrategyPrevent),
+					},
 				},
 				Status: v1.VirtualMachineInstanceStatus{
 					DeviceStatus: &v1.DeviceStatus{
@@ -224,8 +227,10 @@ var _ = Describe("Live migration source", func() {
 		It("adds startupPolicy='optional' to source of non-migratable hotplug host devices when strategy is IgnoreOnTarget", func() {
 			data := "<domain><name>test</name>" + destXMLFragment + "</domain>"
 			vmi := &v1.VirtualMachineInstance{
-				Spec: v1.VirtualMachineInstanceSpec{
-					HostDeviceMigrationStrategy: pointer.P(v1.HostDeviceMigrationStrategyIgnoreOnTarget),
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						v1.USBMigrationStrategyAnn: string(v1.USBMigrationStrategyIgnore),
+					},
 				},
 				Status: v1.VirtualMachineInstanceStatus{
 					DeviceStatus: &v1.DeviceStatus{
@@ -260,8 +265,10 @@ var _ = Describe("Live migration source", func() {
 		It("does not add startupPolicy for hotplug host devices not in nonMigratable list", func() {
 			data := "<domain><name>test</name>" + destXMLFragment + "</domain>"
 			vmi := &v1.VirtualMachineInstance{
-				Spec: v1.VirtualMachineInstanceSpec{
-					HostDeviceMigrationStrategy: pointer.P(v1.HostDeviceMigrationStrategyIgnoreOnTarget),
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						v1.USBMigrationStrategyAnn: string(v1.USBMigrationStrategyIgnore),
+					},
 				},
 				Status: v1.VirtualMachineInstanceStatus{
 					DeviceStatus: &v1.DeviceStatus{

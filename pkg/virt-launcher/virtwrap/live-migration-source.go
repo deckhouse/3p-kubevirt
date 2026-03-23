@@ -51,8 +51,6 @@ import (
 
 	"slices"
 
-	"k8s.io/utils/ptr"
-
 	hotplugdisk "kubevirt.io/kubevirt/pkg/hotplug-disk"
 	storagetypes "kubevirt.io/kubevirt/pkg/storage/types"
 	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/cli"
@@ -1118,7 +1116,7 @@ func configureHotplugHostDevicesForMigrate(data string, vmi *v1.VirtualMachineIn
 		return data
 	}
 
-	if ptr.Deref(vmi.Spec.HostDeviceMigrationStrategy, v1.HostDeviceMigrationStrategyPreventMigration) != v1.HostDeviceMigrationStrategyIgnoreOnTarget {
+	if v1.GetUSBMigrationStrategy(vmi) != v1.USBMigrationStrategyIgnore {
 		return data
 	}
 
@@ -1257,8 +1255,8 @@ func (l *LibvirtDomainManager) migrateHelper(vmi *v1.VirtualMachineInstance, opt
 }
 
 func getHostDevicesForDetach(vmi *v1.VirtualMachineInstance) map[string]struct{} {
-	switch ptr.Deref(vmi.Spec.HostDeviceMigrationStrategy, v1.HostDeviceMigrationStrategyPreventMigration) {
-	case v1.HostDeviceMigrationStrategyPreventMigration, v1.HostDeviceMigrationStrategyIgnoreOnTarget:
+	switch v1.GetUSBMigrationStrategy(vmi) {
+	case v1.USBMigrationStrategyPrevent, v1.USBMigrationStrategyIgnore:
 		return nil
 	}
 

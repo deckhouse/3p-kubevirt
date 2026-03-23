@@ -49,8 +49,6 @@ import (
 
 	"slices"
 
-	"k8s.io/utils/ptr"
-
 	containerdisk "kubevirt.io/kubevirt/pkg/container-disk"
 	"kubevirt.io/kubevirt/pkg/hooks"
 	metrics "kubevirt.io/kubevirt/pkg/monitoring/metrics/virt-controller"
@@ -1015,12 +1013,12 @@ func (t *templateService) RenderMigrationHotplugAttachmentPodTemplate(volumes []
 		return nil, err
 	}
 
-	strategy := ptr.Deref(vmi.Spec.HostDeviceMigrationStrategy, v1.HostDeviceMigrationStrategyPreventMigration)
+	strategy := v1.GetUSBMigrationStrategy(vmi)
 
 	switch strategy {
-	case v1.HostDeviceMigrationStrategyPreventMigration:
+	case v1.USBMigrationStrategyPrevent:
 		return pod, nil
-	case v1.HostDeviceMigrationStrategyDetachBeforeMigration, v1.HostDeviceMigrationStrategyIgnoreOnTarget:
+	case v1.USBMigrationStrategyDetach, v1.USBMigrationStrategyIgnore:
 	default:
 		return nil, fmt.Errorf("unknown host device migration strategy %v", strategy)
 	}

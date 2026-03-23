@@ -28165,13 +28165,6 @@ func schema_kubevirtio_api_core_v1_VirtualMachineInstanceSpec(ref common.Referen
 							Format:      "",
 						},
 					},
-					"hostDeviceMigrationStrategy": {
-						SchemaProps: spec.SchemaProps{
-							Description: "HostDeviceMigrationStrategy defines how non-migratable hotplug host devices attached to the VMI are handled during live migration. Non-hotplug host devices must always be migratable and will block migration if they cannot be migrated.",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
 					"terminationGracePeriodSeconds": {
 						SchemaProps: spec.SchemaProps{
 							Description: "Grace period observed after signalling a VirtualMachineInstance to stop after which the VirtualMachineInstance is force terminated.",
