@@ -258,8 +258,8 @@ func sysprepVolumeSource(sysprepVolume v1.SysprepSource) (k8sv1.VolumeSource, er
 		}, nil
 	}
 	errorStr := fmt.Sprintf("Sysprep must have Secret or ConfigMap reference set %v", sysprepVolume)
-	logger.Errorf(errorStr)
-	return k8sv1.VolumeSource{}, fmt.Errorf(errorStr)
+	logger.Errorf("%s", errorStr)
+	return k8sv1.VolumeSource{}, fmt.Errorf("%s", errorStr)
 }
 
 func (t *templateService) GetLauncherImage() string {

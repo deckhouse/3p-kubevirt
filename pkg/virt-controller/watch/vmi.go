@@ -1038,7 +1038,7 @@ func checkForContainerImageError(pod *k8sv1.Pod) syncError {
 		if reason == controller.ErrImagePullReason || reason == controller.ImagePullBackOffReason {
 			return &syncErrorImpl{
 				reason: reason,
-				err:    fmt.Errorf(containerStatus.State.Waiting.Message),
+				err:    fmt.Errorf("%s", containerStatus.State.Waiting.Message),
 			}
 		}
 	}
