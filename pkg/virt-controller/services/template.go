@@ -64,6 +64,7 @@ import (
 	"kubevirt.io/kubevirt/pkg/virt-controller/watch/topology"
 	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/api"
 	operatorutil "kubevirt.io/kubevirt/pkg/virt-operator/util"
+	"slices"
 )
 
 const (
@@ -1010,8 +1011,8 @@ func (t *templateService) RenderHotplugAttachmentPodTemplate(volumes []*v1.Volum
 	sharedMount := k8sv1.MountPropagationHostToContainer
 	command := []string{"/usr/bin/container-disk", "--copy-path", "/path/hp"}
 
-	tmpTolerations := make([]k8sv1.Toleration, len(ownerPod.Spec.Tolerations))
-	copy(tmpTolerations, ownerPod.Spec.Tolerations)
+	tmpTolerations := slices.Clone(ownerPod.Spec.Tolerations)
+	tmpTolerations = addUnschedulableToleration(tmpTolerations)
 
 	pod := &k8sv1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -1885,4 +1886,25 @@ func toResourceClaimsWithoutHotplugs(claims []v1.ResourceClaim) []k8sv1.PodResou
 		}
 	}
 	return result
+}
+
+func addUnschedulableToleration(tolerations []k8sv1.Toleration) []k8sv1.Toleration {
+	unschedulableToleration := k8sv1.Toleration{
+		Key:      "node.kubernetes.io/unschedulable",
+		Operator: k8sv1.TolerationOpExists,
+		Effect:   k8sv1.TaintEffectNoSchedule,
+	}
+	if tolerations == nil {
+		return []k8sv1.Toleration{unschedulableToleration}
+	}
+	if !slices.ContainsFunc(tolerations, func(toleration k8sv1.Toleration) bool {
+		return toleration.Key == "node.kubernetes.io/unschedulable"
+	}) {
+		tolerations = append(tolerations, k8sv1.Toleration{
+			Key:      "node.kubernetes.io/unschedulable",
+			Operator: k8sv1.TolerationOpExists,
+			Effect:   k8sv1.TaintEffectNoSchedule,
+		})
+	}
+	return tolerations
 }
