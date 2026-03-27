@@ -2489,7 +2489,7 @@ var _ = Describe("VirtualMachineInstance watcher", func() {
 					ConfigMap: &virtv1.ConfigMapVolumeSource{},
 				},
 			}
-			pod, err := controller.createAttachmentPodTemplate(vmi, virtlauncherPod, []*virtv1.Volume{invalidVolume})
+			pod, err := controller.createAttachmentPodTemplate(vmi, virtlauncherPod, []*virtv1.Volume{invalidVolume}, nil)
 			Expect(pod).To(BeNil())
 			Expect(err).To(HaveOccurred())
 		})
@@ -2509,7 +2509,7 @@ var _ = Describe("VirtualMachineInstance watcher", func() {
 					},
 				},
 			}
-			pod, err := controller.createAttachmentPodTemplate(vmi, virtlauncherPod, []*virtv1.Volume{nopvcVolume})
+			pod, err := controller.createAttachmentPodTemplate(vmi, virtlauncherPod, []*virtv1.Volume{nopvcVolume}, nil)
 			Expect(pod).To(BeNil())
 			Expect(err).To(HaveOccurred())
 		})
@@ -2535,7 +2535,7 @@ var _ = Describe("VirtualMachineInstance watcher", func() {
 					},
 				},
 			}
-			pod, err := controller.createAttachmentPodTemplate(vmi, virtlauncherPod, []*virtv1.Volume{volume})
+			pod, err := controller.createAttachmentPodTemplate(vmi, virtlauncherPod, []*virtv1.Volume{volume}, nil)
 			Expect(pod).To(BeNil())
 			Expect(err).To(HaveOccurred())
 		})
@@ -2570,7 +2570,7 @@ var _ = Describe("VirtualMachineInstance watcher", func() {
 					},
 				},
 			}
-			pod, err := controller.createAttachmentPodTemplate(vmi, virtlauncherPod, []*virtv1.Volume{volume})
+			pod, err := controller.createAttachmentPodTemplate(vmi, virtlauncherPod, []*virtv1.Volume{volume}, nil)
 			Expect(pod).To(BeNil())
 			Expect(err).ToNot(HaveOccurred())
 		})
@@ -2612,7 +2612,7 @@ var _ = Describe("VirtualMachineInstance watcher", func() {
 					},
 				},
 			}
-			pod, err := controller.createAttachmentPodTemplate(vmi, virtlauncherPod, []*virtv1.Volume{volume})
+			pod, err := controller.createAttachmentPodTemplate(vmi, virtlauncherPod, []*virtv1.Volume{volume}, nil)
 			Expect(pod).To(BeNil())
 			Expect(err).ToNot(HaveOccurred())
 		})
@@ -2648,7 +2648,7 @@ var _ = Describe("VirtualMachineInstance watcher", func() {
 					},
 				},
 			}
-			pod, err := controller.createAttachmentPodTemplate(vmi, virtlauncherPod, []*virtv1.Volume{volume})
+			pod, err := controller.createAttachmentPodTemplate(vmi, virtlauncherPod, []*virtv1.Volume{volume}, nil)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(pod.GenerateName).To(Equal("d8v-hp-testvmi-"))
 			found := false
