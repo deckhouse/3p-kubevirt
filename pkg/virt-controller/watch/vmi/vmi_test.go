@@ -3473,7 +3473,7 @@ var _ = Describe("VirtualMachineInstance watcher", func() {
 					}
 				}
 			}
-			err := controller.cleanupAttachmentPods(currentPod, oldPods, vmi, len(readyVolumes))
+			err := controller.cleanupAttachmentPods(currentPod, oldPods, vmi, len(readyVolumes), 0)
 			Expect(err).ToNot(HaveOccurred())
 			if expectDelete {
 				eventReasons := []string{}
