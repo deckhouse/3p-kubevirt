@@ -478,6 +478,7 @@ func (n *Notifier) StartDomainNotifier(
 					}
 				}
 			case agentUpdate := <-agentStore.AgentUpdated:
+				fmt.Println("/////////////////////////agentUpdate", agentUpdate)
 				metadataCache.ResetNotification()
 				interfaceStatuses = agentUpdate.DomainInfo.Interfaces
 				guestOsInfo = agentUpdate.DomainInfo.OSInfo
