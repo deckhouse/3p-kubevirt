@@ -481,7 +481,9 @@ func (n *Notifier) StartDomainNotifier(
 				metadataCache.ResetNotification()
 				interfaceStatuses = agentUpdate.DomainInfo.Interfaces
 				guestOsInfo = agentUpdate.DomainInfo.OSInfo
-				fsFreezeStatus = agentUpdate.DomainInfo.FSFreezeStatus
+				if agentUpdate.DomainInfo.FSFreezeStatus != nil {
+					fsFreezeStatus = agentUpdate.DomainInfo.FSFreezeStatus
+				}
 				if domainCache != nil {
 					cache := *domainCache
 					eventCaller.eventCallback(domainConn, &cache, libvirtEvent{}, n, deleteNotificationSent,
