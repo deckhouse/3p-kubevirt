@@ -69,7 +69,7 @@ func (vols *invalidVols) errorMessage() error {
 		s.WriteString(fmt.Sprintf(" luns: %v", vols.luns))
 	}
 
-	return fmt.Errorf(s.String())
+	return fmt.Errorf("%s", s.String())
 }
 
 // updatedVolumesMapping returns a mapping with the volume names and the old claims that have been updated in the VM

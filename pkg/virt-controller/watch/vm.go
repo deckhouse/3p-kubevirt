@@ -460,7 +460,7 @@ func (c *VMController) authorizeDataVolume(vm *virtv1.VirtualMachine, dataVolume
 	}
 
 	if !allowed {
-		return fmt.Errorf(reason)
+		return fmt.Errorf("%s", reason)
 	}
 
 	return nil
@@ -684,7 +684,7 @@ func (c *VMController) VMICPUsPatch(vm *virtv1.VirtualMachine, vmi *virtv1.Virtu
 
 	_, err = c.clientset.VirtualMachineInstance(vmi.Namespace).Patch(context.Background(), vmi.Name, types.JSONPatchType, patchBytes, v1.PatchOptions{})
 	if err == nil {
-		log.Log.Object(vmi).Infof(logMsg)
+		log.Log.Object(vmi).Infof("%s", logMsg)
 	}
 
 	return err
@@ -3441,7 +3441,7 @@ func (c *VMController) handleMemoryHotplugRequest(vm *virtv1.VirtualMachine, vmi
 		return err
 	}
 
-	log.Log.Object(vmi).Infof(logMsg)
+	log.Log.Object(vmi).Infof("%s", logMsg)
 
 	return nil
 }

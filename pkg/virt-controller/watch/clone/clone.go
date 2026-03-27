@@ -532,7 +532,7 @@ func (ctrl *VMCloneController) cleanupRestore(vmClone *clonev1alpha1.VirtualMach
 
 func (ctrl *VMCloneController) logAndRecord(vmClone *clonev1alpha1.VirtualMachineClone, event Event, msg string) {
 	ctrl.recorder.Eventf(vmClone, corev1.EventTypeNormal, string(event), msg)
-	log.Log.Object(vmClone).Infof(msg)
+	log.Log.Object(vmClone).Infof("%s", msg)
 }
 
 func (ctrl *VMCloneController) getTargetType(vmClone *clonev1alpha1.VirtualMachineClone) cloneTargetType {
