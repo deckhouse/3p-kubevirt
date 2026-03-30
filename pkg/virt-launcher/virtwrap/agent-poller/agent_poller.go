@@ -80,6 +80,7 @@ func (s *AsyncAgentStore) Store(key, value any) {
 	fmt.Println("/////////////////////////Store", key, value)
 
 	if key == GetFSFreezeStatus {
+		updated = true
 		fmt.Println("/////////////////////////Store GetFSFreezeStatus", value)
 	}
 
