@@ -78,7 +78,10 @@ func (s *AsyncAgentStore) Store(key, value any) {
 
 	s.store.Store(key, value)
 
+	fmt.Println("/////////////////////////Store", key, value)
+
 	if updated {
+		fmt.Println("/////////////////////////updated true")
 		domainInfo := api.DomainGuestInfo{}
 		switch key {
 		case libvirt.DOMAIN_GUEST_INFO_OS, libvirt.DOMAIN_GUEST_INFO_INTERFACES, GetFSFreezeStatus:
@@ -86,6 +89,8 @@ func (s *AsyncAgentStore) Store(key, value any) {
 			domainInfo.Interfaces = s.GetInterfaceStatus()
 			domainInfo.FSFreezeStatus = s.GetFSFreezeStatus()
 		}
+
+		fmt.Println("/////////////////////////DomainInfo", domainInfo)
 
 		s.AgentUpdated <- AgentUpdatedEvent{
 			DomainInfo: domainInfo,
