@@ -19,6 +19,7 @@
 package agentpoller
 
 import (
+	"fmt"
 	"sync"
 	"time"
 
@@ -372,6 +373,7 @@ func executeAgentCommands(commands []AgentCommand, agentPoller *AgentPoller) {
 		switch command {
 		case GetFSFreezeStatus:
 			fsfreezeStatus, err := ParseFSFreezeStatus(cmdResult)
+			fmt.Println("/////////////////////////executeAgentCommands GetFSFreezeStatus", fsfreezeStatus.Status)
 			if err != nil {
 				log.Log.Errorf("Cannot parse guest agent fsfreeze status %s", err.Error())
 				continue
