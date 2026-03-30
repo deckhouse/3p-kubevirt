@@ -64,6 +64,7 @@ type AgentInfo struct {
 
 // parseFSFreezeStatus from the agent response
 func ParseFSFreezeStatus(agentReply string) (api.FSFreeze, error) {
+	fmt.Println("/////////////////////////agentReply", agentReply)
 	response := stripAgentStringResponse(agentReply)
 	if response == "" {
 		return api.FSFreeze{}, fmt.Errorf("failed to strip FSFreeze status: %v", agentReply)
