@@ -77,6 +77,7 @@ func (s *AsyncAgentStore) Store(key, value any) {
 	updated := (oldData == nil) || !equality.Semantic.DeepEqual(oldData, value)
 
 	s.store.Store(key, value)
+	fmt.Println("/////////////////////////Store", key, value)
 
 	if key == GetFSFreezeStatus {
 		fmt.Println("/////////////////////////Store GetFSFreezeStatus", value)
