@@ -75,6 +75,7 @@ func NewAsyncAgentStore() AsyncAgentStore {
 func (s *AsyncAgentStore) Store(key, value any) {
 	oldData, _ := s.store.Load(key)
 	updated := (oldData == nil) || !equality.Semantic.DeepEqual(oldData, value)
+	updated = true
 
 	s.store.Store(key, value)
 
