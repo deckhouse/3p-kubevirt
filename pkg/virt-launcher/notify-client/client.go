@@ -463,6 +463,9 @@ func (n *Notifier) StartDomainNotifier(
 		var fsFreezeStatus *api.FSFreeze
 		var eventCaller eventCaller
 
+		fsFreezeStatusTicker := time.NewTicker(5 * time.Second)
+		defer fsFreezeStatusTicker.Stop()
+
 		for {
 			select {
 			case event := <-eventChan:
@@ -482,14 +485,15 @@ func (n *Notifier) StartDomainNotifier(
 				metadataCache.ResetNotification()
 				interfaceStatuses = agentUpdate.DomainInfo.Interfaces
 				guestOsInfo = agentUpdate.DomainInfo.OSInfo
-				if agentUpdate.DomainInfo.FSFreezeStatus != nil {
-					fsFreezeStatus = agentUpdate.DomainInfo.FSFreezeStatus
-				}
+				fsFreezeStatus = agentUpdate.DomainInfo.FSFreezeStatus
 				if domainCache != nil {
 					cache := *domainCache
 					eventCaller.eventCallback(domainConn, &cache, libvirtEvent{}, n, deleteNotificationSent,
 						interfaceStatuses, guestOsInfo, vmi, fsFreezeStatus, metadataCache)
 				}
+			case <-fsFreezeStatusTicker.C:
+				go agentPoller.PollFSFreezeStatus()
+
 			case <-reconnectChan:
 				n.SendDomainEvent(newWatchEventError(fmt.Errorf("Libvirt reconnect, domain %s", domainName)))
 

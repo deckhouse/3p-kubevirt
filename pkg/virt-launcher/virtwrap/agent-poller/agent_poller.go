@@ -342,6 +342,13 @@ func (p *AgentPoller) Stop() {
 	}
 }
 
+// PollFSFreezeStatus immediately queries the guest agent for the current
+// filesystem freeze status and updates the agent store. This is used for
+// periodic status refresh independent of the regular polling workers.
+func (p *AgentPoller) PollFSFreezeStatus() {
+	executeAgentCommands([]AgentCommand{GetFSFreezeStatus}, p)
+}
+
 // TODO: Remove all commands with this function
 //
 // GET_FSFREEZE_STATUS - This is not implemented in libvirt API and won't be
