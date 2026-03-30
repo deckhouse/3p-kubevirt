@@ -1066,10 +1066,6 @@ func (c *VirtualMachineController) updateMemoryDumpInfo(vmi *v1.VirtualMachineIn
 }
 
 func (c *VirtualMachineController) updateFSFreezeStatus(vmi *v1.VirtualMachineInstance, domain *api.Domain) {
-	if domain != nil && vmi != nil && vmi.Name == "linux-vm" {
-		fmt.Println("///////////////updateFSFreezeStatus", domain.Status.FSFreezeStatus.Status)
-	}
-
 	if domain == nil || domain.Status.FSFreezeStatus.Status == "" {
 		return
 	}

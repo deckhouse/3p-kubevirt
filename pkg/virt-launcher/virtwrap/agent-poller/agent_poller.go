@@ -75,14 +75,17 @@ func NewAsyncAgentStore() AsyncAgentStore {
 func (s *AsyncAgentStore) Store(key, value any) {
 	oldData, _ := s.store.Load(key)
 	updated := (oldData == nil) || !equality.Semantic.DeepEqual(oldData, value)
-	updated = true
 
 	s.store.Store(key, value)
 
-	fmt.Println("/////////////////////////Store", key, value)
+	if key == GetFSFreezeStatus {
+		fmt.Println("/////////////////////////Store GetFSFreezeStatus", value)
+	}
 
 	if updated {
-		fmt.Println("/////////////////////////updated true")
+		if key == GetFSFreezeStatus {
+			fmt.Println("/////////////////////////updated true GetFSFreezeStatus", value)
+		}
 		domainInfo := api.DomainGuestInfo{}
 		switch key {
 		case libvirt.DOMAIN_GUEST_INFO_OS, libvirt.DOMAIN_GUEST_INFO_INTERFACES, GetFSFreezeStatus:
@@ -379,7 +382,6 @@ func executeAgentCommands(commands []AgentCommand, agentPoller *AgentPoller) {
 		switch command {
 		case GetFSFreezeStatus:
 			fsfreezeStatus, err := ParseFSFreezeStatus(cmdResult)
-			fmt.Println("/////////////////////////executeAgentCommands GetFSFreezeStatus", fsfreezeStatus.Status)
 			if err != nil {
 				log.Log.Errorf("Cannot parse guest agent fsfreeze status %s", err.Error())
 				continue
