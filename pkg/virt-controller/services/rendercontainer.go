@@ -296,9 +296,13 @@ func wrapExecProbeWithVirtProbe(vmi *v1.VirtualMachineInstance, probe *k8sv1.Pro
 }
 
 func requiredCapabilities(vmi *v1.VirtualMachineInstance) []k8sv1.Capability {
-	if util.IsNonRootVMI(vmi) {
-		return nil
+	// These capabilies are always required because we set them on virt-launcher binary
+	capabilities := []k8sv1.Capability{CAP_NET_BIND_SERVICE}
+
+	if !util.IsNonRootVMI(vmi) {
+		// add a CAP_SYS_NICE capability to allow setting cpu affinity
+		capabilities = append(capabilities, CAP_SYS_NICE)
 	}
 
-	return []k8sv1.Capability{CAP_NET_BIND_SERVICE, CAP_SYS_NICE}
+	return capabilities
 }
