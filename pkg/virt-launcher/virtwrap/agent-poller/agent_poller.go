@@ -70,6 +70,15 @@ func NewAsyncAgentStore() AsyncAgentStore {
 	}
 }
 
+// Clear removes all entries from the store, causing the next poll cycle
+// to treat all incoming data as new and re-emit AgentUpdatedEvent.
+func (s *AsyncAgentStore) Clear() {
+	s.store.Range(func(key, _ any) bool {
+		s.store.Delete(key)
+		return true
+	})
+}
+
 // Store saves the value with a key to the storage, when there is a change in data
 // it fires up updated event
 func (s *AsyncAgentStore) Store(key, value any) {
