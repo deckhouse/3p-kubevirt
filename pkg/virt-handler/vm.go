@@ -1003,6 +1003,16 @@ func (c *VirtualMachineController) updateGuestAgentConditions(vmi *v1.VirtualMac
 			condManager.RemoveCondition(vmi, v1.VirtualMachineInstanceUnsupportedAgent)
 		}
 
+		// Sync FSFreezeStatus directly from the launcher. This covers the case where
+		// a freeze/thaw event occurred during live migration and was ignored by the
+		// handler (isMigrationInProgress), leaving the VMI with a stale FSFreezeStatus.
+		fmt.Println("/////////////////////////guestInfo.FSFreezeStatus", guestInfo.FSFreezeStatus)
+		if guestInfo.FSFreezeStatus == api.FSThawed {
+			vmi.Status.FSFreezeStatus = ""
+		} else if guestInfo.FSFreezeStatus != "" {
+			vmi.Status.FSFreezeStatus = guestInfo.FSFreezeStatus
+		}
+
 	}
 	return nil
 }
