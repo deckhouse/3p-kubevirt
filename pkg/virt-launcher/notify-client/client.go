@@ -405,16 +405,6 @@ func (e *eventCaller) eventCallback(c cli.Connection, domain *api.Domain, libvir
 	}
 }
 
-func isMigrationCompletedEvent(event libvirtEvent) bool {
-	if event.Event == nil {
-		return false
-	}
-	return (event.Event.Event == libvirt.DOMAIN_EVENT_RESUMED &&
-		libvirt.DomainEventResumedDetailType(event.Event.Detail) == libvirt.DOMAIN_EVENT_RESUMED_MIGRATED) ||
-		(event.Event.Event == libvirt.DOMAIN_EVENT_SUSPENDED &&
-			libvirt.DomainEventSuspendedDetailType(event.Event.Detail) == libvirt.DOMAIN_EVENT_SUSPENDED_PAUSED)
-}
-
 var updateEvents = updateEventsClosure()
 
 func updateEventsClosure() func(event watch.Event, domain *api.Domain, events chan watch.Event) {
@@ -481,19 +471,11 @@ func (n *Notifier) StartDomainNotifier(
 				eventCaller.eventCallback(domainConn, domainCache, event, n, deleteNotificationSent, interfaceStatuses, guestOsInfo, vmi, fsFreezeStatus, metadataCache)
 				log.Log.Infof("Domain name event: %v", domainCache.Spec.Name)
 				if event.AgentEvent != nil {
-					fmt.Println("/////////////////////////AgentEvent", event.AgentEvent.State)
 					if event.AgentEvent.State == libvirt.CONNECT_DOMAIN_EVENT_AGENT_LIFECYCLE_STATE_CONNECTED {
 						agentPoller.Start()
 					} else if event.AgentEvent.State == libvirt.CONNECT_DOMAIN_EVENT_AGENT_LIFECYCLE_STATE_DISCONNECTED {
 						agentPoller.Stop()
 					}
-				}
-				if isMigrationCompletedEvent(event) {
-					log.Log.Infof("Migration completed, clearing agent store to force fresh agent data")
-					agentStore.Clear()
-					interfaceStatuses = nil
-					guestOsInfo = nil
-					fsFreezeStatus = nil
 				}
 			case agentUpdate := <-agentStore.AgentUpdated:
 				metadataCache.ResetNotification()

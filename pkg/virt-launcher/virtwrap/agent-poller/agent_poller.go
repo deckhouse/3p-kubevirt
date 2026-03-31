@@ -19,7 +19,6 @@
 package agentpoller
 
 import (
-	"fmt"
 	"sync"
 	"time"
 
@@ -70,15 +69,6 @@ func NewAsyncAgentStore() AsyncAgentStore {
 	}
 }
 
-// Clear removes all entries from the store, causing the next poll cycle
-// to treat all incoming data as new and re-emit AgentUpdatedEvent.
-func (s *AsyncAgentStore) Clear() {
-	s.store.Range(func(key, _ any) bool {
-		s.store.Delete(key)
-		return true
-	})
-}
-
 // Store saves the value with a key to the storage, when there is a change in data
 // it fires up updated event
 func (s *AsyncAgentStore) Store(key, value any) {
@@ -87,14 +77,7 @@ func (s *AsyncAgentStore) Store(key, value any) {
 
 	s.store.Store(key, value)
 
-	if key == GetFSFreezeStatus {
-		fmt.Println("/////////////////////////Store GetFSFreezeStatus", value)
-	}
-
 	if updated {
-		if key == GetFSFreezeStatus {
-			fmt.Println("/////////////////////////updated true GetFSFreezeStatus", value)
-		}
 		domainInfo := api.DomainGuestInfo{}
 		switch key {
 		case libvirt.DOMAIN_GUEST_INFO_OS, libvirt.DOMAIN_GUEST_INFO_INTERFACES, GetFSFreezeStatus:
@@ -102,8 +85,6 @@ func (s *AsyncAgentStore) Store(key, value any) {
 			domainInfo.Interfaces = s.GetInterfaceStatus()
 			domainInfo.FSFreezeStatus = s.GetFSFreezeStatus()
 		}
-
-		fmt.Println("/////////////////////////DomainInfo", domainInfo)
 
 		s.AgentUpdated <- AgentUpdatedEvent{
 			DomainInfo: domainInfo,
