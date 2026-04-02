@@ -1521,6 +1521,59 @@ var _ = Describe("Migration watcher", func() {
 			expectMigrationRunningState(migration.Namespace, migration.Name)
 		})
 
+		It("should propagate migration state to the migration object while migration is running", func() {
+			vmi := newVirtualMachine("testvmi", virtv1.Running)
+			addNodeNameToVMI(vmi, "node02")
+			migration := newMigration("testmigration", vmi.Name, virtv1.MigrationRunning)
+			targetPod := newTargetPodForVirtualMachine(vmi, migration, k8sv1.PodPending)
+			targetPod.Spec.NodeName = "node01"
+
+			vmi.Status.MigrationState = &virtv1.VirtualMachineInstanceMigrationState{
+				MigrationUID:      migration.UID,
+				TargetNode:        "node01",
+				SourceNode:        "node02",
+				TargetNodeAddress: "10.10.10.10:1234",
+				StartTimestamp:    pointer.P(metav1.Now()),
+			}
+			addMigration(migration)
+			addVirtualMachineInstance(vmi)
+			addPod(newSourcePodForVirtualMachine(vmi))
+			addPod(targetPod)
+
+			sanityExecute()
+
+			expectMigrationRunningState(migration.Namespace, migration.Name)
+			expectMigrationStateUpdated(migration.Namespace, migration.Name, vmi.Status.MigrationState)
+		})
+
+		It("should propagate migration transfer counters to the migration object while migration is running", func() {
+			vmi := newVirtualMachine("testvmi", virtv1.Running)
+			addNodeNameToVMI(vmi, "node02")
+			migration := newMigration("testmigration", vmi.Name, virtv1.MigrationRunning)
+			targetPod := newTargetPodForVirtualMachine(vmi, migration, k8sv1.PodPending)
+			targetPod.Spec.NodeName = "node01"
+
+			vmi.Status.MigrationState = &virtv1.VirtualMachineInstanceMigrationState{
+				MigrationUID:       migration.UID,
+				TargetNode:         "node01",
+				SourceNode:         "node02",
+				TargetNodeAddress:  "10.10.10.10:1234",
+				StartTimestamp:     pointer.P(metav1.Now()),
+				DataTotalBytes:     pointer.P[uint64](1024),
+				DataProcessedBytes: pointer.P[uint64](768),
+				DataRemainingBytes: pointer.P[uint64](256),
+			}
+			addMigration(migration)
+			addVirtualMachineInstance(vmi)
+			addPod(newSourcePodForVirtualMachine(vmi))
+			addPod(targetPod)
+
+			sanityExecute()
+
+			expectMigrationRunningState(migration.Namespace, migration.Name)
+			expectMigrationStateUpdated(migration.Namespace, migration.Name, vmi.Status.MigrationState)
+		})
+
 		It("should transition to completed phase", func() {
 			vmi := newVirtualMachine("testvmi", virtv1.Running)
 			addNodeNameToVMI(vmi, "node02")
