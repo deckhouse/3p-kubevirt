@@ -30,11 +30,12 @@ import (
 	"syscall"
 
 	"kubevirt.io/kubevirt/pkg/safepath"
+	"kubevirt.io/kubevirt/pkg/util"
 	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/api"
 )
 
 // TODO this should be part of structs, instead of a global
-var DefaultOwnershipManager OwnershipManagerInterface = &OwnershipManager{user: "qemu"}
+var DefaultOwnershipManager OwnershipManagerInterface = &OwnershipManager{user: util.NonRootUserString}
 
 // For testing
 func MockDefaultOwnershipManager() {
