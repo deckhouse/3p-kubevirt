@@ -963,6 +963,9 @@
       "failureReason": "failureReasonValue",
       "migrationUid": "migrationUidValue",
       "mode": "modeValue",
+      "dataTotalBytes": 18446744073709551602,
+      "dataProcessedBytes": 18446744073709551598,
+      "dataRemainingBytes": 18446744073709551598,
       "migrationPolicyName": "migrationPolicyNameValue",
       "migrationConfiguration": {
         "nodeDrainTaintKey": "nodeDrainTaintKeyValue",

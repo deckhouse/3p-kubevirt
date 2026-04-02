@@ -14213,6 +14213,21 @@ var CRDsValidation map[string]string = map[string]string{
             completed:
               description: Indicates the migration completed
               type: boolean
+            dataProcessedBytes:
+              description: DataProcessedBytes is the amount of migration data already
+                processed by the source runtime.
+              format: int64
+              type: integer
+            dataRemainingBytes:
+              description: DataRemainingBytes is the amount of migration data still
+                remaining on the source runtime.
+              format: int64
+              type: integer
+            dataTotalBytes:
+              description: DataTotalBytes is the total amount of migration data reported
+                by the source runtime.
+              format: int64
+              type: integer
             endTimestamp:
               description: The time the migration action ended
               format: date-time
@@ -14795,6 +14810,21 @@ var CRDsValidation map[string]string = map[string]string{
             completed:
               description: Indicates the migration completed
               type: boolean
+            dataProcessedBytes:
+              description: DataProcessedBytes is the amount of migration data already
+                processed by the source runtime.
+              format: int64
+              type: integer
+            dataRemainingBytes:
+              description: DataRemainingBytes is the amount of migration data still
+                remaining on the source runtime.
+              format: int64
+              type: integer
+            dataTotalBytes:
+              description: DataTotalBytes is the total amount of migration data reported
+                by the source runtime.
+              format: int64
+              type: integer
             endTimestamp:
               description: The time the migration action ended
               format: date-time

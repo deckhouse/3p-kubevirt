@@ -27245,6 +27245,27 @@ func schema_kubevirtio_api_core_v1_VirtualMachineInstanceMigrationState(ref comm
 							Format:      "",
 						},
 					},
+					"dataTotalBytes": {
+						SchemaProps: spec.SchemaProps{
+							Description: "DataTotalBytes is the total amount of migration data reported by the source runtime.",
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+					"dataProcessedBytes": {
+						SchemaProps: spec.SchemaProps{
+							Description: "DataProcessedBytes is the amount of migration data already processed by the source runtime.",
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+					"dataRemainingBytes": {
+						SchemaProps: spec.SchemaProps{
+							Description: "DataRemainingBytes is the amount of migration data still remaining on the source runtime.",
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
 					"migrationPolicyName": {
 						SchemaProps: spec.SchemaProps{
 							Description: "Name of the migration policy. If string is empty, no policy is matched",
