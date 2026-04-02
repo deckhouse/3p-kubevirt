@@ -211,27 +211,27 @@ func setMigrationTransferCounters(state *v1.VirtualMachineInstanceMigrationState
 	}
 }
 
-func (c *MigrationSourceController) setMigrationTransferStatus(vmi *v1.VirtualMachineInstance, client cmdclient.LauncherClient) bool {
+func (c *MigrationSourceController) setMigrationTransferStatus(vmi *v1.VirtualMachineInstance, client cmdclient.LauncherClient) {
 	if vmi.Status.MigrationState == nil || client == nil || !c.isMigrationSource(vmi) || isMigrationDone(vmi.Status.MigrationState) {
-		return false
+		return
 	}
 
 	domainStats, exists, err := client.GetDomainStats()
 	if err != nil {
 		log.Log.Object(vmi).V(4).Reason(err).Info("Failed to get domain stats for migration progress")
-		return true
+		return
 	}
 	if !exists {
 		log.Log.Object(vmi).V(4).Info("Migration progress domain stats do not exist yet")
-		return true
+		return
 	}
 	if domainStats == nil {
 		log.Log.Object(vmi).V(4).Info("Migration progress domain stats are nil")
-		return true
+		return
 	}
 	if domainStats.MigrateDomainJobInfo == nil {
 		log.Log.Object(vmi).V(4).Info("Migration progress job info is nil")
-		return true
+		return
 	}
 
 	jobInfo := domainStats.MigrateDomainJobInfo
@@ -253,8 +253,6 @@ func (c *MigrationSourceController) setMigrationTransferStatus(vmi *v1.VirtualMa
 		vmi.Status.MigrationState.DataProcessedBytes,
 		vmi.Status.MigrationState.DataRemainingBytes,
 	)
-
-	return !jobInfo.DataTotalSet && !jobInfo.DataProcessedSet && !jobInfo.DataRemainingSet
 }
 
 func (c *MigrationSourceController) setMigrationProgressStatus(vmi *v1.VirtualMachineInstance, domain *api.Domain) {
@@ -293,11 +291,11 @@ func (c *MigrationSourceController) updateStatus(vmi *v1.VirtualMachineInstance,
 		client, err := c.launcherClients.GetLauncherClient(vmi)
 		if err != nil {
 			log.Log.Object(vmi).V(4).Reason(err).Info("Failed to get launcher client for migration progress")
-			c.queue.AddAfter(controller.VirtualMachineInstanceKey(vmi), time.Second)
-		} else if shouldPollAgain := c.setMigrationTransferStatus(vmi, client); shouldPollAgain {
-			log.Log.Object(vmi).V(4).Info("Re-enqueueing VMI to poll migration transfer counters again")
-			c.queue.AddAfter(controller.VirtualMachineInstanceKey(vmi), time.Second)
+		} else {
+			c.setMigrationTransferStatus(vmi, client)
 		}
+		log.Log.Object(vmi).V(4).Info("Re-enqueueing VMI to poll migration transfer counters again")
+		c.queue.AddAfter(controller.VirtualMachineInstanceKey(vmi), time.Second)
 	}
 
 	// handle migrations differently than normal status updates.
