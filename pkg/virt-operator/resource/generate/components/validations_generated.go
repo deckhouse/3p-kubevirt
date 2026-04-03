@@ -14210,29 +14210,9 @@ var CRDsValidation map[string]string = map[string]string{
             abortStatus:
               description: Indicates the final status of the live migration abortion
               type: string
-            autoConvergeThrottle:
-              description: AutoConvergeThrottle is the current auto-converge throttle
-                reported by the source runtime.
-              format: int32
-              type: integer
             completed:
               description: Indicates the migration completed
               type: boolean
-            dataProcessedBytes:
-              description: DataProcessedBytes is the amount of migration data already
-                processed by the source runtime.
-              format: int64
-              type: integer
-            dataRemainingBytes:
-              description: DataRemainingBytes is the amount of migration data still
-                remaining on the source runtime.
-              format: int64
-              type: integer
-            dataTotalBytes:
-              description: DataTotalBytes is the total amount of migration data reported
-                by the source runtime.
-              format: int64
-              type: integer
             endTimestamp:
               description: The time the migration action ended
               format: date-time
@@ -14244,11 +14224,6 @@ var CRDsValidation map[string]string = map[string]string{
             failureReason:
               description: Contains the reason why the migration failed
               type: string
-            iteration:
-              description: Iteration is the current migration iteration reported by
-                the source runtime.
-              format: int32
-              type: integer
             migrationConfiguration:
               description: Migration configurations to apply
               properties:
@@ -14520,6 +14495,36 @@ var CRDsValidation map[string]string = map[string]string{
                   description: VirtualMachineInstanceUID is the UID of the target
                     virtual machine instance
                   type: string
+              type: object
+            transferStatus:
+              description: TransferStatus contains migration transfer details reported
+                by the source runtime.
+              properties:
+                autoConvergeThrottle:
+                  description: AutoConvergeThrottle is the current auto-converge throttle
+                    reported by the source runtime.
+                  format: int32
+                  type: integer
+                dataProcessedBytes:
+                  description: DataProcessedBytes is the amount of migration data
+                    already processed by the source runtime.
+                  format: int64
+                  type: integer
+                dataRemainingBytes:
+                  description: DataRemainingBytes is the amount of migration data
+                    still remaining on the source runtime.
+                  format: int64
+                  type: integer
+                dataTotalBytes:
+                  description: DataTotalBytes is the total amount of migration data
+                    reported by the source runtime.
+                  format: int64
+                  type: integer
+                iteration:
+                  description: Iteration is the current migration iteration reported
+                    by the source runtime.
+                  format: int32
+                  type: integer
               type: object
           type: object
         migrationTransport:
@@ -14817,29 +14822,9 @@ var CRDsValidation map[string]string = map[string]string{
             abortStatus:
               description: Indicates the final status of the live migration abortion
               type: string
-            autoConvergeThrottle:
-              description: AutoConvergeThrottle is the current auto-converge throttle
-                reported by the source runtime.
-              format: int32
-              type: integer
             completed:
               description: Indicates the migration completed
               type: boolean
-            dataProcessedBytes:
-              description: DataProcessedBytes is the amount of migration data already
-                processed by the source runtime.
-              format: int64
-              type: integer
-            dataRemainingBytes:
-              description: DataRemainingBytes is the amount of migration data still
-                remaining on the source runtime.
-              format: int64
-              type: integer
-            dataTotalBytes:
-              description: DataTotalBytes is the total amount of migration data reported
-                by the source runtime.
-              format: int64
-              type: integer
             endTimestamp:
               description: The time the migration action ended
               format: date-time
@@ -14851,11 +14836,6 @@ var CRDsValidation map[string]string = map[string]string{
             failureReason:
               description: Contains the reason why the migration failed
               type: string
-            iteration:
-              description: Iteration is the current migration iteration reported by
-                the source runtime.
-              format: int32
-              type: integer
             migrationConfiguration:
               description: Migration configurations to apply
               properties:
@@ -15127,6 +15107,36 @@ var CRDsValidation map[string]string = map[string]string{
                   description: VirtualMachineInstanceUID is the UID of the target
                     virtual machine instance
                   type: string
+              type: object
+            transferStatus:
+              description: TransferStatus contains migration transfer details reported
+                by the source runtime.
+              properties:
+                autoConvergeThrottle:
+                  description: AutoConvergeThrottle is the current auto-converge throttle
+                    reported by the source runtime.
+                  format: int32
+                  type: integer
+                dataProcessedBytes:
+                  description: DataProcessedBytes is the amount of migration data
+                    already processed by the source runtime.
+                  format: int64
+                  type: integer
+                dataRemainingBytes:
+                  description: DataRemainingBytes is the amount of migration data
+                    still remaining on the source runtime.
+                  format: int64
+                  type: integer
+                dataTotalBytes:
+                  description: DataTotalBytes is the total amount of migration data
+                    reported by the source runtime.
+                  format: int64
+                  type: integer
+                iteration:
+                  description: Iteration is the current migration iteration reported
+                    by the source runtime.
+                  format: int32
+                  type: integer
               type: object
           type: object
         phase:

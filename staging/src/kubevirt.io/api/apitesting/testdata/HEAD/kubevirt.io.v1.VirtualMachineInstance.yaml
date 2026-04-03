@@ -713,15 +713,10 @@ status:
   migrationState:
     abortRequested: true
     abortStatus: abortStatusValue
-    autoConvergeThrottle: 4294967276
     completed: true
-    dataProcessedBytes: 18446744073709551598
-    dataRemainingBytes: 18446744073709551598
-    dataTotalBytes: 18446744073709551602
     endTimestamp: "1988-01-01T01:01:01Z"
     failed: true
     failureReason: failureReasonValue
-    iteration: 4294967287
     migrationConfiguration:
       allowAutoConverge: true
       allowPostCopy: true
@@ -787,6 +782,12 @@ status:
       selinuxContext: selinuxContextValue
       syncAddress: syncAddressValue
       virtualMachineInstanceUID: virtualMachineInstanceUIDValue
+    transferStatus:
+      autoConvergeThrottle: 4294967276
+      dataProcessedBytes: 18446744073709551598
+      dataRemainingBytes: 18446744073709551598
+      dataTotalBytes: 18446744073709551602
+      iteration: 4294967287
   migrationTransport: migrationTransportValue
   nodeName: nodeNameValue
   phase: phaseValue

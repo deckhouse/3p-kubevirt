@@ -357,24 +357,27 @@ var _ = Describe("VirtualMachineInstance migration target", func() {
 
 			controller.setMigrationTransferStatus(vmi, client)
 
-			Expect(vmi.Status.MigrationState.DataTotalBytes).To(PointTo(BeEquivalentTo(1024)))
-			Expect(vmi.Status.MigrationState.DataProcessedBytes).To(PointTo(BeEquivalentTo(768)))
-			Expect(vmi.Status.MigrationState.DataRemainingBytes).To(PointTo(BeEquivalentTo(256)))
-			Expect(vmi.Status.MigrationState.Iteration).To(PointTo(BeEquivalentTo(10)))
-			Expect(vmi.Status.MigrationState.AutoConvergeThrottle).To(PointTo(BeEquivalentTo(50)))
+			Expect(vmi.Status.MigrationState.TransferStatus).ToNot(BeNil())
+			Expect(vmi.Status.MigrationState.TransferStatus.DataTotalBytes).To(PointTo(BeEquivalentTo(1024)))
+			Expect(vmi.Status.MigrationState.TransferStatus.DataProcessedBytes).To(PointTo(BeEquivalentTo(768)))
+			Expect(vmi.Status.MigrationState.TransferStatus.DataRemainingBytes).To(PointTo(BeEquivalentTo(256)))
+			Expect(vmi.Status.MigrationState.TransferStatus.Iteration).To(PointTo(BeEquivalentTo(10)))
+			Expect(vmi.Status.MigrationState.TransferStatus.AutoConvergeThrottle).To(PointTo(BeEquivalentTo(50)))
 		})
 
 		It("should preserve existing counters when job stats are absent", func() {
 			vmi := libvmi.New(libvmistatus.WithStatus(libvmistatus.New(
 				libvmistatus.WithMigrationState(v1.VirtualMachineInstanceMigrationState{
-					MigrationUID:         "1234",
-					SourceNode:           host,
-					TargetNodeAddress:    "othernode",
-					DataTotalBytes:       pointer.P[uint64](1024),
-					DataProcessedBytes:   pointer.P[uint64](768),
-					DataRemainingBytes:   pointer.P[uint64](256),
-					Iteration:            pointer.P[uint32](10),
-					AutoConvergeThrottle: pointer.P[uint32](50),
+					MigrationUID:      "1234",
+					SourceNode:        host,
+					TargetNodeAddress: "othernode",
+					TransferStatus: &v1.VirtualMachineInstanceMigrationTransferStatus{
+						DataTotalBytes:       pointer.P[uint64](1024),
+						DataProcessedBytes:   pointer.P[uint64](768),
+						DataRemainingBytes:   pointer.P[uint64](256),
+						Iteration:            pointer.P[uint32](10),
+						AutoConvergeThrottle: pointer.P[uint32](50),
+					},
 				}),
 				libvmistatus.WithNodeName(host),
 			)))
@@ -382,11 +385,12 @@ var _ = Describe("VirtualMachineInstance migration target", func() {
 
 			controller.setMigrationTransferStatus(vmi, client)
 
-			Expect(vmi.Status.MigrationState.DataTotalBytes).To(PointTo(BeEquivalentTo(1024)))
-			Expect(vmi.Status.MigrationState.DataProcessedBytes).To(PointTo(BeEquivalentTo(768)))
-			Expect(vmi.Status.MigrationState.DataRemainingBytes).To(PointTo(BeEquivalentTo(256)))
-			Expect(vmi.Status.MigrationState.Iteration).To(PointTo(BeEquivalentTo(10)))
-			Expect(vmi.Status.MigrationState.AutoConvergeThrottle).To(PointTo(BeEquivalentTo(50)))
+			Expect(vmi.Status.MigrationState.TransferStatus).ToNot(BeNil())
+			Expect(vmi.Status.MigrationState.TransferStatus.DataTotalBytes).To(PointTo(BeEquivalentTo(1024)))
+			Expect(vmi.Status.MigrationState.TransferStatus.DataProcessedBytes).To(PointTo(BeEquivalentTo(768)))
+			Expect(vmi.Status.MigrationState.TransferStatus.DataRemainingBytes).To(PointTo(BeEquivalentTo(256)))
+			Expect(vmi.Status.MigrationState.TransferStatus.Iteration).To(PointTo(BeEquivalentTo(10)))
+			Expect(vmi.Status.MigrationState.TransferStatus.AutoConvergeThrottle).To(PointTo(BeEquivalentTo(50)))
 		})
 	})
 

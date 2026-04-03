@@ -200,20 +200,24 @@ func setMigrationTransferCounters(state *v1.VirtualMachineInstanceMigrationState
 		return
 	}
 
+	if state.TransferStatus == nil {
+		state.TransferStatus = &v1.VirtualMachineInstanceMigrationTransferStatus{}
+	}
+
 	if jobInfo.DataTotalSet {
-		state.DataTotalBytes = pointer.P(jobInfo.DataTotal)
+		state.TransferStatus.DataTotalBytes = pointer.P(jobInfo.DataTotal)
 	}
 	if jobInfo.DataProcessedSet {
-		state.DataProcessedBytes = pointer.P(jobInfo.DataProcessed)
+		state.TransferStatus.DataProcessedBytes = pointer.P(jobInfo.DataProcessed)
 	}
 	if jobInfo.DataRemainingSet {
-		state.DataRemainingBytes = pointer.P(jobInfo.DataRemaining)
+		state.TransferStatus.DataRemainingBytes = pointer.P(jobInfo.DataRemaining)
 	}
 	if jobInfo.IterationSet {
-		state.Iteration = pointer.P(jobInfo.Iteration)
+		state.TransferStatus.Iteration = pointer.P(jobInfo.Iteration)
 	}
 	if jobInfo.AutoConvergeThrottleSet {
-		state.AutoConvergeThrottle = pointer.P(jobInfo.AutoConvergeThrottle)
+		state.TransferStatus.AutoConvergeThrottle = pointer.P(jobInfo.AutoConvergeThrottle)
 	}
 }
 
