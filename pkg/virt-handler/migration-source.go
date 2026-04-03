@@ -221,38 +221,11 @@ func (c *MigrationSourceController) setMigrationTransferStatus(vmi *v1.VirtualMa
 		log.Log.Object(vmi).V(4).Reason(err).Info("Failed to get domain stats for migration progress")
 		return
 	}
-	if !exists {
-		log.Log.Object(vmi).V(4).Info("Migration progress domain stats do not exist yet")
-		return
-	}
-	if domainStats == nil {
-		log.Log.Object(vmi).V(4).Info("Migration progress domain stats are nil")
-		return
-	}
-	if domainStats.MigrateDomainJobInfo == nil {
-		log.Log.Object(vmi).V(4).Info("Migration progress job info is nil")
+	if !exists || domainStats == nil || domainStats.MigrateDomainJobInfo == nil {
 		return
 	}
 
-	jobInfo := domainStats.MigrateDomainJobInfo
-	log.Log.Object(vmi).V(4).Infof(
-		"Migration progress job info observed: totalSet=%t total=%d processedSet=%t processed=%d remainingSet=%t remaining=%d",
-		jobInfo.DataTotalSet,
-		jobInfo.DataTotal,
-		jobInfo.DataProcessedSet,
-		jobInfo.DataProcessed,
-		jobInfo.DataRemainingSet,
-		jobInfo.DataRemaining,
-	)
-
-	setMigrationTransferCounters(vmi.Status.MigrationState, jobInfo)
-
-	log.Log.Object(vmi).V(4).Infof(
-		"Migration progress state updated: totalBytes=%v processedBytes=%v remainingBytes=%v",
-		vmi.Status.MigrationState.DataTotalBytes,
-		vmi.Status.MigrationState.DataProcessedBytes,
-		vmi.Status.MigrationState.DataRemainingBytes,
-	)
+	setMigrationTransferCounters(vmi.Status.MigrationState, domainStats.MigrateDomainJobInfo)
 }
 
 func (c *MigrationSourceController) setMigrationProgressStatus(vmi *v1.VirtualMachineInstance, domain *api.Domain) {
