@@ -14210,6 +14210,11 @@ var CRDsValidation map[string]string = map[string]string{
             abortStatus:
               description: Indicates the final status of the live migration abortion
               type: string
+            autoConvergeThrottle:
+              description: AutoConvergeThrottle is the current auto-converge throttle
+                reported by the source runtime.
+              format: int32
+              type: integer
             completed:
               description: Indicates the migration completed
               type: boolean
@@ -14239,6 +14244,11 @@ var CRDsValidation map[string]string = map[string]string{
             failureReason:
               description: Contains the reason why the migration failed
               type: string
+            iteration:
+              description: Iteration is the current migration iteration reported by
+                the source runtime.
+              format: int32
+              type: integer
             migrationConfiguration:
               description: Migration configurations to apply
               properties:
@@ -14807,6 +14817,11 @@ var CRDsValidation map[string]string = map[string]string{
             abortStatus:
               description: Indicates the final status of the live migration abortion
               type: string
+            autoConvergeThrottle:
+              description: AutoConvergeThrottle is the current auto-converge throttle
+                reported by the source runtime.
+              format: int32
+              type: integer
             completed:
               description: Indicates the migration completed
               type: boolean
@@ -14836,6 +14851,11 @@ var CRDsValidation map[string]string = map[string]string{
             failureReason:
               description: Contains the reason why the migration failed
               type: string
+            iteration:
+              description: Iteration is the current migration iteration reported by
+                the source runtime.
+              format: int32
+              type: integer
             migrationConfiguration:
               description: Migration configurations to apply
               properties:

@@ -1084,6 +1084,10 @@ type VirtualMachineInstanceMigrationState struct {
 	DataProcessedBytes *uint64 `json:"dataProcessedBytes,omitempty"`
 	// DataRemainingBytes is the amount of migration data still remaining on the source runtime.
 	DataRemainingBytes *uint64 `json:"dataRemainingBytes,omitempty"`
+	// Iteration is the current migration iteration reported by the source runtime.
+	Iteration *uint32 `json:"iteration,omitempty"`
+	// AutoConvergeThrottle is the current auto-converge throttle reported by the source runtime.
+	AutoConvergeThrottle *uint32 `json:"autoConvergeThrottle,omitempty"`
 	// Name of the migration policy. If string is empty, no policy is matched
 	MigrationPolicyName *string `json:"migrationPolicyName,omitempty"`
 	// Migration configurations to apply

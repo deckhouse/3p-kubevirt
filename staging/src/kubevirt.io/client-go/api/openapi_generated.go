@@ -27266,6 +27266,20 @@ func schema_kubevirtio_api_core_v1_VirtualMachineInstanceMigrationState(ref comm
 							Format:      "int64",
 						},
 					},
+					"iteration": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Iteration is the current migration iteration reported by the source runtime.",
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+					"autoConvergeThrottle": {
+						SchemaProps: spec.SchemaProps{
+							Description: "AutoConvergeThrottle is the current auto-converge throttle reported by the source runtime.",
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
 					"migrationPolicyName": {
 						SchemaProps: spec.SchemaProps{
 							Description: "Name of the migration policy. If string is empty, no policy is matched",

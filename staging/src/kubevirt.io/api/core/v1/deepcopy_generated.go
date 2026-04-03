@@ -5787,6 +5787,16 @@ func (in *VirtualMachineInstanceMigrationState) DeepCopyInto(out *VirtualMachine
 		*out = new(uint64)
 		**out = **in
 	}
+	if in.Iteration != nil {
+		in, out := &in.Iteration, &out.Iteration
+		*out = new(uint32)
+		**out = **in
+	}
+	if in.AutoConvergeThrottle != nil {
+		in, out := &in.AutoConvergeThrottle, &out.AutoConvergeThrottle
+		*out = new(uint32)
+		**out = **in
+	}
 	if in.MigrationPolicyName != nil {
 		in, out := &in.MigrationPolicyName, &out.MigrationPolicyName
 		*out = new(string)

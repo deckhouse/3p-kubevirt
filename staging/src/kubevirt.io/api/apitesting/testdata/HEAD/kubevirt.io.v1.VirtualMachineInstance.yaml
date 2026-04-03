@@ -713,6 +713,7 @@ status:
   migrationState:
     abortRequested: true
     abortStatus: abortStatusValue
+    autoConvergeThrottle: 4294967276
     completed: true
     dataProcessedBytes: 18446744073709551598
     dataRemainingBytes: 18446744073709551598
@@ -720,6 +721,7 @@ status:
     endTimestamp: "1988-01-01T01:01:01Z"
     failed: true
     failureReason: failureReasonValue
+    iteration: 4294967287
     migrationConfiguration:
       allowAutoConverge: true
       allowPostCopy: true

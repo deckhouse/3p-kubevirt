@@ -209,6 +209,12 @@ func setMigrationTransferCounters(state *v1.VirtualMachineInstanceMigrationState
 	if jobInfo.DataRemainingSet {
 		state.DataRemainingBytes = pointer.P(jobInfo.DataRemaining)
 	}
+	if jobInfo.IterationSet {
+		state.Iteration = pointer.P(jobInfo.Iteration)
+	}
+	if jobInfo.AutoConvergeThrottleSet {
+		state.AutoConvergeThrottle = pointer.P(jobInfo.AutoConvergeThrottle)
+	}
 }
 
 func (c *MigrationSourceController) setMigrationTransferStatus(vmi *v1.VirtualMachineInstance, client cmdclient.LauncherClient) {

@@ -1554,14 +1554,16 @@ var _ = Describe("Migration watcher", func() {
 			targetPod.Spec.NodeName = "node01"
 
 			vmi.Status.MigrationState = &virtv1.VirtualMachineInstanceMigrationState{
-				MigrationUID:       migration.UID,
-				TargetNode:         "node01",
-				SourceNode:         "node02",
-				TargetNodeAddress:  "10.10.10.10:1234",
-				StartTimestamp:     pointer.P(metav1.Now()),
-				DataTotalBytes:     pointer.P[uint64](1024),
-				DataProcessedBytes: pointer.P[uint64](768),
-				DataRemainingBytes: pointer.P[uint64](256),
+				MigrationUID:         migration.UID,
+				TargetNode:           "node01",
+				SourceNode:           "node02",
+				TargetNodeAddress:    "10.10.10.10:1234",
+				StartTimestamp:       pointer.P(metav1.Now()),
+				DataTotalBytes:       pointer.P[uint64](1024),
+				DataProcessedBytes:   pointer.P[uint64](768),
+				DataRemainingBytes:   pointer.P[uint64](256),
+				Iteration:            pointer.P[uint32](10),
+				AutoConvergeThrottle: pointer.P[uint32](50),
 			}
 			addMigration(migration)
 			addVirtualMachineInstance(vmi)
@@ -1694,17 +1696,19 @@ var _ = Describe("Migration watcher", func() {
 			targetPod.Spec.NodeName = "node01"
 
 			vmi.Status.MigrationState = &virtv1.VirtualMachineInstanceMigrationState{
-				MigrationUID:       migration.UID,
-				TargetNode:         "node01",
-				SourceNode:         "node02",
-				TargetNodeAddress:  "10.10.10.10:1234",
-				StartTimestamp:     pointer.P(metav1.Now()),
-				EndTimestamp:       pointer.P(metav1.Now()),
-				Failed:             false,
-				Completed:          true,
-				DataTotalBytes:     pointer.P[uint64](1024),
-				DataProcessedBytes: pointer.P[uint64](768),
-				DataRemainingBytes: pointer.P[uint64](256),
+				MigrationUID:         migration.UID,
+				TargetNode:           "node01",
+				SourceNode:           "node02",
+				TargetNodeAddress:    "10.10.10.10:1234",
+				StartTimestamp:       pointer.P(metav1.Now()),
+				EndTimestamp:         pointer.P(metav1.Now()),
+				Failed:               false,
+				Completed:            true,
+				DataTotalBytes:       pointer.P[uint64](1024),
+				DataProcessedBytes:   pointer.P[uint64](768),
+				DataRemainingBytes:   pointer.P[uint64](256),
+				Iteration:            pointer.P[uint32](10),
+				AutoConvergeThrottle: pointer.P[uint32](50),
 			}
 			addMigration(migration)
 			addVirtualMachineInstance(vmi)
