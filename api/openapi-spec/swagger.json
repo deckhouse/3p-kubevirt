@@ -8707,6 +8707,55 @@
      }
     ]
    },
+   "/apis/subresources.kubevirt.io/v1/namespaces/{namespace}/virtualmachineinstances/{name}/addresourceclaim": {
+    "put": {
+     "description": "Add a resource claim and host device to a running Virtual Machine Instance",
+     "consumes": [
+      "*/*"
+     ],
+     "operationId": "v1vmi-addresourceclaim",
+     "parameters": [
+      {
+       "name": "body",
+       "in": "body",
+       "required": true,
+       "schema": {
+        "$ref": "#/definitions/v1.AddResourceClaimOptions"
+       }
+      }
+     ],
+     "responses": {
+      "200": {
+       "description": "OK",
+       "schema": {
+        "type": "string"
+       }
+      },
+      "400": {
+       "description": "Bad Request",
+       "schema": {
+        "type": "string"
+       }
+      },
+      "401": {
+       "description": "Unauthorized"
+      }
+     }
+    },
+    "parameters": [
+     {
+      "uniqueItems": true,
+      "type": "string",
+      "description": "Name of the resource",
+      "name": "name",
+      "in": "path",
+      "required": true
+     },
+     {
+      "$ref": "#/parameters/namespace-nfszEHZ0"
+     }
+    ]
+   },
    "/apis/subresources.kubevirt.io/v1/namespaces/{namespace}/virtualmachineinstances/{name}/addvolume": {
     "put": {
      "description": "Add a volume and disk to a running Virtual Machine Instance",
@@ -8835,7 +8884,7 @@
      }
     ]
    },
-   "/apis/subresources.kubevirt.io/v1/namespaces/{namespace}/virtualmachineinstances/{name}/evacuate/cancel": {
+   "/apis/subresources.kubevirt.io/v1/namespaces/{namespace}/virtualmachineinstances/{name}/evacuatecancel": {
     "put": {
      "description": "Cancel evacuation Virtual Machine Instance",
      "consumes": [
@@ -9213,6 +9262,55 @@
        "schema": {
         "type": "string"
        }
+      }
+     }
+    },
+    "parameters": [
+     {
+      "uniqueItems": true,
+      "type": "string",
+      "description": "Name of the resource",
+      "name": "name",
+      "in": "path",
+      "required": true
+     },
+     {
+      "$ref": "#/parameters/namespace-nfszEHZ0"
+     }
+    ]
+   },
+   "/apis/subresources.kubevirt.io/v1/namespaces/{namespace}/virtualmachineinstances/{name}/removeresourceclaim": {
+    "put": {
+     "description": "Removes a resource claim and host device from a running Virtual Machine Instance",
+     "consumes": [
+      "*/*"
+     ],
+     "operationId": "v1vmi-removeresourceclaim",
+     "parameters": [
+      {
+       "name": "body",
+       "in": "body",
+       "required": true,
+       "schema": {
+        "$ref": "#/definitions/v1.RemoveResourceClaimOptions"
+       }
+      }
+     ],
+     "responses": {
+      "200": {
+       "description": "OK",
+       "schema": {
+        "type": "string"
+       }
+      },
+      "400": {
+       "description": "Bad Request",
+       "schema": {
+        "type": "string"
+       }
+      },
+      "401": {
+       "description": "Unauthorized"
       }
      }
     },
@@ -9756,6 +9854,55 @@
      }
     ]
    },
+   "/apis/subresources.kubevirt.io/v1/namespaces/{namespace}/virtualmachines/{name}/addresourceclaim": {
+    "put": {
+     "description": "Add a resource claim and host device to a running Virtual Machine.",
+     "consumes": [
+      "*/*"
+     ],
+     "operationId": "v1vm-addresourceclaim",
+     "parameters": [
+      {
+       "name": "body",
+       "in": "body",
+       "required": true,
+       "schema": {
+        "$ref": "#/definitions/v1.AddResourceClaimOptions"
+       }
+      }
+     ],
+     "responses": {
+      "200": {
+       "description": "OK",
+       "schema": {
+        "type": "string"
+       }
+      },
+      "400": {
+       "description": "Bad Request",
+       "schema": {
+        "type": "string"
+       }
+      },
+      "401": {
+       "description": "Unauthorized"
+      }
+     }
+    },
+    "parameters": [
+     {
+      "uniqueItems": true,
+      "type": "string",
+      "description": "Name of the resource",
+      "name": "name",
+      "in": "path",
+      "required": true
+     },
+     {
+      "$ref": "#/parameters/namespace-nfszEHZ0"
+     }
+    ]
+   },
    "/apis/subresources.kubevirt.io/v1/namespaces/{namespace}/virtualmachines/{name}/addvolume": {
     "put": {
      "description": "Add a volume and disk to a running Virtual Machine.",
@@ -9805,7 +9952,7 @@
      }
     ]
    },
-   "/apis/subresources.kubevirt.io/v1/namespaces/{namespace}/virtualmachines/{name}/evacuate/cancel": {
+   "/apis/subresources.kubevirt.io/v1/namespaces/{namespace}/virtualmachines/{name}/evacuatecancel": {
     "put": {
      "description": "Cancel evacuation Virtual Machine",
      "consumes": [
@@ -10137,6 +10284,55 @@
        "schema": {
         "type": "string"
        }
+      }
+     }
+    },
+    "parameters": [
+     {
+      "uniqueItems": true,
+      "type": "string",
+      "description": "Name of the resource",
+      "name": "name",
+      "in": "path",
+      "required": true
+     },
+     {
+      "$ref": "#/parameters/namespace-nfszEHZ0"
+     }
+    ]
+   },
+   "/apis/subresources.kubevirt.io/v1/namespaces/{namespace}/virtualmachines/{name}/removeresourceclaim": {
+    "put": {
+     "description": "Removes a resource claim and host device from a running Virtual Machine.",
+     "consumes": [
+      "*/*"
+     ],
+     "operationId": "v1vm-removeresourceclaim",
+     "parameters": [
+      {
+       "name": "body",
+       "in": "body",
+       "required": true,
+       "schema": {
+        "$ref": "#/definitions/v1.RemoveResourceClaimOptions"
+       }
+      }
+     ],
+     "responses": {
+      "200": {
+       "description": "OK",
+       "schema": {
+        "type": "string"
+       }
+      },
+      "400": {
+       "description": "Bad Request",
+       "schema": {
+        "type": "string"
+       }
+      },
+      "401": {
+       "description": "Unauthorized"
       }
      }
     },
@@ -10538,6 +10734,55 @@
      }
     ]
    },
+   "/apis/subresources.kubevirt.io/v1alpha3/namespaces/{namespace}/virtualmachineinstances/{name}/addresourceclaim": {
+    "put": {
+     "description": "Add a resource claim and host device to a running Virtual Machine Instance",
+     "consumes": [
+      "*/*"
+     ],
+     "operationId": "v1alpha3vmi-addresourceclaim",
+     "parameters": [
+      {
+       "name": "body",
+       "in": "body",
+       "required": true,
+       "schema": {
+        "$ref": "#/definitions/v1.AddResourceClaimOptions"
+       }
+      }
+     ],
+     "responses": {
+      "200": {
+       "description": "OK",
+       "schema": {
+        "type": "string"
+       }
+      },
+      "400": {
+       "description": "Bad Request",
+       "schema": {
+        "type": "string"
+       }
+      },
+      "401": {
+       "description": "Unauthorized"
+      }
+     }
+    },
+    "parameters": [
+     {
+      "uniqueItems": true,
+      "type": "string",
+      "description": "Name of the resource",
+      "name": "name",
+      "in": "path",
+      "required": true
+     },
+     {
+      "$ref": "#/parameters/namespace-nfszEHZ0"
+     }
+    ]
+   },
    "/apis/subresources.kubevirt.io/v1alpha3/namespaces/{namespace}/virtualmachineinstances/{name}/addvolume": {
     "put": {
      "description": "Add a volume and disk to a running Virtual Machine Instance",
@@ -10666,7 +10911,7 @@
      }
     ]
    },
-   "/apis/subresources.kubevirt.io/v1alpha3/namespaces/{namespace}/virtualmachineinstances/{name}/evacuate/cancel": {
+   "/apis/subresources.kubevirt.io/v1alpha3/namespaces/{namespace}/virtualmachineinstances/{name}/evacuatecancel": {
     "put": {
      "description": "Cancel evacuation Virtual Machine Instance",
      "consumes": [
@@ -11044,6 +11289,55 @@
        "schema": {
         "type": "string"
        }
+      }
+     }
+    },
+    "parameters": [
+     {
+      "uniqueItems": true,
+      "type": "string",
+      "description": "Name of the resource",
+      "name": "name",
+      "in": "path",
+      "required": true
+     },
+     {
+      "$ref": "#/parameters/namespace-nfszEHZ0"
+     }
+    ]
+   },
+   "/apis/subresources.kubevirt.io/v1alpha3/namespaces/{namespace}/virtualmachineinstances/{name}/removeresourceclaim": {
+    "put": {
+     "description": "Removes a resource claim and host device from a running Virtual Machine Instance",
+     "consumes": [
+      "*/*"
+     ],
+     "operationId": "v1alpha3vmi-removeresourceclaim",
+     "parameters": [
+      {
+       "name": "body",
+       "in": "body",
+       "required": true,
+       "schema": {
+        "$ref": "#/definitions/v1.RemoveResourceClaimOptions"
+       }
+      }
+     ],
+     "responses": {
+      "200": {
+       "description": "OK",
+       "schema": {
+        "type": "string"
+       }
+      },
+      "400": {
+       "description": "Bad Request",
+       "schema": {
+        "type": "string"
+       }
+      },
+      "401": {
+       "description": "Unauthorized"
       }
      }
     },
@@ -11587,6 +11881,55 @@
      }
     ]
    },
+   "/apis/subresources.kubevirt.io/v1alpha3/namespaces/{namespace}/virtualmachines/{name}/addresourceclaim": {
+    "put": {
+     "description": "Add a resource claim and host device to a running Virtual Machine.",
+     "consumes": [
+      "*/*"
+     ],
+     "operationId": "v1alpha3vm-addresourceclaim",
+     "parameters": [
+      {
+       "name": "body",
+       "in": "body",
+       "required": true,
+       "schema": {
+        "$ref": "#/definitions/v1.AddResourceClaimOptions"
+       }
+      }
+     ],
+     "responses": {
+      "200": {
+       "description": "OK",
+       "schema": {
+        "type": "string"
+       }
+      },
+      "400": {
+       "description": "Bad Request",
+       "schema": {
+        "type": "string"
+       }
+      },
+      "401": {
+       "description": "Unauthorized"
+      }
+     }
+    },
+    "parameters": [
+     {
+      "uniqueItems": true,
+      "type": "string",
+      "description": "Name of the resource",
+      "name": "name",
+      "in": "path",
+      "required": true
+     },
+     {
+      "$ref": "#/parameters/namespace-nfszEHZ0"
+     }
+    ]
+   },
    "/apis/subresources.kubevirt.io/v1alpha3/namespaces/{namespace}/virtualmachines/{name}/addvolume": {
     "put": {
      "description": "Add a volume and disk to a running Virtual Machine.",
@@ -11636,7 +11979,7 @@
      }
     ]
    },
-   "/apis/subresources.kubevirt.io/v1alpha3/namespaces/{namespace}/virtualmachines/{name}/evacuate/cancel": {
+   "/apis/subresources.kubevirt.io/v1alpha3/namespaces/{namespace}/virtualmachines/{name}/evacuatecancel": {
     "put": {
      "description": "Cancel evacuation Virtual Machine",
      "consumes": [
@@ -11968,6 +12311,55 @@
        "schema": {
         "type": "string"
        }
+      }
+     }
+    },
+    "parameters": [
+     {
+      "uniqueItems": true,
+      "type": "string",
+      "description": "Name of the resource",
+      "name": "name",
+      "in": "path",
+      "required": true
+     },
+     {
+      "$ref": "#/parameters/namespace-nfszEHZ0"
+     }
+    ]
+   },
+   "/apis/subresources.kubevirt.io/v1alpha3/namespaces/{namespace}/virtualmachines/{name}/removeresourceclaim": {
+    "put": {
+     "description": "Removes a resource claim and host device from a running Virtual Machine.",
+     "consumes": [
+      "*/*"
+     ],
+     "operationId": "v1alpha3vm-removeresourceclaim",
+     "parameters": [
+      {
+       "name": "body",
+       "in": "body",
+       "required": true,
+       "schema": {
+        "$ref": "#/definitions/v1.RemoveResourceClaimOptions"
+       }
+      }
+     ],
+     "responses": {
+      "200": {
+       "description": "OK",
+       "schema": {
+        "type": "string"
+       }
+      },
+      "400": {
+       "description": "Bad Request",
+       "schema": {
+        "type": "string"
+       }
+      },
+      "401": {
+       "description": "Unauthorized"
       }
      }
     },
@@ -13876,6 +14268,38 @@
      }
     }
    },
+   "v1.AddResourceClaimOptions": {
+    "type": "object",
+    "required": [
+     "name",
+     "hostDevice",
+     "resourceClaim"
+    ],
+    "properties": {
+     "dryRun": {
+      "description": "When present, indicates that modifications should not be persisted. An invalid or unrecognized dryRun directive will result in an error response and no further processing of the request. Valid values are: - All: all dry run stages will be processed",
+      "type": "array",
+      "items": {
+       "type": "string",
+       "default": ""
+      },
+      "x-kubernetes-list-type": "atomic"
+     },
+     "hostDevice": {
+      "description": "HostDevice represents the host device that will be plugged into the running VMI",
+      "$ref": "#/definitions/v1.HostDevice"
+     },
+     "name": {
+      "description": "Name represents the name that will be used to map the device to the corresponding resource claim. This overrides any name that is set in the Device struct itself.",
+      "type": "string",
+      "default": ""
+     },
+     "resourceClaim": {
+      "description": "ResourceClaim represents the resource claim to map to the host device",
+      "$ref": "#/definitions/v1.VirtualMachineInstanceResourceClaim"
+     }
+    }
+   },
    "v1.AddVolumeOptions": {
     "description": "AddVolumeOptions is provided when dynamically hot plugging a volume and disk",
     "type": "object",
@@ -14774,14 +15198,29 @@
      "name"
     ],
     "properties": {
+     "address": {
+      "type": "string"
+     },
      "deviceResourceClaimStatus": {
       "description": "DeviceResourceClaimStatus reflects the DRA related information for the device",
       "$ref": "#/definitions/v1.DeviceResourceClaimStatus"
+     },
+     "hotplug": {
+      "$ref": "#/definitions/v1.HotplugDeviceStatus"
+     },
+     "message": {
+      "type": "string"
      },
      "name": {
       "description": "Name of the device as specified in spec.domain.devices.gpus.name or spec.domain.devices.hostDevices.name",
       "type": "string",
       "default": ""
+     },
+     "phase": {
+      "type": "string"
+     },
+     "reason": {
+      "type": "string"
      }
     }
    },
@@ -15632,6 +16071,19 @@
      }
     }
    },
+   "v1.HotplugDeviceStatus": {
+    "type": "object",
+    "properties": {
+     "attachPodName": {
+      "description": "AttachPodName is the name of the pod used to attach the device to the node.",
+      "type": "string"
+     },
+     "attachPodUID": {
+      "description": "AttachPodUID is the UID of the pod used to attach the device to the node.",
+      "type": "string"
+     }
+    }
+   },
    "v1.HotplugVolumeSource": {
     "description": "HotplugVolumeSource Represents the source of a volume to mount which are capable of being hotplugged on a live running VMI. Only one of its members may be specified.",
     "type": "object",
@@ -15974,7 +16426,7 @@
     "type": "object",
     "properties": {
      "container": {
-      "description": "Container defines the container that containes kernel artifacts",
+      "description": "Container defines the container that contains kernel artifacts",
       "$ref": "#/definitions/v1.KernelBootContainer"
      },
      "kernelArgs": {
@@ -16816,7 +17268,7 @@
       "$ref": "#/definitions/k8s.io.apimachinery.pkg.api.resource.Quantity"
      },
      "completionTimeoutPerGiB": {
-      "description": "CompletionTimeoutPerGiB is the maximum number of seconds per GiB a migration is allowed to take. If the timeout is reached, the migration will be either paused, switched to post-copy or cancelled depending on other settings. Defaults to 150",
+      "description": "CompletionTimeoutPerGiB is the maximum number of seconds per GiB a migration is allowed to take. If the timeout is reached, the migration will be either paused, switched to post-copy or canceled depending on other settings. Defaults to 150",
       "type": "integer",
       "format": "int64"
      },
@@ -16852,7 +17304,7 @@
       "format": "int64"
      },
      "progressTimeout": {
-      "description": "ProgressTimeout is the maximum number of seconds a live migration is allowed to make no progress. Hitting this timeout means a migration transferred 0 data for that many seconds. The migration is then considered stuck and therefore cancelled. Defaults to 150",
+      "description": "ProgressTimeout is the maximum number of seconds a live migration is allowed to make no progress. Hitting this timeout means a migration transferred 0 data for that many seconds. The migration is then considered stuck and therefore canceled. Defaults to 150",
       "type": "integer",
       "format": "int64"
      },
@@ -17474,6 +17926,27 @@
      }
     }
    },
+   "v1.RemoveResourceClaimOptions": {
+    "type": "object",
+    "required": [
+     "name"
+    ],
+    "properties": {
+     "dryRun": {
+      "description": "When present, indicates that modifications should not be persisted. An invalid or unrecognized dryRun directive will result in an error response and no further processing of the request. Valid values are: - All: all dry run stages will be processed",
+      "type": "array",
+      "items": {
+       "type": "string",
+       "default": ""
+      },
+      "x-kubernetes-list-type": "atomic"
+     },
+     "name": {
+      "type": "string",
+      "default": ""
+     }
+    }
+   },
    "v1.RemoveVolumeOptions": {
     "description": "RemoveVolumeOptions is provided when dynamically hot unplugging volume and disk",
     "type": "object",
@@ -18066,7 +18539,7 @@
       "type": "boolean"
      },
      "persistent": {
-      "description": "Persistent indicates the state of the TPM device should be kept accross reboots Defaults to false",
+      "description": "Persistent indicates the state of the TPM device should be kept across reboots Defaults to false",
       "type": "boolean"
      }
     }
@@ -18320,7 +18793,7 @@
       "$ref": "#/definitions/k8s.io.apimachinery.pkg.api.resource.Quantity"
      },
      "completionTimeoutPerGiB": {
-      "description": "CompletionTimeoutPerGiB is the maximum number of seconds per GiB a migration is allowed to take. If the timeout is reached, the migration will be either paused, switched to post-copy or cancelled depending on other settings. Defaults to 150",
+      "description": "CompletionTimeoutPerGiB is the maximum number of seconds per GiB a migration is allowed to take. If the timeout is reached, the migration will be either paused, switched to post-copy or canceled depending on other settings. Defaults to 150",
       "type": "integer",
       "format": "int64"
      },
@@ -18360,7 +18833,7 @@
       "format": "int64"
      },
      "progressTimeout": {
-      "description": "ProgressTimeout is the maximum number of seconds a live migration is allowed to make no progress. Hitting this timeout means a migration transferred 0 data for that many seconds. The migration is then considered stuck and therefore cancelled. Defaults to 150",
+      "description": "ProgressTimeout is the maximum number of seconds a live migration is allowed to make no progress. Hitting this timeout means a migration transferred 0 data for that many seconds. The migration is then considered stuck and therefore canceled. Defaults to 150",
       "type": "integer",
       "format": "int64"
      },
@@ -19460,6 +19933,10 @@
      "targetState": {
       "description": "TargetState contains migration state managed by the target virt handler",
       "$ref": "#/definitions/v1.VirtualMachineInstanceMigrationTargetState"
+     },
+     "transferStatus": {
+      "description": "TransferStatus contains migration transfer details reported by the source runtime.",
+      "$ref": "#/definitions/v1.VirtualMachineInstanceMigrationTransferStatus"
      }
     }
    },
@@ -19592,6 +20069,36 @@
      "virtualMachineInstanceUID": {
       "description": "VirtualMachineInstanceUID is the UID of the target virtual machine instance",
       "type": "string"
+     }
+    }
+   },
+   "v1.VirtualMachineInstanceMigrationTransferStatus": {
+    "type": "object",
+    "properties": {
+     "autoConvergeThrottle": {
+      "description": "AutoConvergeThrottle is the current auto-converge throttle reported by the source runtime.",
+      "type": "integer",
+      "format": "int64"
+     },
+     "dataProcessedBytes": {
+      "description": "DataProcessedBytes is the amount of migration data already processed by the source runtime.",
+      "type": "integer",
+      "format": "int64"
+     },
+     "dataRemainingBytes": {
+      "description": "DataRemainingBytes is the amount of migration data still remaining on the source runtime.",
+      "type": "integer",
+      "format": "int64"
+     },
+     "dataTotalBytes": {
+      "description": "DataTotalBytes is the total amount of migration data reported by the source runtime.",
+      "type": "integer",
+      "format": "int64"
+     },
+     "iteration": {
+      "description": "Iteration is the current migration iteration reported by the source runtime.",
+      "type": "integer",
+      "format": "int64"
      }
     }
    },
@@ -19885,6 +20392,10 @@
      "name"
     ],
     "properties": {
+     "hotpluggable": {
+      "description": "Hotpluggable marks a claim that is attached to a running VMI through an attachment pod instead of the virt-launcher pod.",
+      "type": "boolean"
+     },
      "name": {
       "description": "Name uniquely identifies this resource claim inside the VMI. This field is required and must be a DNS_LABEL.",
       "type": "string",
@@ -20008,7 +20519,7 @@
       "type": "string"
      },
      "terminationGracePeriodSeconds": {
-      "description": "Grace period observed after signalling a VirtualMachineInstance to stop after which the VirtualMachineInstance is force terminated.",
+      "description": "Grace period observed after signaling a VirtualMachineInstance to stop after which the VirtualMachineInstance is force terminated.",
       "type": "integer",
       "format": "int64"
      },
@@ -20306,6 +20817,19 @@
      }
     }
    },
+   "v1.VirtualMachineResourceClaimRequest": {
+    "type": "object",
+    "properties": {
+     "addResourceClaimOptions": {
+      "description": "AddResourceClaimOptions when set indicates a resource claim should be added. The details within this field specify how to add the resource claim",
+      "$ref": "#/definitions/v1.AddResourceClaimOptions"
+     },
+     "removeResourceClaimOptions": {
+      "description": "RemoveResourceClaimOptions when set indicates a resource claim should be removed. The details within this field specify how to remove the resource claim",
+      "$ref": "#/definitions/v1.RemoveResourceClaimOptions"
+     }
+    }
+   },
    "v1.VirtualMachineSpec": {
     "description": "VirtualMachineSpec describes how the proper VirtualMachine should look like",
     "type": "object",
@@ -20438,6 +20962,15 @@
      "ready": {
       "description": "Ready indicates if the virtual machine is running and ready",
       "type": "boolean"
+     },
+     "resourceClaimRequests": {
+      "description": "ResourceClaimRequests indicates a list of resource claims add or remove from the VMI template and hotplug on an active running VMI.",
+      "type": "array",
+      "items": {
+       "default": {},
+       "$ref": "#/definitions/v1.VirtualMachineResourceClaimRequest"
+      },
+      "x-kubernetes-list-type": "atomic"
      },
      "restoreInProgress": {
       "description": "RestoreInProgress is the name of the VirtualMachineRestore currently executing",
@@ -20974,7 +21507,7 @@
       "type": "boolean"
      },
      "mode": {
-      "description": "Mode specifies the way the backup output will be recieved",
+      "description": "Mode specifies the way the backup output will be received",
       "type": "string"
      },
      "pvcName": {
@@ -22734,7 +23267,7 @@
       "type": "string"
      },
      "preferredTerminationGracePeriodSeconds": {
-      "description": "Grace period observed after signalling a VirtualMachineInstance to stop after which the VirtualMachineInstance is force terminated.",
+      "description": "Grace period observed after signaling a VirtualMachineInstance to stop after which the VirtualMachineInstance is force terminated.",
       "type": "integer",
       "format": "int64"
      },

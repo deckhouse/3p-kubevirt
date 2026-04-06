@@ -32,6 +32,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	. "github.com/onsi/gomega/gstruct"
 
 	k8sv1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -66,6 +67,7 @@ import (
 	migrationproxy "kubevirt.io/kubevirt/pkg/virt-handler/migration-proxy"
 	notifyserver "kubevirt.io/kubevirt/pkg/virt-handler/notify-server"
 	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/api"
+	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/stats"
 )
 
 func parseDefaultStallDetectorFactor(value string) float64 {
@@ -391,6 +393,68 @@ var _ = Describe("VirtualMachineInstance migration target", func() {
 				d.Spec.Metadata.KubeVirt.Migration.AbortStatus)))
 			Expect(vmi.Status.MigrationState.FailureReason).To(Equal(d.Spec.Metadata.KubeVirt.Migration.FailureReason))
 			testutils.ExpectEvent(recorder, v1.Migrated.String())
+		})
+	})
+
+	Context("setMigrationTransferStatus", func() {
+		It("should map transfer counters from domain job stats", func() {
+			vmi := libvmi.New(libvmistatus.WithStatus(libvmistatus.New(
+				libvmistatus.WithMigrationState(v1.VirtualMachineInstanceMigrationState{
+					MigrationUID:      "1234",
+					SourceNode:        host,
+					TargetNodeAddress: "othernode",
+				}),
+				libvmistatus.WithNodeName(host),
+			)))
+			client.EXPECT().GetDomainStats().Return(&stats.DomainStats{MigrateDomainJobInfo: &stats.DomainJobInfo{
+				DataTotalSet:            true,
+				DataTotal:               1024,
+				DataProcessedSet:        true,
+				DataProcessed:           768,
+				DataRemainingSet:        true,
+				DataRemaining:           256,
+				IterationSet:            true,
+				Iteration:               10,
+				AutoConvergeThrottleSet: true,
+				AutoConvergeThrottle:    50,
+			}}, true, nil)
+
+			controller.setMigrationTransferStatus(vmi, client)
+
+			Expect(vmi.Status.MigrationState.TransferStatus).ToNot(BeNil())
+			Expect(vmi.Status.MigrationState.TransferStatus.DataTotalBytes).To(PointTo(BeEquivalentTo(1024)))
+			Expect(vmi.Status.MigrationState.TransferStatus.DataProcessedBytes).To(PointTo(BeEquivalentTo(768)))
+			Expect(vmi.Status.MigrationState.TransferStatus.DataRemainingBytes).To(PointTo(BeEquivalentTo(256)))
+			Expect(vmi.Status.MigrationState.TransferStatus.Iteration).To(PointTo(BeEquivalentTo(10)))
+			Expect(vmi.Status.MigrationState.TransferStatus.AutoConvergeThrottle).To(PointTo(BeEquivalentTo(50)))
+		})
+
+		It("should preserve existing counters when job stats are absent", func() {
+			vmi := libvmi.New(libvmistatus.WithStatus(libvmistatus.New(
+				libvmistatus.WithMigrationState(v1.VirtualMachineInstanceMigrationState{
+					MigrationUID:      "1234",
+					SourceNode:        host,
+					TargetNodeAddress: "othernode",
+					TransferStatus: &v1.VirtualMachineInstanceMigrationTransferStatus{
+						DataTotalBytes:       pointer.P[uint64](1024),
+						DataProcessedBytes:   pointer.P[uint64](768),
+						DataRemainingBytes:   pointer.P[uint64](256),
+						Iteration:            pointer.P[uint32](10),
+						AutoConvergeThrottle: pointer.P[uint32](50),
+					},
+				}),
+				libvmistatus.WithNodeName(host),
+			)))
+			client.EXPECT().GetDomainStats().Return(&stats.DomainStats{MigrateDomainJobInfo: &stats.DomainJobInfo{}}, true, nil)
+
+			controller.setMigrationTransferStatus(vmi, client)
+
+			Expect(vmi.Status.MigrationState.TransferStatus).ToNot(BeNil())
+			Expect(vmi.Status.MigrationState.TransferStatus.DataTotalBytes).To(PointTo(BeEquivalentTo(1024)))
+			Expect(vmi.Status.MigrationState.TransferStatus.DataProcessedBytes).To(PointTo(BeEquivalentTo(768)))
+			Expect(vmi.Status.MigrationState.TransferStatus.DataRemainingBytes).To(PointTo(BeEquivalentTo(256)))
+			Expect(vmi.Status.MigrationState.TransferStatus.Iteration).To(PointTo(BeEquivalentTo(10)))
+			Expect(vmi.Status.MigrationState.TransferStatus.AutoConvergeThrottle).To(PointTo(BeEquivalentTo(50)))
 		})
 	})
 
