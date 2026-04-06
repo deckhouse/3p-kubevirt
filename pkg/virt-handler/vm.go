@@ -346,7 +346,7 @@ func (c *VirtualMachineController) Execute() bool {
 
 func (c *VirtualMachineController) execute(key string) error {
 	if key == "test-project4/linux-vm" {
-		log.Log.Info("[my-debug] executing test-project4/linux-vm")
+		log.Log.Info(fmt.Sprintf("[my-debug] executing %s", key))
 	}
 
 	vmi, vmiExists, err := c.getVMIFromCache(key)
@@ -380,7 +380,9 @@ func (c *VirtualMachineController) execute(key string) error {
 		return err
 	}
 	log.Log.Object(vmi).V(4).Infof("[my-debug] domain exists %v", domainExists)
-	log.Log.Object(domain).V(4).Infof("[my-debug] domain, fsFreeze: %s", domain.Status.FSFreezeStatus.Status)
+	if domain != nil && key == "test-project4/linux-vm" {
+		log.Log.Object(domain).V(4).Infof("[my-debug] domain, fsFreeze: %s", domain.Status.FSFreezeStatus.Status)
+	}
 
 	if !vmiExists && string(domainCachedUID) != "" {
 		// it's possible to discover the UID from cache even if the domain
@@ -439,7 +441,9 @@ func (c *VirtualMachineController) execute(key string) error {
 	}
 
 	if vmi.DeletionTimestamp == nil && isMigrationInProgress(vmi, domain) {
-		log.Log.V(4).Infof("[my-debug] ignoring key %v as migration is in progress", key)
+		if key == "test-project4/linux-vm" {
+			log.Log.Info(fmt.Sprintf("[my-debug] ignoring key %s as migration is in progress", key))
+		}
 		return nil
 	}
 
