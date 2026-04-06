@@ -345,6 +345,10 @@ func (c *VirtualMachineController) Execute() bool {
 }
 
 func (c *VirtualMachineController) execute(key string) error {
+	if key == "test-project4/linux-vm" {
+		log.Log.Info("[my-debug] executing test-project4/linux-vm")
+	}
+
 	vmi, vmiExists, err := c.getVMIFromCache(key)
 	if err != nil {
 		return err
@@ -375,7 +379,8 @@ func (c *VirtualMachineController) execute(key string) error {
 	if err != nil {
 		return err
 	}
-	log.Log.Object(vmi).V(4).Infof("domain exists %v", domainExists)
+	log.Log.Object(vmi).V(4).Infof("[my-debug] domain exists %v", domainExists)
+	log.Log.Object(domain).V(4).Infof("[my-debug] domain, fsFreeze: %s", domain.Status.FSFreezeStatus.Status)
 
 	if !vmiExists && string(domainCachedUID) != "" {
 		// it's possible to discover the UID from cache even if the domain
@@ -434,7 +439,7 @@ func (c *VirtualMachineController) execute(key string) error {
 	}
 
 	if vmi.DeletionTimestamp == nil && isMigrationInProgress(vmi, domain) {
-		log.Log.V(4).Infof("ignoring key %v as migration is in progress", key)
+		log.Log.V(4).Infof("[my-debug] ignoring key %v as migration is in progress", key)
 		return nil
 	}
 
@@ -1003,14 +1008,14 @@ func (c *VirtualMachineController) updateGuestAgentConditions(vmi *v1.VirtualMac
 			condManager.RemoveCondition(vmi, v1.VirtualMachineInstanceUnsupportedAgent)
 		}
 
-		// Sync FSFreezeStatus directly from the launcher. This covers the case where
-		// a freeze/thaw event occurred during live migration and was ignored by the
-		// handler (isMigrationInProgress), leaving the VMI with a stale FSFreezeStatus.
-		if guestInfo.FSFreezeStatus == api.FSThawed {
-			vmi.Status.FSFreezeStatus = ""
-		} else if guestInfo.FSFreezeStatus != "" {
-			vmi.Status.FSFreezeStatus = guestInfo.FSFreezeStatus
-		}
+		// // Sync FSFreezeStatus directly from the launcher. This covers the case where
+		// // a freeze/thaw event occurred during live migration and was ignored by the
+		// // handler (isMigrationInProgress), leaving the VMI with a stale FSFreezeStatus.
+		// if guestInfo.FSFreezeStatus == api.FSThawed {
+		// 	vmi.Status.FSFreezeStatus = ""
+		// } else if guestInfo.FSFreezeStatus != "" {
+		// 	vmi.Status.FSFreezeStatus = guestInfo.FSFreezeStatus
+		// }
 
 	}
 	return nil
