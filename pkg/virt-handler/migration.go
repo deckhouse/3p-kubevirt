@@ -22,19 +22,38 @@ package virthandler
 import (
 	"fmt"
 	"net"
+	"os"
 
 	v1 "kubevirt.io/api/core/v1"
 )
 
-// FindMigrationIP looks for dedicated migration network migration0. If found, sets migration IP to it
+// MigrationNetworkInterfaceEnv overrides the dedicated migration network
+// interface name that virt-handler inspects to discover the migration IP.
+// When unset, the upstream default v1.MigrationInterfaceName ("migration0") is used.
+const MigrationNetworkInterfaceEnv = "MIGRATION_NETWORK_INTERFACE"
+
+// FindMigrationIP looks for a dedicated migration network interface. If found,
+// sets migration IP to its first global unicast address. The interface name
+// defaults to v1.MigrationInterfaceName ("migration0") and can be overridden
+// via the MIGRATION_NETWORK_INTERFACE environment variable.
 func FindMigrationIP(migrationIp string) (string, error) {
-	ief, err := net.InterfaceByName(v1.MigrationInterfaceName)
+	return FindMigrationIPOnInterface(migrationIp, os.Getenv(MigrationNetworkInterfaceEnv))
+}
+
+// FindMigrationIPOnInterface is the explicit form of FindMigrationIP that
+// takes the interface name directly. An empty ifaceName falls back to
+// v1.MigrationInterfaceName.
+func FindMigrationIPOnInterface(migrationIp, ifaceName string) (string, error) {
+	if ifaceName == "" {
+		ifaceName = v1.MigrationInterfaceName
+	}
+	ief, err := net.InterfaceByName(ifaceName)
 	if err != nil {
 		return migrationIp, nil
 	}
 	addrs, err := ief.Addrs()
 	if err != nil { // get addresses
-		return migrationIp, fmt.Errorf("%s present but doesn't have an IP", v1.MigrationInterfaceName)
+		return migrationIp, fmt.Errorf("%s present but doesn't have an IP", ifaceName)
 	}
 	for _, addr := range addrs {
 		if !addr.(*net.IPNet).IP.IsGlobalUnicast() {
@@ -47,5 +66,5 @@ func FindMigrationIP(migrationIp string) (string, error) {
 		}
 	}
 
-	return migrationIp, fmt.Errorf("no IP found on %s", v1.MigrationInterfaceName)
+	return migrationIp, fmt.Errorf("no IP found on %s", ifaceName)
 }

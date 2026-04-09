@@ -35,5 +35,17 @@ var _ = Describe("virt-handler", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(newIp).To(Equal(originalIP))
 		})
+
+		It("Should return the IP passed to it when the overridden interface does not exist", func() {
+			newIp, err := FindMigrationIPOnInterface(originalIP, "definitely-not-an-iface-xyz")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(newIp).To(Equal(originalIP))
+		})
+
+		It("Should fall back to the default interface name when the override is empty", func() {
+			newIp, err := FindMigrationIPOnInterface(originalIP, "")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(newIp).To(Equal(originalIP))
+		})
 	})
 })
