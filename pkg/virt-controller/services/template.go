@@ -1862,6 +1862,9 @@ func (t *TemplateService) VMIResourcePredicates(vmi *v1.VirtualMachineInstance, 
 			}, WithMemoryLimitsOverhead(memoryLimitsOverhead)),
 			NewVMIResourceRule(t.doesVMIRequireAutoMemoryLimits, WithAutoMemoryLimits(vmi.Namespace, t.namespaceStore)),
 			NewVMIResourceRule(func(*v1.VirtualMachineInstance) bool {
+				return true
+			}, EnsureMemoryLimits()),
+			NewVMIResourceRule(func(*v1.VirtualMachineInstance) bool {
 				return len(networkToResourceMap) > 0
 			}, WithNetworkResources(networkToResourceMap)),
 			NewVMIResourceRule(isGPUVMIDevicePlugins, WithGPUsDevicePlugins(vmi.Spec.Domain.Devices.GPUs)),
