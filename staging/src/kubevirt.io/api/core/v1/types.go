@@ -693,6 +693,12 @@ func (v *VirtualMachineInstance) IsCPUDedicated() bool {
 	return v.Spec.Domain.CPU != nil && v.Spec.Domain.CPU.DedicatedCPUPlacement
 }
 
+// IsCPUFractioned checks if CPU fraction requests has been requested.
+func (v *VirtualMachineInstance) IsCPUFractioned() bool {
+	_, hasFraction := v.Annotations[CPUResourcesRequestsFraction]
+	return v.Spec.Domain.CPU != nil && hasFraction
+}
+
 func (v *VirtualMachineInstance) IsBootloaderEFI() bool {
 	return v.Spec.Domain.Firmware != nil && v.Spec.Domain.Firmware.Bootloader != nil &&
 		v.Spec.Domain.Firmware.Bootloader.EFI != nil
@@ -1682,6 +1688,13 @@ const (
 	//         - protocol: UDP
 	//           port: dns
 	AllowAccessClusterServicesNPLabel string = "np.kubevirt.io/allow-access-cluster-services"
+)
+
+const (
+	// VCPUTopologyDynamicCoresAnnotation annotation indicates "distributed by sockets" or "dynamic cores number" VCPU topology.
+	VCPUTopologyDynamicCoresAnnotation = "internal.virtualization.deckhouse.io/vcpu-topology-dynamic-cores"
+
+	CPUResourcesRequestsFraction = "internal.virtualization.deckhouse.io/cpu-resources-requests-fraction"
 )
 
 func NewVMI(name string, uid types.UID) *VirtualMachineInstance {

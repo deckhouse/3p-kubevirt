@@ -241,12 +241,12 @@ func (c *directIOChecker) CheckFile(path string) (bool, error) {
 // based on https://gitlab.com/qemu-project/qemu/-/blob/master/util/osdep.c#L344
 func (c *directIOChecker) check(path string, flags int) (bool, error) {
 	// #nosec No risk for path injection as we only open the file, not read from it. The function leaks only whether the directory to `path` exists.
-	f, err := os.OpenFile(path, flags|syscall.O_DIRECT, 0600)
+	f, err := os.OpenFile(path, flags|SYSCALL_O_DIRECT, 0600)
 	if err != nil {
 		// EINVAL is returned if the filesystem does not support the O_DIRECT flag
 		if err, ok := err.(*os.PathError); ok && err.Err == syscall.EINVAL {
 			// #nosec No risk for path injection as we only open the file, not read from it. The function leaks only whether the directory to `path` exists.
-			f, err := os.OpenFile(path, flags & ^syscall.O_DIRECT, 0600)
+			f, err := os.OpenFile(path, flags & ^SYSCALL_O_DIRECT, 0600)
 			if err == nil {
 				defer util.CloseIOAndCheckErr(f, nil)
 				return false, nil
@@ -321,13 +321,9 @@ func getOptimalBlockIOForDevice(path string) (*api.BlockIO, error) {
 	}
 	defer util.CloseIOAndCheckErr(f, &err)
 
-	logicalSize, err := unix.IoctlGetUint32(int(f.Fd()), unix.BLKSSZGET)
+	logicalSize, physicalSize, err := getBlockIOSizes(path, f)
 	if err != nil {
-		return nil, fmt.Errorf("unable to get logical block size from device %s: %w", path, err)
-	}
-	physicalSize, err := unix.IoctlGetUint32(int(f.Fd()), unix.BLKPBSZGET)
-	if err != nil {
-		return nil, fmt.Errorf("unable to get physical block size from device %s: %w", path, err)
+		return nil, err
 	}
 
 	log.Log.Infof("Detected logical size of %d and physical size of %d for device %s", logicalSize, physicalSize, path)

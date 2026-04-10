@@ -1063,7 +1063,12 @@ func (t *TemplateService) newResourceRenderer(vmi *v1.VirtualMachineInstance, ne
 		return nil, err
 	}
 
-	options := append(baseOptions, t.VMIResourcePredicates(vmi, networkToResourceMap, memoryOverhead).Apply()...)
+	cpuFraction, err := parseCPUFraction(vmi)
+	if err != nil {
+		return nil, err
+	}
+
+	options := append(baseOptions, t.VMIResourcePredicates(vmi, networkToResourceMap, memoryOverhead, cpuFraction).Apply()...)
 	return NewResourceRenderer(vmiResources.Limits, vmiResources.Requests, options...), nil
 }
 
@@ -1838,7 +1843,7 @@ func (t *TemplateService) doesVMIRequireAutoCPULimits(vmi *v1.VirtualMachineInst
 	return false
 }
 
-func (t *TemplateService) VMIResourcePredicates(vmi *v1.VirtualMachineInstance, networkToResourceMap map[string]string, memoryOverhead resource.Quantity) VMIResourcePredicates {
+func (t *TemplateService) VMIResourcePredicates(vmi *v1.VirtualMachineInstance, networkToResourceMap map[string]string, memoryOverhead resource.Quantity, cpuFraction int) VMIResourcePredicates {
 	memoryLimitsOverhead := GetMemoryLimitsOverhead(vmi)
 	withCPULimits := t.doesVMIRequireAutoCPULimits(vmi)
 	additionalCPUs := uint32(0)
@@ -1854,7 +1859,8 @@ func (t *TemplateService) VMIResourcePredicates(vmi *v1.VirtualMachineInstance, 
 			// Run overcommit first to avoid overcommitting overhead memory
 			NewVMIResourceRule(emptyMemoryRequest, WithMemoryRequests(vmi.Spec.Domain.Memory, t.clusterConfig.GetMemoryOvercommit())),
 			NewVMIResourceRule(doesVMIRequireDedicatedCPU, WithCPUPinning(vmi, vmi.Annotations, additionalCPUs)),
-			NewVMIResourceRule(not(doesVMIRequireDedicatedCPU), WithoutDedicatedCPU(vmi, t.clusterConfig.GetCPUAllocationRatio(), withCPULimits)),
+			NewVMIResourceRule(withoutDedicatedCPU, WithoutDedicatedCPU(vmi, t.clusterConfig.GetCPUAllocationRatio(), withCPULimits)),
+			NewVMIResourceRule(doesVMIRequireFractionCPU, WithCPUFractionRequests(vmi, cpuFraction)),
 			NewVMIResourceRule(hasHugePages, WithHugePages(vmi.Spec.Domain.Memory, memoryOverhead)),
 			NewVMIResourceRule(not(hasHugePages), WithMemoryOverhead(vmi.Spec.Domain.Resources, memoryOverhead)),
 			NewVMIResourceRule(func(_ *v1.VirtualMachineInstance) bool {
