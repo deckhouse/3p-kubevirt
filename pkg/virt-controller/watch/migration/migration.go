@@ -1685,32 +1685,10 @@ func (c *Controller) sync(key string, migration *virtv1.VirtualMachineInstanceMi
 }
 
 func (c *Controller) setupVMIRuntimeUser(vmi *virtv1.VirtualMachineInstance) *patch.PatchSet {
-	patchSet := patch.New()
-	if !c.clusterConfig.RootEnabled() {
-		// The cluster is configured for non-root VMs, ensure the VMI is non-root.
-		// If the VMI is root, the migration will be a root -> non-root migration.
-		if vmi.Status.RuntimeUser != util.NonRootUID {
-			patchSet.AddOption(patch.WithReplace("/status/runtimeUser", util.NonRootUID))
-		}
-
-		// This is required in order to be able to update from v0.43-v0.51 to v0.52+
-		if vmi.Annotations == nil {
-			patchSet.AddOption(patch.WithAdd("/metadata/annotations", map[string]string{virtv1.DeprecatedNonRootVMIAnnotation: "true"}))
-		} else if _, ok := vmi.Annotations[virtv1.DeprecatedNonRootVMIAnnotation]; !ok {
-			patchSet.AddOption(patch.WithAdd(fmt.Sprintf("/metadata/annotations/%s", patch.EscapeJSONPointer(virtv1.DeprecatedNonRootVMIAnnotation)), "true"))
-		}
-	} else {
-		// The cluster is configured for root VMs, ensure the VMI is root.
-		// If the VMI is non-root, the migration will be a non-root -> root migration.
-		if vmi.Status.RuntimeUser != util.RootUser {
-			patchSet.AddOption(patch.WithReplace("/status/runtimeUser", util.RootUser))
-		}
-
-		if _, ok := vmi.Annotations[virtv1.DeprecatedNonRootVMIAnnotation]; ok {
-			patchSet.AddOption(patch.WithRemove(fmt.Sprintf("/metadata/annotations/%s", patch.EscapeJSONPointer(virtv1.DeprecatedNonRootVMIAnnotation))))
-		}
-	}
-	return patchSet
+	// Transitioning RuntimeUser during live migration is unsafe.
+	// Keep RuntimeUser stable across migrations; changing the cluster's default (Root feature gate)
+	// only takes effect after a VM restart.
+	return patch.New()
 }
 
 func (c *Controller) listMatchingTargetPods(migration *virtv1.VirtualMachineInstanceMigration, vmi *virtv1.VirtualMachineInstance) ([]*k8sv1.Pod, error) {
