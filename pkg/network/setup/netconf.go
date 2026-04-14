@@ -129,6 +129,8 @@ func (c *NetConf) Setup(vmi *v1.VirtualMachineInstance, networks []v1.Network, l
 		ownerID = util.NonRootUID
 	}
 	queuesCapacity := int(converter.NetworkQueuesCapacity(vmi))
+	disableTapVethBridge := vmi.GetAnnotations()[netpod.DisableTapVethBridgeAnnotation] == "true"
+	log.Log.Object(vmi).Infof("bridge network setup mode: disableTapVethBridge=%t", disableTapVethBridge)
 	netpod := netpod.NewNetPod(
 		networks,
 		vmispec.FilterInterfacesByNetworks(vmi.Spec.Domain.Devices.Interfaces, networks),
@@ -140,6 +142,7 @@ func (c *NetConf) Setup(vmi *v1.VirtualMachineInstance, networks []v1.Network, l
 		netpod.WithMasqueradeAdapter(newMasqueradeAdapter(vmi)),
 		netpod.WithCacheCreator(c.cacheCreator),
 		netpod.WithBindingPlugins(c.clusterConfigurer.GetNetworkBindings()),
+		netpod.WithDisableTapVethBridge(disableTapVethBridge),
 		netpod.WithLogger(log.Log.Object(vmi)),
 		netpod.WithVMIIfaceStatuses(vmi.Status.Interfaces),
 	)

@@ -434,6 +434,55 @@ var _ = Describe("netpod", func() {
 		}))
 	})
 
+	It("setup bridge binding with disable tap-veth-bridge annotation skips tap device creation", func() {
+		const podIfaceOrignalMAC = "12:34:56:78:90:ab"
+		nmstatestub := nmstateStub{status: nmstate.Status{
+			Interfaces: []nmstate.Interface{{
+				Name:       "eth0",
+				Index:      0,
+				TypeName:   nmstate.TypeVETH,
+				State:      nmstate.IfaceStateUp,
+				MacAddress: podIfaceOrignalMAC,
+				MTU:        1500,
+				IPv4: nmstate.IP{
+					Enabled: pointer.P(true),
+					Address: []nmstate.IPAddress{{
+						IP:        primaryIPv4Address,
+						PrefixLen: 30,
+					}},
+				},
+				IPv6: nmstate.IP{
+					Enabled: pointer.P(true),
+					Address: []nmstate.IPAddress{{
+						IP:        primaryIPv6Address,
+						PrefixLen: 64,
+					}},
+				},
+			}},
+			Routes: nmstate.Routes{Running: []nmstate.Route{{
+				Destination:      "0.0.0.0/0",
+				NextHopInterface: "eth0",
+				NextHopAddress:   "10.222.222.254",
+				TableID:          0,
+			}}},
+		}}
+
+		vmiIface := v1.Interface{
+			Name:                   defaultPodNetworkName,
+			InterfaceBindingMethod: v1.InterfaceBindingMethod{Bridge: &v1.InterfaceBridge{}},
+		}
+		netPod := netpod.NewNetPod(
+			[]v1.Network{*v1.DefaultPodNetwork()},
+			[]v1.Interface{vmiIface},
+			vmiUID, 0, 0, 0, state,
+			netpod.WithNMStateAdapter(&nmstatestub),
+			netpod.WithCacheCreator(&baseCacheCreator),
+			netpod.WithDisableTapVethBridge(true),
+		)
+		Expect(netPod.Setup()).To(Succeed())
+		Expect(nmstatestub.spec).To(Equal(nmstate.Spec{Interfaces: []nmstate.Interface{}}))
+	})
+
 	It("setup bridge binding with IP custom primary interface name", func() {
 		const (
 			defaultGatewayIP4Address = "10.222.222.254"

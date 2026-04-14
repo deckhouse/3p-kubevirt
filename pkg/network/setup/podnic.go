@@ -38,6 +38,9 @@ import (
 
 const defaultState = cache.PodIfaceNetworkPreparationPending
 
+const disableTapVethBridgeAnnotation = "virtualization.deckhouse.io/disable-tap-veth-bridge"
+const disableDHCPAnnotation = "virtualization.deckhouse.io/disable-dhcp"
+
 type podNIC struct {
 	vmi              *v1.VirtualMachineInstance
 	podInterfaceName string
@@ -113,7 +116,17 @@ func (l *podNIC) PlugPhase2(domain *api.Domain) error {
 
 func (l *podNIC) newDHCPConfigurator() dhcpconfigurator.Configurator {
 	var dhcpConfigurator dhcpconfigurator.Configurator
+
 	if l.vmiSpecIface.Bridge != nil {
+		if l.vmi.GetAnnotations()[disableTapVethBridgeAnnotation] == "true" {
+			log.Log.Object(l.vmi).Infof("bridge network setup: skipping bridge DHCP configurator because %q=true for interface %q", disableTapVethBridgeAnnotation, l.vmiSpecIface.Name)
+			return nil
+		}
+		if l.vmi.GetAnnotations()[disableDHCPAnnotation] == "true" {
+			log.Log.Object(l.vmi).Infof("bridge network setup: skipping bridge DHCP configurator because %q=true for interface %q", disableDHCPAnnotation, l.vmiSpecIface.Name)
+			return nil
+		}
+		log.Log.Object(l.vmi).Infof("bridge network setup: creating bridge DHCP configurator for interface %q", l.vmiSpecIface.Name)
 		dhcpConfigurator = dhcpconfigurator.NewBridgeConfigurator(
 			l.cacheCreator,
 			getPIDString(l.launcherPID),

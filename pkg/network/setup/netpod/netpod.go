@@ -64,6 +64,8 @@ type NSExecutor interface {
 	Do(func() error) error
 }
 
+const DisableTapVethBridgeAnnotation = "virtualization.deckhouse.io/disable-tap-veth-bridge"
+
 type NetPod struct {
 	vmiSpecIfaces    []v1.Interface
 	vmiSpecNets      []v1.Network
@@ -80,6 +82,7 @@ type NetPod struct {
 	state        *State
 
 	bindingPluginsByName map[string]v1.InterfaceBindingPlugin
+	disableTapVethBridge bool
 
 	log *log.FilteredLogger
 }
@@ -133,6 +136,12 @@ func WithCacheCreator(c cacheCreator) option {
 func WithBindingPlugins(bindings map[string]v1.InterfaceBindingPlugin) option {
 	return func(n *NetPod) {
 		n.bindingPluginsByName = bindings
+	}
+}
+
+func WithDisableTapVethBridge(disable bool) option {
+	return func(n *NetPod) {
+		n.disableTapVethBridge = disable
 	}
 }
 
@@ -400,6 +409,13 @@ func (n NetPod) bridgeBindingSpec(podIfaceName string, vmiIfaceIndex int, ifaceS
 		},
 		Metadata: &nmstate.IfaceMetadata{Pid: n.podPID, NetworkName: vmiNetworkName},
 	}
+
+	if n.disableTapVethBridge {
+		n.log.Infof("bridge network setup: skipping tap-veth-bridge wiring and tap device creation for pod interface %q", podIfaceName)
+		return nil, nil
+	}
+
+	n.log.Infof("bridge network setup: creating tap-veth-bridge wiring for pod interface %q", podIfaceName)
 
 	dummyIface := nmstate.Interface{
 		Name:       podIfaceName,
