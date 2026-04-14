@@ -1597,18 +1597,6 @@ func (c *Controller) sync(key string, migration *virtv1.VirtualMachineInstanceMi
 					return fmt.Errorf("failed to render fake source pod launch manifest: %v", err)
 				}
 			}
-			// patch VMI annotations and set RuntimeUser in preparation for target pod creation
-			patches := c.setupVMIRuntimeUser(vmi)
-			if !patches.IsEmpty() {
-				patchBytes, err := patches.GeneratePayload()
-				if err != nil {
-					return err
-				}
-				vmi, err = c.clientset.VirtualMachineInstance(vmi.Namespace).Patch(context.Background(), vmi.Name, types.JSONPatchType, patchBytes, v1.PatchOptions{})
-				if err != nil {
-					return fmt.Errorf("failed to set VMI RuntimeUser: %v", err)
-				}
-			}
 			return c.handleTargetPodCreation(key, migration, vmi, sourcePod)
 		} else if controller.IsPodReady(pod) {
 			if controller.VMIHasHotplugVolumes(vmi) {
@@ -1681,13 +1669,6 @@ func (c *Controller) sync(key string, migration *virtv1.VirtualMachineInstanceMi
 		return c.patchVMI(origVMI, vmi)
 	}
 	return nil
-}
-
-func (c *Controller) setupVMIRuntimeUser(vmi *virtv1.VirtualMachineInstance) *patch.PatchSet {
-	// Transitioning RuntimeUser during live migration is unsafe.
-	// Keep RuntimeUser stable across migrations; changing the cluster's default (Root feature gate)
-	// only takes effect after a VM restart.
-	return patch.New()
 }
 
 func (c *Controller) listMatchingTargetPods(migration *virtv1.VirtualMachineInstanceMigration, vmi *virtv1.VirtualMachineInstance) ([]*k8sv1.Pod, error) {
