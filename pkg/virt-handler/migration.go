@@ -22,28 +22,14 @@ package virthandler
 import (
 	"fmt"
 	"net"
-	"os"
 
 	v1 "kubevirt.io/api/core/v1"
 )
 
-// MigrationNetworkInterfaceEnv overrides the dedicated migration network
-// interface name that virt-handler inspects to discover the migration IP.
-// When unset, the upstream default v1.MigrationInterfaceName ("migration0") is used.
-const MigrationNetworkInterfaceEnv = "MIGRATION_NETWORK_INTERFACE"
-
-// FindMigrationIP looks for a dedicated migration network interface. If found,
-// sets migration IP to its first global unicast address. The interface name
-// defaults to v1.MigrationInterfaceName ("migration0") and can be overridden
-// via the MIGRATION_NETWORK_INTERFACE environment variable.
-func FindMigrationIP(migrationIp string) (string, error) {
-	return FindMigrationIPOnInterface(migrationIp, os.Getenv(MigrationNetworkInterfaceEnv))
-}
-
-// FindMigrationIPOnInterface is the explicit form of FindMigrationIP that
-// takes the interface name directly. An empty ifaceName falls back to
-// v1.MigrationInterfaceName.
-func FindMigrationIPOnInterface(migrationIp, ifaceName string) (string, error) {
+// FindMigrationIP returns the IP to bind live migration to. When ifaceName is
+// empty, the upstream default v1.MigrationInterfaceName ("migration0") is
+// used. If the interface is not present, migrationIp is returned unchanged.
+func FindMigrationIP(migrationIp, ifaceName string) (string, error) {
 	if ifaceName == "" {
 		ifaceName = v1.MigrationInterfaceName
 	}
@@ -52,12 +38,11 @@ func FindMigrationIPOnInterface(migrationIp, ifaceName string) (string, error) {
 		return migrationIp, nil
 	}
 	addrs, err := ief.Addrs()
-	if err != nil { // get addresses
+	if err != nil {
 		return migrationIp, fmt.Errorf("%s present but doesn't have an IP", ifaceName)
 	}
 	for _, addr := range addrs {
 		if !addr.(*net.IPNet).IP.IsGlobalUnicast() {
-			// skip local/multicast IPs
 			continue
 		}
 		ip := addr.(*net.IPNet).IP.To16()
@@ -65,6 +50,5 @@ func FindMigrationIPOnInterface(migrationIp, ifaceName string) (string, error) {
 			return ip.String(), nil
 		}
 	}
-
 	return migrationIp, fmt.Errorf("no IP found on %s", ifaceName)
 }

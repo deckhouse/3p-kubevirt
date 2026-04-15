@@ -337,18 +337,18 @@ func (app *virtHandlerApp) Run() {
 	go nodeLabellerController.Run(10, stop)
 
 	migrationIpAddress := app.PodIpAddress
+	// Optional dedicated migration interface from a Node annotation written by
+	// the Deckhouse virtualization module (sourced from a SystemNetwork CR).
 	migrationIfaceName := ""
-	// Deckhouse virtualization module: a small reconciler may annotate this Node
-	// with the kernel interface name of a dedicated migration network (sourced
-	// from a SystemNetwork CR). When the annotation is present, virt-handler
-	// binds migration traffic to the address on that interface instead of the
-	// pod IP. Missing/empty annotation falls back to upstream behavior.
-	if node, getErr := app.virtCli.CoreV1().Nodes().Get(context.Background(), app.HostOverride, metav1.GetOptions{}); getErr != nil {
+	nodeCtx, nodeCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	node, getErr := app.virtCli.CoreV1().Nodes().Get(nodeCtx, app.HostOverride, metav1.GetOptions{})
+	nodeCancel()
+	if getErr != nil {
 		log.Log.Reason(getErr).Warningf("failed to get node %q for migration interface annotation lookup", app.HostOverride)
-	} else if node != nil {
-		migrationIfaceName = node.Annotations["network.virtualization.deckhouse.io/migration-iface"]
+	} else {
+		migrationIfaceName = node.Annotations["virtualization.deckhouse.io/migration-iface"]
 	}
-	migrationIpAddress, err = virthandler.FindMigrationIPOnInterface(migrationIpAddress, migrationIfaceName)
+	migrationIpAddress, err = virthandler.FindMigrationIP(migrationIpAddress, migrationIfaceName)
 	if err != nil {
 		panic(err)
 	}

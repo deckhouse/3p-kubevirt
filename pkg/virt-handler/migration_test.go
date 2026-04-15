@@ -24,28 +24,20 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-const (
-	originalIP = "1.1.1.1"
-)
+const originalIP = "1.1.1.1"
 
 var _ = Describe("virt-handler", func() {
-	Context("findMigrationIp", func() {
-		It("Should return the IP passed to it when no migration0 interface exists", func() {
-			newIp, err := FindMigrationIP(originalIP)
+	Context("FindMigrationIP", func() {
+		It("returns the fallback IP when the default interface does not exist", func() {
+			ip, err := FindMigrationIP(originalIP, "")
 			Expect(err).NotTo(HaveOccurred())
-			Expect(newIp).To(Equal(originalIP))
+			Expect(ip).To(Equal(originalIP))
 		})
 
-		It("Should return the IP passed to it when the overridden interface does not exist", func() {
-			newIp, err := FindMigrationIPOnInterface(originalIP, "definitely-not-an-iface-xyz")
+		It("returns the fallback IP when an explicit interface does not exist", func() {
+			ip, err := FindMigrationIP(originalIP, "definitely-not-an-iface-xyz")
 			Expect(err).NotTo(HaveOccurred())
-			Expect(newIp).To(Equal(originalIP))
-		})
-
-		It("Should fall back to the default interface name when the override is empty", func() {
-			newIp, err := FindMigrationIPOnInterface(originalIP, "")
-			Expect(err).NotTo(HaveOccurred())
-			Expect(newIp).To(Equal(originalIP))
+			Expect(ip).To(Equal(originalIP))
 		})
 	})
 })
