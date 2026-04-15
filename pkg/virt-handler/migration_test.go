@@ -24,7 +24,9 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-const originalIP = "1.1.1.1"
+const (
+	originalIP = "1.1.1.1"
+)
 
 var _ = Describe("virt-handler", func() {
 	Context("FindMigrationIP", func() {
