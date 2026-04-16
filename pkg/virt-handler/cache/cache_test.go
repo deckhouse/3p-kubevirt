@@ -219,6 +219,7 @@ var _ = Describe("Domain informer", func() {
 			domainManager.EXPECT().ListAllDomains().Return(list, nil)
 			domainManager.EXPECT().GetGuestOSInfo().Return(&api.GuestOSInfo{})
 			domainManager.EXPECT().InterfacesStatus().Return([]api.InterfaceStatus{})
+			domainManager.EXPECT().GetFSFreezeStatus().Return(nil)
 
 			runCMDServer(wg, socketPath, domainManager, stopChan, nil)
 
@@ -241,6 +242,7 @@ var _ = Describe("Domain informer", func() {
 			domainManager.EXPECT().ListAllDomains().Return(list, nil)
 			domainManager.EXPECT().GetGuestOSInfo().Return(&api.GuestOSInfo{})
 			domainManager.EXPECT().InterfacesStatus().Return([]api.InterfaceStatus{})
+			domainManager.EXPECT().GetFSFreezeStatus().Return(nil)
 
 			err := ghostRecordStore.Add("test1-namespace", "test1", "somefile1", "1234-1")
 			Expect(err).ToNot(HaveOccurred())
@@ -266,6 +268,7 @@ var _ = Describe("Domain informer", func() {
 			domainManager.EXPECT().ListAllDomains().Return(list, nil)
 			domainManager.EXPECT().GetGuestOSInfo().Return(&api.GuestOSInfo{})
 			domainManager.EXPECT().InterfacesStatus().Return([]api.InterfaceStatus{})
+			domainManager.EXPECT().GetFSFreezeStatus().Return(nil)
 
 			runCMDServer(wg, socketPath, domainManager, stopChan, nil)
 
@@ -286,6 +289,7 @@ var _ = Describe("Domain informer", func() {
 			domainManager.EXPECT().ListAllDomains().Return([]*api.Domain{domain}, nil)
 			domainManager.EXPECT().GetGuestOSInfo().Return(&api.GuestOSInfo{})
 			domainManager.EXPECT().InterfacesStatus().Return([]api.InterfaceStatus{})
+			domainManager.EXPECT().GetFSFreezeStatus().Return(nil)
 			// now prove if we make a change, like adding a label, that the resync
 			// will pick that change up automatically
 			newDomain := domain.DeepCopy()
@@ -294,6 +298,7 @@ var _ = Describe("Domain informer", func() {
 			domainManager.EXPECT().ListAllDomains().Return([]*api.Domain{newDomain}, nil)
 			domainManager.EXPECT().GetGuestOSInfo().Return(nil)
 			domainManager.EXPECT().InterfacesStatus().Return(nil)
+			domainManager.EXPECT().GetFSFreezeStatus().Return(nil)
 
 			runCMDServer(wg, socketPath, domainManager, stopChan, nil)
 
@@ -402,6 +407,7 @@ var _ = Describe("Domain informer", func() {
 			domainManager.EXPECT().ListAllDomains().Return(list, nil)
 			domainManager.EXPECT().GetGuestOSInfo().Return(&api.GuestOSInfo{})
 			domainManager.EXPECT().InterfacesStatus().Return([]api.InterfaceStatus{})
+			domainManager.EXPECT().GetFSFreezeStatus().Return(nil)
 
 			runCMDServer(wg, socketPath, domainManager, stopChan, nil)
 			// ensure we can connect to the server first.
