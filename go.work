@@ -53,3 +53,7 @@ replace k8s.io/sample-cli-plugin => k8s.io/sample-cli-plugin v0.34.2
 replace k8s.io/sample-controller => k8s.io/sample-controller v0.34.2
 
 replace k8s.io/kube-openapi => k8s.io/kube-openapi v0.0.0-20250710124328-f3f2b991d03b
+
+replace github.com/deckhouse/kube-api-rewriter => github.com/deckhouse/kube-api-rewriter v0.2.0
+
+replace github.com/deckhouse/virtualization/src/kubevirt-rules => github.com/deckhouse/virtualization/src/kubevirt-rules v1.7.0

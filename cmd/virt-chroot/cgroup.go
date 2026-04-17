@@ -17,9 +17,6 @@ import (
 	cgroupfs2 "github.com/opencontainers/cgroups/fs2"
 	"golang.org/x/sys/unix"
 
-	// Import the cgroups/devices package to register the default cgroups managers.
-	_ "github.com/opencontainers/runc/libcontainer/cgroups/devices"
-
 	cgroupconsts "kubevirt.io/kubevirt/pkg/virt-handler/cgroup/constants"
 )
 

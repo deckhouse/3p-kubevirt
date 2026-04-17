@@ -270,7 +270,7 @@ func NewHandlerDaemonSet(config *operatorutil.KubeVirtDeploymentConfig, productN
 	}
 	container.Args = []string{
 		"--port",
-		"8090",
+		"8443",
 		"--hostname-override",
 		"$(NODE_NAME)",
 		"--pod-ip-address",
@@ -290,7 +290,7 @@ func NewHandlerDaemonSet(config *operatorutil.KubeVirtDeploymentConfig, productN
 		{
 			Name:          "metrics",
 			Protocol:      corev1.ProtocolTCP,
-			ContainerPort: 8080,
+			ContainerPort: 8443,
 		},
 		{
 			Name:          "vmstats",
@@ -330,10 +330,10 @@ func NewHandlerDaemonSet(config *operatorutil.KubeVirtDeploymentConfig, productN
 		FailureThreshold: 3,
 		ProbeHandler: corev1.ProbeHandler{
 			HTTPGet: &corev1.HTTPGetAction{
-				Scheme: corev1.URISchemeHTTP,
+				Scheme: corev1.URISchemeHTTPS,
 				Port: intstr.IntOrString{
 					Type:   intstr.Int,
-					IntVal: 8090,
+					IntVal: 8443,
 				},
 				Path: "/healthz",
 			},
@@ -345,10 +345,10 @@ func NewHandlerDaemonSet(config *operatorutil.KubeVirtDeploymentConfig, productN
 	container.ReadinessProbe = &corev1.Probe{
 		ProbeHandler: corev1.ProbeHandler{
 			HTTPGet: &corev1.HTTPGetAction{
-				Scheme: corev1.URISchemeHTTP,
+				Scheme: corev1.URISchemeHTTPS,
 				Port: intstr.IntOrString{
 					Type:   intstr.Int,
-					IntVal: 8090,
+					IntVal: 8443,
 				},
 				Path: "/healthz",
 			},

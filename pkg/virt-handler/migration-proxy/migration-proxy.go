@@ -61,6 +61,8 @@ type ProxyManager interface {
 }
 
 type migrationProxyManager struct {
+	migrationIpAddress string
+	portRange          *PortRange
 	sourceProxies      map[string][]*migrationProxy
 	targetProxies      map[string][]*migrationProxy
 	managerLock        sync.Mutex
@@ -92,7 +94,8 @@ type migrationProxy struct {
 	clientTLSConfig    *tls.Config
 	migrationTLSConfig *tls.Config
 
-	logger *log.FilteredLogger
+	logger   *log.FilteredLogger
+	freePort func()
 }
 
 func (m *migrationProxyManager) InitiateGracefulShutdown() {
@@ -117,8 +120,10 @@ func GetMigrationPortsList(isBlockMigration bool) (ports []int) {
 	return
 }
 
-func NewMigrationProxyManager(serverTLSConfig *tls.Config, clientTLSConfig, migrationTLSConfig *tls.Config, config *virtconfig.ClusterConfig) ProxyManager {
+func NewMigrationProxyManager(migrationIpAddress string, portRange *PortRange, serverTLSConfig *tls.Config, clientTLSConfig, migrationTLSConfig *tls.Config, config *virtconfig.ClusterConfig) ProxyManager {
 	return &migrationProxyManager{
+		migrationIpAddress: migrationIpAddress,
+		portRange:          portRange,
 		sourceProxies:      make(map[string][]*migrationProxy),
 		targetProxies:      make(map[string][]*migrationProxy),
 		serverTLSConfig:    serverTLSConfig,
@@ -171,15 +176,39 @@ func (m *migrationProxyManager) StartTargetListener(key string, targetUnixFiles 
 		}
 	}
 
-	zeroAddress := ip.GetIPZeroAddress()
-	proxiesList := []*migrationProxy{}
+	addr := m.migrationIpAddress
+	if net.ParseIP(addr) == nil {
+		addr = ip.GetIPZeroAddress()
+	}
+
+	var proxiesList []*migrationProxy
 	serverTLSConfig := m.serverTLSConfig
 	if m.config.GetMigrationConfiguration().DisableTLS != nil && *m.config.GetMigrationConfiguration().DisableTLS {
 		serverTLSConfig = nil
 	}
+
+	if m.portRange != nil {
+		if len(targetUnixFiles) > m.portRange.AvailableCount() {
+			return fmt.Errorf("not enough ports available for starting %d migration proxies", len(targetUnixFiles))
+		}
+	}
+
 	for _, targetUnixFile := range targetUnixFiles {
 		// 0 means random port is used
-		proxy := NewTargetProxy(zeroAddress, 0, serverTLSConfig, targetUnixFile, key)
+		tcpBindPort := 0
+		if m.portRange != nil {
+			port, err := m.portRange.Alloc()
+			if err != nil {
+				return fmt.Errorf("failed to allocate port for migration proxy: %v", err)
+			}
+			tcpBindPort = port
+
+		}
+		proxy := NewTargetProxy(addr, tcpBindPort, serverTLSConfig, targetUnixFile, key, func() {
+			if m.portRange != nil {
+				m.portRange.Free(tcpBindPort)
+			}
+		})
 
 		err := proxy.Start()
 		if err != nil {
@@ -363,7 +392,7 @@ func NewSourceProxy(unixSocketPath string, tcpTargetAddress string, clientTLSCon
 }
 
 // Target proxy listens on a tcp socket and pipes to a virtqemud unix socket
-func NewTargetProxy(tcpBindAddress string, tcpBindPort int, serverTLSConfig *tls.Config, virtqemudSocketPath string, vmiUID string) *migrationProxy {
+func NewTargetProxy(tcpBindAddress string, tcpBindPort int, serverTLSConfig *tls.Config, virtqemudSocketPath string, vmiUID string, freePort func()) *migrationProxy {
 	return &migrationProxy{
 		tcpBindAddress:  tcpBindAddress,
 		tcpBindPort:     tcpBindPort,
@@ -374,6 +403,7 @@ func NewTargetProxy(tcpBindAddress string, tcpBindPort int, serverTLSConfig *tls
 		listenErrChan:   make(chan error, 1),
 		serverTLSConfig: serverTLSConfig,
 		logger:          log.Log.With("uid", vmiUID).With("outbound", filepath.Base(virtqemudSocketPath)),
+		freePort:        freePort,
 	}
 }
 
@@ -444,11 +474,13 @@ func (m *migrationProxy) createUnixListener() error {
 }
 
 func (m *migrationProxy) Stop() {
-
 	close(m.stopChan)
 	if m.listener != nil {
 		m.logger.Infof("proxy stopped listening")
 		m.listener.Close()
+	}
+	if m.freePort != nil {
+		m.freePort()
 	}
 }
 

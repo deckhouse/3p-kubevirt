@@ -14,6 +14,7 @@ go_library(
     deps = [
         "//pkg/monitoring/metrics/common/client:go_default_library",
         "//pkg/monitoring/metrics/common/vmisync:go_default_library",
+        "//pkg/monitoring/metrics/common/kube-api-rewriter:go_default_library",
         "//pkg/monitoring/metrics/common/workqueue:go_default_library",
         "//pkg/monitoring/metrics/virt-handler/domainstats:go_default_library",
         "//pkg/monitoring/metrics/virt-handler/gpuinfo:go_default_library",
