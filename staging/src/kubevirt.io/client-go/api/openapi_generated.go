@@ -23335,6 +23335,13 @@ func schema_kubevirtio_api_core_v1_MigrationConfiguration(ref common.ReferenceCa
 							Format:      "int64",
 						},
 					},
+					"parallelSyncMigrationsPerNode": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ParallelSyncMigrationsPerNode is the maximum number of concurrent outgoing live migrations per source node allowed to be in the data-transfer (sync) phase. Migrations above this cap wait in PreparingTarget with a WaitingForSyncSlot condition until a slot frees. Effective value is clamped to ParallelOutboundMigrationsPerNode. Defaults to 1.",
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
 					"parallelMigrationsPerCluster": {
 						SchemaProps: spec.SchemaProps{
 							Description: "ParallelMigrationsPerCluster is the total number of concurrent live migrations allowed cluster-wide. Defaults to 5",

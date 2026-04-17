@@ -745,6 +745,10 @@ func (c *Controller) processMigrationPhase(
 	case virtv1.MigrationPreparingTarget:
 		if (migration.IsLocalOrDecentralizedSource() && vmi.IsMigrationSourceSynchronized() && vmi.Status.MigrationState.TargetState.NodeAddress != nil) ||
 			(migration.IsLocalOrDecentralizedTarget() && vmi.Status.MigrationState.TargetNode != "" && vmi.Status.MigrationState.TargetNodeAddress != "") {
+			if c.holdForSyncSlot(migration, migrationCopy, vmi) {
+				return nil
+			}
+			conditionManager.RemoveCondition(migrationCopy, virtv1.VirtualMachineInstanceMigrationWaitingForSyncSlot)
 			migrationCopy.Status.Phase = virtv1.MigrationTargetReady
 		}
 	case virtv1.MigrationTargetReady:
@@ -2162,6 +2166,66 @@ func (c *Controller) outboundMigrationsOnNode(node string, runningMigrations []*
 			if vmi.Status.NodeName == node || (vmi.Status.MigrationState != nil && vmi.Status.MigrationState.SourceNode == node) {
 				sum++
 			}
+		}
+	}
+	return sum
+}
+
+// holdForSyncSlot decides whether a migration in PreparingTarget must wait for a
+// free data-transfer (sync) slot on the source node. If so, it sets the
+// WaitingForSyncSlot condition on migrationCopy, requeues the migration with a
+// short delay, and returns true. Otherwise it returns false, allowing the
+// caller to transition to TargetReady.
+func (c *Controller) holdForSyncSlot(migration, migrationCopy *virtv1.VirtualMachineInstanceMigration, vmi *virtv1.VirtualMachineInstance) bool {
+	if vmi == nil || vmi.Status.NodeName == "" {
+		return false
+	}
+	syncCap := c.clusterConfig.GetEffectiveParallelSyncMigrationsPerNode()
+	syncing := c.syncingMigrationsOnNode(vmi.Status.NodeName, migration)
+	if uint32(syncing) < syncCap {
+		return false
+	}
+	msg := fmt.Sprintf("Target prepared; waiting for sync slot on source node %q (%d/%d in data-transfer)",
+		vmi.Status.NodeName, syncing, syncCap)
+	cm := controller.NewVirtualMachineInstanceMigrationConditionManager()
+	if !cm.HasCondition(migrationCopy, virtv1.VirtualMachineInstanceMigrationWaitingForSyncSlot) {
+		cm.UpdateCondition(migrationCopy, &virtv1.VirtualMachineInstanceMigrationCondition{
+			Type:    virtv1.VirtualMachineInstanceMigrationWaitingForSyncSlot,
+			Status:  k8sv1.ConditionTrue,
+			Reason:  "PerNodeSyncPoolFull",
+			Message: msg,
+		})
+	}
+	log.Log.Object(migration).V(2).Info(msg)
+	c.Queue.AddWithOpts(priorityqueue.AddOpts{Priority: pointer.P(pendingPriority), After: 5 * time.Second}, controller.MigrationKey(migration))
+	return true
+}
+
+// syncingMigrationsOnNode counts migrations whose source VMI runs on the given
+// node and which are in the data-transfer (sync) phase: TargetReady and beyond
+// (including Running). The current migration (self) is excluded from the count
+// so that the gate does not deadlock on its own entry. Target pod's lifecycle
+// phases (Scheduling, Scheduled, PreparingTarget) are excluded — they are the
+// prep pool counted by outboundMigrationsOnNode.
+func (c *Controller) syncingMigrationsOnNode(node string, self *virtv1.VirtualMachineInstanceMigration) int {
+	sum := 0
+	for _, migration := range migrationsutil.ListUnfinishedMigrations(c.migrationIndexer) {
+		if migration.UID == self.UID {
+			continue
+		}
+		switch migration.Status.Phase {
+		case virtv1.MigrationTargetReady, virtv1.MigrationRunning:
+		default:
+			continue
+		}
+		key := controller.NamespacedKey(migration.Namespace, migration.Spec.VMIName)
+		obj, exists, _ := c.vmiStore.GetByKey(key)
+		if !exists {
+			continue
+		}
+		vmi := obj.(*virtv1.VirtualMachineInstance)
+		if vmi.Status.NodeName == node || (vmi.Status.MigrationState != nil && vmi.Status.MigrationState.SourceNode == node) {
+			sum++
 		}
 	}
 	return sum

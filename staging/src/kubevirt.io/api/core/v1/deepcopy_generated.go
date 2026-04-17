@@ -3454,6 +3454,11 @@ func (in *MigrationConfiguration) DeepCopyInto(out *MigrationConfiguration) {
 		*out = new(uint32)
 		**out = **in
 	}
+	if in.ParallelSyncMigrationsPerNode != nil {
+		in, out := &in.ParallelSyncMigrationsPerNode, &out.ParallelSyncMigrationsPerNode
+		*out = new(uint32)
+		**out = **in
+	}
 	if in.ParallelMigrationsPerCluster != nil {
 		in, out := &in.ParallelMigrationsPerCluster, &out.ParallelMigrationsPerCluster
 		*out = new(uint32)

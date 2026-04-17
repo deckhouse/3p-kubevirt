@@ -158,6 +158,7 @@ func (c *ClusterConfig) crdUpdated(_, cur interface{}) {
 
 func defaultClusterConfig(cpuArch string) *v1.KubeVirtConfiguration {
 	parallelOutboundMigrationsPerNodeDefault := ParallelOutboundMigrationsPerNodeDefault
+	parallelSyncMigrationsPerNodeDefault := ParallelSyncMigrationsPerNodeDefault
 	parallelMigrationsPerClusterDefault := ParallelMigrationsPerClusterDefault
 	bandwidthPerMigrationDefault := resource.MustParse(BandwidthPerMigrationDefault)
 	nodeDrainTaintDefaultKey := NodeDrainTaintDefaultKey
@@ -203,6 +204,7 @@ func defaultClusterConfig(cpuArch string) *v1.KubeVirtConfiguration {
 		MigrationConfiguration: &v1.MigrationConfiguration{
 			ParallelMigrationsPerCluster:      &parallelMigrationsPerClusterDefault,
 			ParallelOutboundMigrationsPerNode: &parallelOutboundMigrationsPerNodeDefault,
+			ParallelSyncMigrationsPerNode:     &parallelSyncMigrationsPerNodeDefault,
 			NodeDrainTaintKey:                 &nodeDrainTaintDefaultKey,
 			BandwidthPerMigration:             &bandwidthPerMigrationDefault,
 			ProgressTimeout:                   &progressTimeout,

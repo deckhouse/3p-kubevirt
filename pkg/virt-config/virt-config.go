@@ -38,6 +38,7 @@ import (
 
 const (
 	ParallelOutboundMigrationsPerNodeDefault uint32 = 2
+	ParallelSyncMigrationsPerNodeDefault     uint32 = 1
 	ParallelMigrationsPerClusterDefault      uint32 = 5
 	BandwidthPerMigrationDefault                    = "0Mi"
 	MigrationAllowAutoConverge               bool   = false
@@ -117,6 +118,31 @@ func (c *ClusterConfig) GetMigrationConfiguration() *v1.MigrationConfiguration {
 		migrationConfig.AllowWorkloadDisruption = &allowPostCopy
 	}
 	return migrationConfig
+}
+
+// GetEffectiveParallelSyncMigrationsPerNode returns the per-source-node cap
+// on migrations allowed to be in the data-transfer (sync) phase. The value is
+// clamped to ParallelOutboundMigrationsPerNode: prep cap is an upper bound on
+// sync cap. Defaults to ParallelSyncMigrationsPerNodeDefault when unset.
+func (c *ClusterConfig) GetEffectiveParallelSyncMigrationsPerNode() uint32 {
+	mc := c.GetMigrationConfiguration()
+
+	sync := ParallelSyncMigrationsPerNodeDefault
+	if mc.ParallelSyncMigrationsPerNode != nil {
+		sync = *mc.ParallelSyncMigrationsPerNode
+	}
+	if sync == 0 {
+		sync = ParallelSyncMigrationsPerNodeDefault
+	}
+
+	outbound := ParallelOutboundMigrationsPerNodeDefault
+	if mc.ParallelOutboundMigrationsPerNode != nil {
+		outbound = *mc.ParallelOutboundMigrationsPerNode
+	}
+	if sync > outbound {
+		sync = outbound
+	}
+	return sync
 }
 
 func (c *ClusterConfig) GetImagePullPolicy() (policy k8sv1.PullPolicy) {

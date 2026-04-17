@@ -1261,6 +1261,14 @@ var CRDsValidation map[string]string = map[string]string{
                     allowed per node. Defaults to 2
                   format: int32
                   type: integer
+                parallelSyncMigrationsPerNode:
+                  description: |-
+                    ParallelSyncMigrationsPerNode is the maximum number of concurrent outgoing live migrations
+                    per source node allowed to be in the data-transfer (sync) phase. Migrations above this cap
+                    wait in PreparingTarget with a WaitingForSyncSlot condition until a slot frees.
+                    Effective value is clamped to ParallelOutboundMigrationsPerNode. Defaults to 1.
+                  format: int32
+                  type: integer
                 progressTimeout:
                   description: |-
                     ProgressTimeout is the maximum number of seconds a live migration is allowed to make no progress.
@@ -14296,6 +14304,14 @@ var CRDsValidation map[string]string = map[string]string{
                     allowed per node. Defaults to 2
                   format: int32
                   type: integer
+                parallelSyncMigrationsPerNode:
+                  description: |-
+                    ParallelSyncMigrationsPerNode is the maximum number of concurrent outgoing live migrations
+                    per source node allowed to be in the data-transfer (sync) phase. Migrations above this cap
+                    wait in PreparingTarget with a WaitingForSyncSlot condition until a slot frees.
+                    Effective value is clamped to ParallelOutboundMigrationsPerNode. Defaults to 1.
+                  format: int32
+                  type: integer
                 progressTimeout:
                   description: |-
                     ProgressTimeout is the maximum number of seconds a live migration is allowed to make no progress.
@@ -14906,6 +14922,14 @@ var CRDsValidation map[string]string = map[string]string{
                   description: |-
                     ParallelOutboundMigrationsPerNode is the maximum number of concurrent outgoing live migrations
                     allowed per node. Defaults to 2
+                  format: int32
+                  type: integer
+                parallelSyncMigrationsPerNode:
+                  description: |-
+                    ParallelSyncMigrationsPerNode is the maximum number of concurrent outgoing live migrations
+                    per source node allowed to be in the data-transfer (sync) phase. Migrations above this cap
+                    wait in PreparingTarget with a WaitingForSyncSlot condition until a slot frees.
+                    Effective value is clamped to ParallelOutboundMigrationsPerNode. Defaults to 1.
                   format: int32
                   type: integer
                 progressTimeout:

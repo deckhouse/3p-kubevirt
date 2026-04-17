@@ -866,6 +866,10 @@ const (
 	VirtualMachineInstanceMigrationAbortRequested          VirtualMachineInstanceMigrationConditionType = "migrationAbortRequested"
 	VirtualMachineInstanceMigrationRejectedByResourceQuota VirtualMachineInstanceMigrationConditionType = "migrationRejectedByResourceQuota"
 	VirtualMachineInstanceMigrationFailed                  VirtualMachineInstanceMigrationConditionType = "migrationFailed"
+	// VirtualMachineInstanceMigrationWaitingForSyncSlot indicates that the target pod is prepared
+	// but the migration is waiting for a free data-transfer (sync) slot on the source node,
+	// gated by MigrationConfiguration.ParallelSyncMigrationsPerNode.
+	VirtualMachineInstanceMigrationWaitingForSyncSlot VirtualMachineInstanceMigrationConditionType = "WaitingForSyncSlot"
 )
 
 const (
@@ -3246,6 +3250,11 @@ type MigrationConfiguration struct {
 	// ParallelOutboundMigrationsPerNode is the maximum number of concurrent outgoing live migrations
 	// allowed per node. Defaults to 2
 	ParallelOutboundMigrationsPerNode *uint32 `json:"parallelOutboundMigrationsPerNode,omitempty"`
+	// ParallelSyncMigrationsPerNode is the maximum number of concurrent outgoing live migrations
+	// per source node allowed to be in the data-transfer (sync) phase. Migrations above this cap
+	// wait in PreparingTarget with a WaitingForSyncSlot condition until a slot frees.
+	// Effective value is clamped to ParallelOutboundMigrationsPerNode. Defaults to 1.
+	ParallelSyncMigrationsPerNode *uint32 `json:"parallelSyncMigrationsPerNode,omitempty"`
 	// ParallelMigrationsPerCluster is the total number of concurrent live migrations
 	// allowed cluster-wide. Defaults to 5
 	ParallelMigrationsPerCluster *uint32 `json:"parallelMigrationsPerCluster,omitempty"`
