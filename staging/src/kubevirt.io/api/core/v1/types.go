@@ -643,6 +643,13 @@ func (v *VirtualMachineInstance) IsCPUFractioned() bool {
 	return v.Spec.Domain.CPU != nil && hasFraction
 }
 
+// HasCPUResourceRequirements checks if CPU resource requirements are specified in VMI spec.
+// Note: That was an old non-hotplug version. We should not break it.
+func (v *VirtualMachineInstance) HasCPUResourceRequirements() bool {
+	resources := v.Spec.Domain.Resources
+	return !resources.Requests.Cpu().IsZero() && !resources.Limits.Cpu().IsZero()
+}
+
 func (v *VirtualMachineInstance) IsBootloaderEFI() bool {
 	return v.Spec.Domain.Firmware != nil && v.Spec.Domain.Firmware.Bootloader != nil &&
 		v.Spec.Domain.Firmware.Bootloader.EFI != nil

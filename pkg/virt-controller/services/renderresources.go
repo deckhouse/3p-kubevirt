@@ -57,12 +57,16 @@ func doesVMIRequireDedicatedCPU(vmi *v1.VirtualMachineInstance) bool {
 	return vmi.IsCPUDedicated()
 }
 
-func withoutDedicatedCPU(vmi *v1.VirtualMachineInstance) bool {
-	return !doesVMIRequireDedicatedCPU(vmi) && !doesVMIRequireFractionCPU(vmi)
-}
-
 func doesVMIRequireFractionCPU(vmi *v1.VirtualMachineInstance) bool {
 	return vmi.IsCPUFractioned()
+}
+
+// doesSpecifyCPUResources returns true whether VMI has one of CPU resources requirements:
+// - CPU dedication
+// - CPU cores fraction in the annotation.
+// - CPU cores fraction in the resources.
+func doesSpecifyCPUResources(vmi *v1.VirtualMachineInstance) bool {
+	return doesVMIRequireDedicatedCPU(vmi) || doesVMIRequireFractionCPU(vmi) || vmi.HasCPUResourceRequirements()
 }
 
 func NewResourceRenderer(vmLimits k8sv1.ResourceList, vmRequests k8sv1.ResourceList, options ...ResourceRendererOption) *ResourceRenderer {
