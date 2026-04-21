@@ -345,21 +345,27 @@ func generateQemuTimeoutWithJitter(qemuTimeoutBaseSeconds int) string {
 	return fmt.Sprintf("%ds", timeout)
 }
 
+// legacyQemuGID is the gid that existing VMs were created with before the switch
+// to the deckhouse user. Preserved for root VMIs so that their PVC ownership does
+// not change across migrations.
+const legacyQemuGID = int64(107)
+
 func computePodSecurityContext(vmi *v1.VirtualMachineInstance, seccomp *k8sv1.SeccompProfile) *k8sv1.PodSecurityContext {
 	psc := &k8sv1.PodSecurityContext{}
-
-	// virtiofs container will run unprivileged even if the pod runs as root,
-	// so we need to allow the NonRootUID for virtiofsd to be able to write into the PVC
-	psc.FSGroup = pointer.P(int64(util.NonRootUID))
 
 	if util.IsNonRootVMI(vmi) {
 		nonRootUser := int64(util.NonRootUID)
 		psc.RunAsUser = &nonRootUser
 		psc.RunAsGroup = &nonRootUser
 		psc.RunAsNonRoot = pointer.P(true)
+		// virtiofs container will run unprivileged even if the pod runs as root,
+		// so we need to allow the NonRootUID for virtiofsd to be able to write into the PVC
+		psc.FSGroup = pointer.P(nonRootUser)
 	} else {
 		rootUser := int64(util.RootUser)
 		psc.RunAsUser = &rootUser
+		// Keep fsGroup stable across migrations for root VMIs.
+		psc.FSGroup = pointer.P(legacyQemuGID)
 	}
 	psc.SeccompProfile = seccomp
 
