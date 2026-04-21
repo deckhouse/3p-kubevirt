@@ -13780,6 +13780,10 @@ var CRDsValidation map[string]string = map[string]string{
                     description: DeviceResourceClaimStatus reflects the DRA related
                       information for the device
                     properties:
+                      allowMultipleAllocations:
+                        description: AllowMultipleAllocations is a flag to allow multiple
+                          allocations of the same device
+                        type: boolean
                       attributes:
                         description: |-
                           Attributes are properties of the device that could be used by kubevirt and other copmonents to learn more
@@ -13808,6 +13812,10 @@ var CRDsValidation map[string]string = map[string]string{
                             - deviceNumber
                             type: object
                         type: object
+                      bindsToNode:
+                        description: BindsToNode is a flag to bind the device to the
+                          node
+                        type: boolean
                       name:
                         description: Name is the name of actual device on the host
                           provisioned by the driver as reflected in resourceclaim.status
@@ -13857,6 +13865,10 @@ var CRDsValidation map[string]string = map[string]string{
                     description: DeviceResourceClaimStatus reflects the DRA related
                       information for the device
                     properties:
+                      allowMultipleAllocations:
+                        description: AllowMultipleAllocations is a flag to allow multiple
+                          allocations of the same device
+                        type: boolean
                       attributes:
                         description: |-
                           Attributes are properties of the device that could be used by kubevirt and other copmonents to learn more
@@ -13885,6 +13897,10 @@ var CRDsValidation map[string]string = map[string]string{
                             - deviceNumber
                             type: object
                         type: object
+                      bindsToNode:
+                        description: BindsToNode is a flag to bind the device to the
+                          node
+                        type: boolean
                       name:
                         description: Name is the name of actual device on the host
                           provisioned by the driver as reflected in resourceclaim.status
@@ -14480,6 +14496,36 @@ var CRDsValidation map[string]string = map[string]string{
                     virtual machine instance
                   type: string
               type: object
+            transferStatus:
+              description: TransferStatus contains migration transfer details reported
+                by the source runtime.
+              properties:
+                autoConvergeThrottle:
+                  description: AutoConvergeThrottle is the current auto-converge throttle
+                    reported by the source runtime.
+                  format: int32
+                  type: integer
+                dataProcessedBytes:
+                  description: DataProcessedBytes is the amount of migration data
+                    already processed by the source runtime.
+                  format: int64
+                  type: integer
+                dataRemainingBytes:
+                  description: DataRemainingBytes is the amount of migration data
+                    still remaining on the source runtime.
+                  format: int64
+                  type: integer
+                dataTotalBytes:
+                  description: DataTotalBytes is the total amount of migration data
+                    reported by the source runtime.
+                  format: int64
+                  type: integer
+                iteration:
+                  description: Iteration is the current migration iteration reported
+                    by the source runtime.
+                  format: int32
+                  type: integer
+              type: object
           type: object
         migrationTransport:
           description: This represents the migration transport
@@ -15061,6 +15107,36 @@ var CRDsValidation map[string]string = map[string]string{
                   description: VirtualMachineInstanceUID is the UID of the target
                     virtual machine instance
                   type: string
+              type: object
+            transferStatus:
+              description: TransferStatus contains migration transfer details reported
+                by the source runtime.
+              properties:
+                autoConvergeThrottle:
+                  description: AutoConvergeThrottle is the current auto-converge throttle
+                    reported by the source runtime.
+                  format: int32
+                  type: integer
+                dataProcessedBytes:
+                  description: DataProcessedBytes is the amount of migration data
+                    already processed by the source runtime.
+                  format: int64
+                  type: integer
+                dataRemainingBytes:
+                  description: DataRemainingBytes is the amount of migration data
+                    still remaining on the source runtime.
+                  format: int64
+                  type: integer
+                dataTotalBytes:
+                  description: DataTotalBytes is the total amount of migration data
+                    reported by the source runtime.
+                  format: int64
+                  type: integer
+                iteration:
+                  description: Iteration is the current migration iteration reported
+                    by the source runtime.
+                  format: int32
+                  type: integer
               type: object
           type: object
         phase:

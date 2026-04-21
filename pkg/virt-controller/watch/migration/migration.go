@@ -490,12 +490,11 @@ func (c *Controller) updateStatus(migration *virtv1.VirtualMachineInstanceMigrat
 	// - Fail if any obvious failure is found
 	// - Interrupt if something unexpectedly disappeared
 	// - Begin progressing migration state based on VMI's MigrationState status.
-	if migration.IsFinal() {
-		if vmi.IsMigrationSynchronized(migration) && migration.UID == vmi.Status.MigrationState.MigrationUID {
-			// Store the finalized migration state data from the VMI status in the migration object
-			migrationCopy.Status.MigrationState = vmi.Status.MigrationState
-		}
+	if vmi != nil && vmi.Status.MigrationState != nil && vmi.IsMigrationSynchronized(migration) && migration.UID == vmi.Status.MigrationState.MigrationUID {
+		migrationCopy.Status.MigrationState = vmi.Status.MigrationState
+	}
 
+	if migration.IsFinal() {
 		// Remove the finalizer and conditions if the migration has already completed
 		controller.RemoveFinalizer(migrationCopy, virtv1.VirtualMachineInstanceMigrationFinalizer)
 	} else if vmi == nil {
@@ -1341,7 +1340,7 @@ func (c *Controller) createAttachmentPod(migration *virtv1.VirtualMachineInstanc
 	// Reset the hotplug volume statuses to enforce mount
 	vmiCopy := vmi.DeepCopy()
 	vmiCopy.Status.VolumeStatus = []virtv1.VolumeStatus{}
-	attachmentPodTemplate, err := c.templateService.RenderHotplugAttachmentPodTemplate(volumes, resourceClaims, virtLauncherPod, vmiCopy, volumeNamesPVCMap)
+	attachmentPodTemplate, err := c.templateService.RenderMigrationHotplugAttachmentPodTemplate(volumes, resourceClaims, virtLauncherPod, vmiCopy, volumeNamesPVCMap)
 	if err != nil {
 		return fmt.Errorf("failed to render attachment pod template: %v", err)
 	}
@@ -1599,7 +1598,7 @@ func (c *Controller) sync(key string, migration *virtv1.VirtualMachineInstanceMi
 			}
 			return c.handleTargetPodCreation(key, migration, vmi, sourcePod)
 		} else if controller.IsPodReady(pod) {
-			if controller.VMIHasHotplugVolumes(vmi) {
+			if needMigrationHotplug(vmi) {
 				attachmentPods, err := controller.AttachmentPods(pod, c.podIndexer)
 				if err != nil {
 					return fmt.Errorf(failedGetAttractionPodsFmt, err)
@@ -2411,4 +2410,36 @@ func setMigrationFailedConditionIfNotExists(migration *virtv1.VirtualMachineInst
 			})
 		}
 	}
+}
+
+func needMigrationHotplug(vmi *virtv1.VirtualMachineInstance) bool {
+	if controller.VMIHasHotplugVolumes(vmi) {
+		return true
+	}
+
+	strategy := virtv1.GetUSBMigrationStrategy(vmi)
+	if strategy == virtv1.USBMigrationStrategyPrevent {
+		return controller.VMIHasHotplugResourceClaims(vmi)
+	}
+
+	hotplugClaims := controller.GetHotplugResourceClaims(vmi)
+	hotplugClaimNames := make(map[string]struct{})
+	for _, claim := range hotplugClaims {
+		hotplugClaimNames[claim.Name] = struct{}{}
+	}
+
+	if vmi.Status.DeviceStatus != nil {
+		for _, deviceStatus := range vmi.Status.DeviceStatus.HostDeviceStatuses {
+			// skip non-usb devices
+			if deviceStatus.DeviceResourceClaimStatus == nil || deviceStatus.DeviceResourceClaimStatus.Attributes == nil || deviceStatus.DeviceResourceClaimStatus.Attributes.USBAddress == nil {
+				continue
+			}
+
+			if !deviceStatus.DeviceResourceClaimStatus.AllowMultipleAllocations || deviceStatus.DeviceResourceClaimStatus.BindsToNode {
+				delete(hotplugClaimNames, deviceStatus.Name)
+			}
+		}
+	}
+
+	return len(hotplugClaimNames) > 0
 }

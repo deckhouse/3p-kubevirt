@@ -77,6 +77,27 @@ const (
 	StartStrategyPaused StartStrategy = "Paused"
 )
 
+type USBMigrationStrategy string
+
+const (
+	// USBMigrationStrategyAnn is the annotation key for USB migration strategy
+	// The value of the annotation can be one of the following:
+	USBMigrationStrategyAnn                          = "usb.virtualization.deckhouse.io/migrationStrategy"
+	USBMigrationStrategyPrevent USBMigrationStrategy = "Prevent"
+	USBMigrationStrategyDetach  USBMigrationStrategy = "Detach"
+	USBMigrationStrategyIgnore  USBMigrationStrategy = "Ignore"
+)
+
+func GetUSBMigrationStrategy(vmi *VirtualMachineInstance) USBMigrationStrategy {
+	if val, ok := vmi.Annotations[USBMigrationStrategyAnn]; ok {
+		switch USBMigrationStrategy(val) {
+		case USBMigrationStrategyPrevent, USBMigrationStrategyDetach, USBMigrationStrategyIgnore:
+			return USBMigrationStrategy(val)
+		}
+	}
+	return USBMigrationStrategyIgnore
+}
+
 // VirtualMachineInstanceSpec is a description of a VirtualMachineInstance.
 type VirtualMachineInstanceSpec struct {
 
@@ -367,6 +388,10 @@ type DeviceResourceClaimStatus struct {
 	// about the device, like pciAddress or mdevUUID
 	// +optional
 	Attributes *DeviceAttribute `json:"attributes,omitempty"`
+	// AllowMultipleAllocations is a flag to allow multiple allocations of the same device
+	AllowMultipleAllocations bool `json:"allowMultipleAllocations,omitempty"`
+	// BindsToNode is a flag to bind the device to the node
+	BindsToNode bool `json:"bindsToNode,omitempty"`
 }
 
 // DeviceAttribute must have exactly one field set.
@@ -610,6 +635,12 @@ func (v *VirtualMachineInstance) IsUnprocessed() bool {
 // Checks if CPU pinning has been requested
 func (v *VirtualMachineInstance) IsCPUDedicated() bool {
 	return v.Spec.Domain.CPU != nil && v.Spec.Domain.CPU.DedicatedCPUPlacement
+}
+
+// IsCPUFractioned checks if CPU fraction requests has been requested.
+func (v *VirtualMachineInstance) IsCPUFractioned() bool {
+	_, hasFraction := v.Annotations[CPUResourcesRequestsFraction]
+	return v.Spec.Domain.CPU != nil && hasFraction
 }
 
 func (v *VirtualMachineInstance) IsBootloaderEFI() bool {
@@ -1012,6 +1043,20 @@ type VirtualMachineInstanceMigrationTargetState struct {
 type MigrationConfigSource string
 
 // +k8s:openapi-gen=true
+type VirtualMachineInstanceMigrationTransferStatus struct {
+	// DataTotalBytes is the total amount of migration data reported by the source runtime.
+	DataTotalBytes *uint64 `json:"dataTotalBytes,omitempty"`
+	// DataProcessedBytes is the amount of migration data already processed by the source runtime.
+	DataProcessedBytes *uint64 `json:"dataProcessedBytes,omitempty"`
+	// DataRemainingBytes is the amount of migration data still remaining on the source runtime.
+	DataRemainingBytes *uint64 `json:"dataRemainingBytes,omitempty"`
+	// Iteration is the current migration iteration reported by the source runtime.
+	Iteration *uint32 `json:"iteration,omitempty"`
+	// AutoConvergeThrottle is the current auto-converge throttle reported by the source runtime.
+	AutoConvergeThrottle *uint32 `json:"autoConvergeThrottle,omitempty"`
+}
+
+// +k8s:openapi-gen=true
 type VirtualMachineInstanceMigrationState struct {
 	// The time the migration action began
 	// +nullable
@@ -1053,6 +1098,8 @@ type VirtualMachineInstanceMigrationState struct {
 	MigrationUID types.UID `json:"migrationUid,omitempty"`
 	// Lets us know if the vmi is currently running pre or post copy migration
 	Mode MigrationMode `json:"mode,omitempty"`
+	// TransferStatus contains migration transfer details reported by the source runtime.
+	TransferStatus *VirtualMachineInstanceMigrationTransferStatus `json:"transferStatus,omitempty"`
 	// Name of the migration policy. If string is empty, no policy is matched
 	MigrationPolicyName *string `json:"migrationPolicyName,omitempty"`
 	// Migration configurations to apply
@@ -1439,6 +1486,13 @@ const (
 	// DisablePCIHole64 indicates that the 64-Bit PCI hole should be disabled on a VirtualMachineInstance.
 	// This annotation might be deprecated in the future if we decided to add a struct for it.
 	DisablePCIHole64 string = "kubevirt.io/disablePCIHole64"
+)
+
+const (
+	// VCPUTopologyDynamicCoresAnnotation annotation indicates "distributed by sockets" or "dynamic cores number" VCPU topology.
+	VCPUTopologyDynamicCoresAnnotation = "internal.virtualization.deckhouse.io/vcpu-topology-dynamic-cores"
+
+	CPUResourcesRequestsFraction = "internal.virtualization.deckhouse.io/cpu-resources-requests-fraction"
 )
 
 func NewVMI(name string, uid types.UID) *VirtualMachineInstance {

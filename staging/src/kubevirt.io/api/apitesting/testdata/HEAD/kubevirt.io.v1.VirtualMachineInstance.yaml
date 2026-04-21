@@ -614,12 +614,14 @@ status:
     gpuStatuses:
     - address: addressValue
       deviceResourceClaimStatus:
+        allowMultipleAllocations: true
         attributes:
           mDevUUID: mDevUUIDValue
           pciAddress: pciAddressValue
           usbAddress:
             bus: -3
             deviceNumber: -12
+        bindsToNode: true
         name: nameValue
         resourceClaimName: resourceClaimNameValue
       hotplug:
@@ -632,12 +634,14 @@ status:
     hostDeviceStatuses:
     - address: addressValue
       deviceResourceClaimStatus:
+        allowMultipleAllocations: true
         attributes:
           mDevUUID: mDevUUIDValue
           pciAddress: pciAddressValue
           usbAddress:
             bus: -3
             deviceNumber: -12
+        bindsToNode: true
         name: nameValue
         resourceClaimName: resourceClaimNameValue
       hotplug:
@@ -778,6 +782,12 @@ status:
       selinuxContext: selinuxContextValue
       syncAddress: syncAddressValue
       virtualMachineInstanceUID: virtualMachineInstanceUIDValue
+    transferStatus:
+      autoConvergeThrottle: 4294967276
+      dataProcessedBytes: 18446744073709551598
+      dataRemainingBytes: 18446744073709551598
+      dataTotalBytes: 18446744073709551602
+      iteration: 4294967287
   migrationTransport: migrationTransportValue
   nodeName: nodeNameValue
   phase: phaseValue

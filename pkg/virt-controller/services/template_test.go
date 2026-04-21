@@ -2330,7 +2330,7 @@ var _ = Describe("Template", func() {
 				Expect(hugepagesRequest.ToDec().ScaledValue(resource.Mega)).To(Equal(int64(64)))
 				Expect(hugepagesLimit.ToDec().ScaledValue(resource.Mega)).To(Equal(int64(64)))
 
-				Expect(pod.Spec.Volumes).To(HaveLen(16))
+				Expect(pod.Spec.Volumes).To(HaveLen(17))
 				Expect(pod.Spec.Volumes).To(
 					ContainElements(
 						k8sv1.Volume{
@@ -2345,7 +2345,7 @@ var _ = Describe("Template", func() {
 								EmptyDir: &k8sv1.EmptyDirVolumeSource{},
 							}}))
 
-				Expect(pod.Spec.Containers[0].VolumeMounts).To(HaveLen(15))
+				Expect(pod.Spec.Containers[0].VolumeMounts).To(HaveLen(16))
 				Expect(pod.Spec.Containers[0].VolumeMounts).To(
 					ContainElements(
 						k8sv1.VolumeMount{
@@ -2409,7 +2409,7 @@ var _ = Describe("Template", func() {
 				Expect(hugepagesRequest.ToDec().ScaledValue(resource.Mega)).To(Equal(int64(64)))
 				Expect(hugepagesLimit.ToDec().ScaledValue(resource.Mega)).To(Equal(int64(64)))
 
-				Expect(pod.Spec.Volumes).To(HaveLen(16))
+				Expect(pod.Spec.Volumes).To(HaveLen(17))
 				Expect(pod.Spec.Volumes).To(
 					ContainElements(
 						k8sv1.Volume{
@@ -2424,7 +2424,7 @@ var _ = Describe("Template", func() {
 								EmptyDir: &k8sv1.EmptyDirVolumeSource{},
 							}}))
 
-				Expect(pod.Spec.Containers[0].VolumeMounts).To(HaveLen(15))
+				Expect(pod.Spec.Containers[0].VolumeMounts).To(HaveLen(16))
 				Expect(pod.Spec.Containers[0].VolumeMounts).To(
 					ContainElements(
 						k8sv1.VolumeMount{
@@ -2479,11 +2479,11 @@ var _ = Describe("Template", func() {
 				Expect(pod.Spec.Containers[0].VolumeDevices).To(BeEmpty(), "No devices in manifest for 1st container")
 
 				Expect(pod.Spec.Containers[0].VolumeMounts).ToNot(BeEmpty(), "Some mounts in manifest for 1st container")
-				Expect(pod.Spec.Containers[0].VolumeMounts).To(HaveLen(14), "14 mounts in manifest for 1st container")
-				Expect(pod.Spec.Containers[0].VolumeMounts[13].Name).To(Equal(volumeName), "1st mount in manifest for 1st container has correct name")
+				Expect(pod.Spec.Containers[0].VolumeMounts).To(HaveLen(15), "15 mounts in manifest for 1st container")
+				Expect(pod.Spec.Containers[0].VolumeMounts[14].Name).To(Equal(volumeName), "1st mount in manifest for 1st container has correct name")
 
 				Expect(pod.Spec.Volumes).ToNot(BeEmpty(), "Found some volumes in manifest")
-				Expect(pod.Spec.Volumes).To(HaveLen(15), "Found 15 volumes in manifest")
+				Expect(pod.Spec.Volumes).To(HaveLen(16), "Found 16 volumes in manifest")
 				Expect(pod.Spec.Volumes).To(
 					ContainElement(
 						k8sv1.Volume{
@@ -2551,10 +2551,10 @@ var _ = Describe("Template", func() {
 				Expect(pod.Spec.Containers[0].VolumeDevices[1].Name).To(Equal(ephemeralVolumeName), "Found device for 1st container with correct name")
 
 				Expect(pod.Spec.Containers[0].VolumeMounts).ToNot(BeEmpty(), "Found some mounts in manifest for 1st container")
-				Expect(pod.Spec.Containers[0].VolumeMounts).To(HaveLen(13), "Found 13 mounts in manifest for 1st container")
+				Expect(pod.Spec.Containers[0].VolumeMounts).To(HaveLen(14), "Found 14 mounts in manifest for 1st container")
 
 				Expect(pod.Spec.Volumes).ToNot(BeEmpty(), "Found some volumes in manifest")
-				Expect(pod.Spec.Volumes).To(HaveLen(16), "Found 16 volumes in manifest")
+				Expect(pod.Spec.Volumes).To(HaveLen(17), "Found 17 volumes in manifest")
 				Expect(pod.Spec.Volumes).To(
 					ContainElement(
 						k8sv1.Volume{
@@ -3074,7 +3074,7 @@ var _ = Describe("Template", func() {
 				pod, err := svc.RenderLaunchManifest(vmi)
 				Expect(err).ToNot(HaveOccurred())
 				Expect(pod.Spec.Volumes).ToNot(BeEmpty())
-				Expect(pod.Spec.Volumes).To(HaveLen(15))
+				Expect(pod.Spec.Volumes).To(HaveLen(16))
 
 				oneMB := resource.MustParse("1Mi")
 				Expect(pod.Spec.Volumes).To(ContainElement(
@@ -3088,7 +3088,7 @@ var _ = Describe("Template", func() {
 						},
 					}))
 
-				Expect(pod.Spec.Containers[0].VolumeMounts[13].MountPath).To(Equal(k6tconfig.DownwardMetricDisksDir))
+				Expect(pod.Spec.Containers[0].VolumeMounts[14].MountPath).To(Equal(k6tconfig.DownwardMetricDisksDir))
 			})
 
 			It("Should add 1Mi memory overhead", func() {
@@ -3142,7 +3142,7 @@ var _ = Describe("Template", func() {
 				Expect(err).ToNot(HaveOccurred())
 
 				Expect(pod.Spec.Volumes).ToNot(BeEmpty())
-				Expect(pod.Spec.Volumes).To(HaveLen(15))
+				Expect(pod.Spec.Volumes).To(HaveLen(16))
 				Expect(pod.Spec.Volumes).To(ContainElement(k8sv1.Volume{
 					Name: "configmap-volume",
 					VolumeSource: k8sv1.VolumeSource{
@@ -3181,7 +3181,7 @@ var _ = Describe("Template", func() {
 					Expect(err).ToNot(HaveOccurred())
 
 					Expect(pod.Spec.Volumes).ToNot(BeEmpty())
-					Expect(pod.Spec.Volumes).To(HaveLen(16))
+					Expect(pod.Spec.Volumes).To(HaveLen(17))
 					Expect(pod.Spec.Volumes).To(ContainElement(k8sv1.Volume{
 						Name: "sysprep-configmap-volume",
 						VolumeSource: k8sv1.VolumeSource{
@@ -3218,7 +3218,7 @@ var _ = Describe("Template", func() {
 					Expect(err).ToNot(HaveOccurred())
 
 					Expect(pod.Spec.Volumes).ToNot(BeEmpty())
-					Expect(pod.Spec.Volumes).To(HaveLen(16))
+					Expect(pod.Spec.Volumes).To(HaveLen(17))
 
 					Expect(pod.Spec.Volumes).To(ContainElement(k8sv1.Volume{
 						Name: "sysprep-configmap-volume",
@@ -3260,7 +3260,7 @@ var _ = Describe("Template", func() {
 				Expect(err).ToNot(HaveOccurred())
 
 				Expect(pod.Spec.Volumes).ToNot(BeEmpty())
-				Expect(pod.Spec.Volumes).To(HaveLen(15))
+				Expect(pod.Spec.Volumes).To(HaveLen(16))
 
 				Expect(pod.Spec.Volumes).To(ContainElement(k8sv1.Volume{
 					Name: "secret-volume",
@@ -4178,7 +4178,7 @@ var _ = Describe("Template", func() {
 			pod, err := svc.RenderHotplugAttachmentPodTemplate([]*v1.Volume{}, nil, ownerPod, vmi, claimMap)
 			Expect(err).ToNot(HaveOccurred())
 
-			Expect(pod.Spec.Tolerations).To(BeEquivalentTo(vmi.Spec.Tolerations))
+			Expect(pod.Spec.Tolerations).To(BeEquivalentTo(addUnschedulableToleration(vmi.Spec.Tolerations)))
 		})
 
 		It("should compute the correct tolerations when rendering hotplug attachment trigger pods", func() {
@@ -5329,7 +5329,7 @@ var _ = Describe("Template", func() {
 			})
 
 			Context("when the creation namespace have a resource quota without memory limits associated to it", func() {
-				It("should not set memory limits", func() {
+				It("should set memory limits to requests", func() {
 					vmi := v1.VirtualMachineInstance{
 						ObjectMeta: metav1.ObjectMeta{
 							Name:      "testvmi",
@@ -5348,7 +5348,8 @@ var _ = Describe("Template", func() {
 					pod, err := svc.RenderLaunchManifest(&vmi)
 					Expect(err).ToNot(HaveOccurred())
 					Expect(pod.Spec.Containers[0].Name).To(Equal("d8v-compute"))
-					Expect(pod.Spec.Containers[0].Resources.Limits.Memory().Value()).To(BeZero())
+					expectedValue := pod.Spec.Containers[0].Resources.Requests.Memory().Value()
+					Expect(pod.Spec.Containers[0].Resources.Limits.Memory().Value()).To(BeEquivalentTo(expectedValue))
 				})
 			})
 		})

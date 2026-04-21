@@ -161,6 +161,20 @@ func (mr *MockDomainManagerMockRecorder) GetDomainStats() *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetDomainStats", reflect.TypeOf((*MockDomainManager)(nil).GetDomainStats))
 }
 
+// GetFSFreezeStatus mocks base method.
+func (m *MockDomainManager) GetFSFreezeStatus() *api.FSFreeze {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetFSFreezeStatus")
+	ret0, _ := ret[0].(*api.FSFreeze)
+	return ret0
+}
+
+// GetFSFreezeStatus indicates an expected call of GetFSFreezeStatus.
+func (mr *MockDomainManagerMockRecorder) GetFSFreezeStatus() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetFSFreezeStatus", reflect.TypeOf((*MockDomainManager)(nil).GetFSFreezeStatus))
+}
+
 // GetFilesystems mocks base method.
 func (m *MockDomainManager) GetFilesystems() []v1.VirtualMachineInstanceFileSystem {
 	m.ctrl.T.Helper()

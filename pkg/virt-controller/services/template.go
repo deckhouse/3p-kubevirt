@@ -47,6 +47,8 @@ import (
 	drautil "kubevirt.io/kubevirt/pkg/dra"
 	"kubevirt.io/kubevirt/pkg/pointer"
 
+	"slices"
+
 	containerdisk "kubevirt.io/kubevirt/pkg/container-disk"
 	"kubevirt.io/kubevirt/pkg/hooks"
 	metrics "kubevirt.io/kubevirt/pkg/monitoring/metrics/virt-controller"
@@ -158,6 +160,7 @@ type TemplateService interface {
 	RenderLaunchManifest(vmi *v1.VirtualMachineInstance) (*k8sv1.Pod, error)
 	RenderHotplugAttachmentPodTemplate(volumes []*v1.Volume, resourceClaims []*v1.ResourceClaim, ownerPod *k8sv1.Pod, vmi *v1.VirtualMachineInstance, claimMap map[string]*k8sv1.PersistentVolumeClaim) (*k8sv1.Pod, error)
 	RenderHotplugAttachmentTriggerPodTemplate(volume *v1.Volume, ownerPod *k8sv1.Pod, vmi *v1.VirtualMachineInstance, pvcName string, isBlock bool, tempPod bool) (*k8sv1.Pod, error)
+	RenderMigrationHotplugAttachmentPodTemplate(volumes []*v1.Volume, resourceClaims []*v1.ResourceClaim, ownerPod *k8sv1.Pod, vmi *v1.VirtualMachineInstance, claimMap map[string]*k8sv1.PersistentVolumeClaim) (*k8sv1.Pod, error)
 	RenderLaunchManifestNoVm(*v1.VirtualMachineInstance) (*k8sv1.Pod, error)
 	RenderExporterManifest(vmExport *exportv1.VirtualMachineExport, namePrefix string) *k8sv1.Pod
 	GetLauncherImage() string
@@ -270,8 +273,8 @@ func sysprepVolumeSource(sysprepVolume v1.SysprepSource) (k8sv1.VolumeSource, er
 		}, nil
 	}
 	errorStr := fmt.Sprintf("Sysprep must have Secret or ConfigMap reference set %v", sysprepVolume)
-	logger.Errorf(errorStr)
-	return k8sv1.VolumeSource{}, fmt.Errorf(errorStr)
+	logger.Errorf("%s", errorStr)
+	return k8sv1.VolumeSource{}, fmt.Errorf("%s", errorStr)
 }
 
 func (t *templateService) GetLauncherImage() string {
@@ -919,7 +922,12 @@ func (t *templateService) newResourceRenderer(vmi *v1.VirtualMachineInstance, ne
 		return nil, err
 	}
 
-	options := append(baseOptions, t.VMIResourcePredicates(vmi, networkToResourceMap).Apply()...)
+	cpuFraction, err := parseCPUFraction(vmi)
+	if err != nil {
+		return nil, err
+	}
+
+	options := append(baseOptions, t.VMIResourcePredicates(vmi, networkToResourceMap, cpuFraction).Apply()...)
 	return NewResourceRenderer(vmiResources.Limits, vmiResources.Requests, options...), nil
 }
 
@@ -1004,14 +1012,65 @@ func (t *templateService) containerForHotplugContainerDisk(ctrName, volName stri
 	}
 }
 
+func (t *templateService) RenderMigrationHotplugAttachmentPodTemplate(volumes []*v1.Volume, resourceClaims []*v1.ResourceClaim, ownerPod *k8sv1.Pod, vmi *v1.VirtualMachineInstance, claimMap map[string]*k8sv1.PersistentVolumeClaim) (*k8sv1.Pod, error) {
+	pod, err := t.RenderHotplugAttachmentPodTemplate(volumes, resourceClaims, ownerPod, vmi, claimMap)
+	if err != nil {
+		return nil, err
+	}
+
+	if vmi.Status.DeviceStatus == nil {
+		return pod, nil
+	}
+
+	strategy := v1.GetUSBMigrationStrategy(vmi)
+
+	switch strategy {
+	case v1.USBMigrationStrategyPrevent:
+		return pod, nil
+	case v1.USBMigrationStrategyDetach, v1.USBMigrationStrategyIgnore:
+	default:
+		return nil, fmt.Errorf("unknown host device migration strategy %v", strategy)
+	}
+
+	// delete non-migratable resource claims
+	deleteCandidates := make(map[string]struct{})
+	for _, deviceStatus := range vmi.Status.DeviceStatus.HostDeviceStatuses {
+		// skip non-usb devices
+		if deviceStatus.DeviceResourceClaimStatus == nil || deviceStatus.DeviceResourceClaimStatus.Attributes == nil || deviceStatus.DeviceResourceClaimStatus.Attributes.USBAddress == nil {
+			continue
+		}
+
+		if !deviceStatus.DeviceResourceClaimStatus.AllowMultipleAllocations || deviceStatus.DeviceResourceClaimStatus.BindsToNode {
+			deleteCandidates[deviceStatus.Name] = struct{}{}
+		}
+	}
+
+	if len(deleteCandidates) == 0 {
+		return pod, nil
+	}
+
+	if len(pod.Spec.ResourceClaims) > 0 {
+		pod.Spec.ResourceClaims = slices.DeleteFunc(pod.Spec.ResourceClaims, func(rc k8sv1.PodResourceClaim) bool {
+			_, ok := deleteCandidates[rc.Name]
+			return ok
+		})
+		pod.Spec.Containers[0].Resources.Claims = slices.DeleteFunc(pod.Spec.Containers[0].Resources.Claims, func(rc k8sv1.ResourceClaim) bool {
+			_, ok := deleteCandidates[rc.Name]
+			return ok
+		})
+	}
+
+	return pod, nil
+}
+
 func (t *templateService) RenderHotplugAttachmentPodTemplate(volumes []*v1.Volume, resourceClaims []*v1.ResourceClaim, ownerPod *k8sv1.Pod, vmi *v1.VirtualMachineInstance, claimMap map[string]*k8sv1.PersistentVolumeClaim) (*k8sv1.Pod, error) {
 	zero := int64(0)
 	runUser := int64(util.NonRootUID)
 	sharedMount := k8sv1.MountPropagationHostToContainer
 	command := []string{"/usr/bin/container-disk", "--copy-path", "/path/hp"}
 
-	tmpTolerations := make([]k8sv1.Toleration, len(ownerPod.Spec.Tolerations))
-	copy(tmpTolerations, ownerPod.Spec.Tolerations)
+	tmpTolerations := slices.Clone(ownerPod.Spec.Tolerations)
+	tmpTolerations = addUnschedulableToleration(tmpTolerations)
 
 	pod := &k8sv1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -1686,7 +1745,7 @@ func (t *templateService) doesVMIRequireAutoCPULimits(vmi *v1.VirtualMachineInst
 	return false
 }
 
-func (t *templateService) VMIResourcePredicates(vmi *v1.VirtualMachineInstance, networkToResourceMap map[string]string) VMIResourcePredicates {
+func (t *templateService) VMIResourcePredicates(vmi *v1.VirtualMachineInstance, networkToResourceMap map[string]string, cpuFraction int) VMIResourcePredicates {
 	// Set default with vmi Architecture. compatible with multi-architecture hybrid environments
 	vmiCPUArch := vmi.Spec.Architecture
 	if vmiCPUArch == "" {
@@ -1718,13 +1777,17 @@ func (t *templateService) VMIResourcePredicates(vmi *v1.VirtualMachineInstance, 
 				return t.clusterConfig.GetMemoryOvercommit() != 100
 			}, WithMemoryOvercommit(t.clusterConfig.GetMemoryOvercommit())),
 			NewVMIResourceRule(doesVMIRequireDedicatedCPU, WithCPUPinning(vmi, vmi.Annotations, additionalCPUs)),
-			NewVMIResourceRule(not(doesVMIRequireDedicatedCPU), WithoutDedicatedCPU(vmi, t.clusterConfig.GetCPUAllocationRatio(), withCPULimits)),
+			NewVMIResourceRule(withoutDedicatedCPU, WithoutDedicatedCPU(vmi, t.clusterConfig.GetCPUAllocationRatio(), withCPULimits)),
+			NewVMIResourceRule(doesVMIRequireFractionCPU, WithCPUFractionRequests(vmi, cpuFraction)),
 			NewVMIResourceRule(hasHugePages, WithHugePages(vmi.Spec.Domain.Memory, memoryOverhead)),
 			NewVMIResourceRule(not(hasHugePages), WithMemoryOverhead(vmi.Spec.Domain.Resources, memoryOverhead)),
 			NewVMIResourceRule(func(_ *v1.VirtualMachineInstance) bool {
 				return memoryLimitsOverhead.Value() > 0
 			}, WithMemoryLimitsOverhead(memoryLimitsOverhead)),
 			NewVMIResourceRule(t.doesVMIRequireAutoMemoryLimits, WithAutoMemoryLimits(vmi.Namespace, t.namespaceStore)),
+			NewVMIResourceRule(func(*v1.VirtualMachineInstance) bool {
+				return true
+			}, EnsureMemoryLimits()),
 			NewVMIResourceRule(func(*v1.VirtualMachineInstance) bool {
 				return len(networkToResourceMap) > 0
 			}, WithNetworkResources(networkToResourceMap)),
@@ -1885,4 +1948,25 @@ func toResourceClaimsWithoutHotplugs(claims []v1.ResourceClaim) []k8sv1.PodResou
 		}
 	}
 	return result
+}
+
+func addUnschedulableToleration(tolerations []k8sv1.Toleration) []k8sv1.Toleration {
+	unschedulableToleration := k8sv1.Toleration{
+		Key:      "node.kubernetes.io/unschedulable",
+		Operator: k8sv1.TolerationOpExists,
+		Effect:   k8sv1.TaintEffectNoSchedule,
+	}
+	if tolerations == nil {
+		return []k8sv1.Toleration{unschedulableToleration}
+	}
+	if !slices.ContainsFunc(tolerations, func(toleration k8sv1.Toleration) bool {
+		return toleration.Key == "node.kubernetes.io/unschedulable"
+	}) {
+		tolerations = append(tolerations, k8sv1.Toleration{
+			Key:      "node.kubernetes.io/unschedulable",
+			Operator: k8sv1.TolerationOpExists,
+			Effect:   k8sv1.TaintEffectNoSchedule,
+		})
+	}
+	return tolerations
 }
