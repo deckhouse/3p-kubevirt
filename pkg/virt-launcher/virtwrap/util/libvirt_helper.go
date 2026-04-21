@@ -18,7 +18,6 @@ import (
 
 	"kubevirt.io/kubevirt/pkg/virt-controller/services"
 
-	"golang.org/x/sys/unix"
 	k8sv1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"libvirt.org/go/libvirt"
