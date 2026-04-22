@@ -37,8 +37,10 @@ func (c diskImgCreator) CreateDiskAndSetOwnership(vmi *v1.VirtualMachineInstance
 	}
 	if fileExists {
 		// Leave an existing disk image's ownership to support qemu->deckhouse uid migrations
+		log.Log.Infof("HOSTDISK-FIX-ACTIVE: skipping chown on existing disk image %s", diskPath)
 		return nil
 	}
+	log.Log.Infof("HOSTDISK-FIX-ACTIVE: creating and chown'ing new disk image %s", diskPath)
 	if err := c.handleRequestedSizeAndCreateQcow2(vmi, diskDir, diskPath, volumeName, requestedSize); err != nil {
 		return err
 	}
