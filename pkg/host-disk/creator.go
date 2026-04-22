@@ -35,12 +35,13 @@ func (c diskImgCreator) CreateDiskAndSetOwnership(vmi *v1.VirtualMachineInstance
 	if err != nil {
 		return err
 	}
-	if !fileExists {
-		if err := c.handleRequestedSizeAndCreateQcow2(vmi, diskDir, diskPath, volumeName, requestedSize); err != nil {
-			return err
-		}
+	if fileExists {
+		// Leave an existing disk image's ownership to support qemu->deckhouse uid migrations
+		return nil
 	}
-	// Change file ownership to the qemu user.
+	if err := c.handleRequestedSizeAndCreateQcow2(vmi, diskDir, diskPath, volumeName, requestedSize); err != nil {
+		return err
+	}
 	if err := ephemeraldiskutils.DefaultOwnershipManager.UnsafeSetFileOwnership(diskPath); err != nil {
 		log.Log.Reason(err).Errorf("Couldn't set Ownership on %s: %v", diskPath, err)
 		return err
