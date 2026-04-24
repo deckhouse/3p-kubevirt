@@ -182,10 +182,14 @@ func Convert_v1_Disk_To_api_Disk(c *ConverterContext, diskDevice *v1.Disk, disk 
 			setReservation(disk)
 		}
 	} else if diskDevice.CDRom != nil {
+		var unit int
 		disk.Device = "cdrom"
 		disk.Target.Tray = string(diskDevice.CDRom.Tray)
 		disk.Target.Bus = diskDevice.CDRom.Bus
-		disk.Target.Device, _ = makeDeviceName(diskDevice.Name, diskDevice.CDRom.Bus, prefixMap)
+		disk.Target.Device, unit = makeDeviceName(diskDevice.Name, diskDevice.CDRom.Bus, prefixMap)
+		if diskDevice.CDRom.Bus == "scsi" {
+			assignDiskToSCSIController(disk, unit)
+		}
 		if diskDevice.CDRom.ReadOnly != nil {
 			disk.ReadOnly = toApiReadOnly(*diskDevice.CDRom.ReadOnly)
 		} else {
