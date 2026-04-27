@@ -25,6 +25,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"io"
 	"log"
@@ -60,9 +61,7 @@ func main() {
 	subOperation := os.Args[3]
 
 	if operation == "migrate" && subOperation == "begin" {
-		if err := injectSharedDiskSeclabels(os.Stdin, os.Stdout); err != nil {
-			log.Printf("seclabel injection error: %v", err)
-		}
+		runMigrateBeginHook(os.Stdin, os.Stdout)
 		return
 	}
 
@@ -76,9 +75,38 @@ func main() {
 	}
 }
 
-// sourceLineRE matches a libvirt disk <source file='X'/> or <source file='X'></source>
-// line that does NOT already carry child elements
-var sourceLineRE = regexp.MustCompile(`<source\s+file=(['"])([^'"]+)\1\s*((?:/>)|(?:></source>))`)
+// runMigrateBeginHook reads the original XML from stdin, attempts to inject
+// per-disk seclabel relabel='no' for shared filesystem PVCs, and writes either
+// the modified XML or the original XML (on any error/panic) to stdout.
+func runMigrateBeginHook(in io.Reader, out io.Writer) {
+	xmlBytes, err := io.ReadAll(in)
+	if err != nil {
+		log.Printf("read stdin failed: %v", err)
+		// Empty stdout means libvirt uses its own input XML unchanged.
+		return
+	}
+
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("seclabel injection panicked: %v; passing through original XML", r)
+			_, _ = out.Write(xmlBytes)
+		}
+	}()
+
+	var buf bytes.Buffer
+	if err := injectSharedDiskSeclabels(bytes.NewReader(xmlBytes), &buf); err != nil {
+		log.Printf("seclabel injection error: %v; passing through original XML", err)
+		_, _ = out.Write(xmlBytes)
+		return
+	}
+	_, _ = out.Write(buf.Bytes())
+}
+
+// sourceLineRE matches a libvirt disk <source file="X"/> or <source file="X"></source>
+// or single-quoted variants, with no child elements yet (so injection is safe).
+// RE2 doesn't support backreferences, so we accept any combination of quote
+// characters around the path; libvirt always emits a consistent pair.
+var sourceLineRE = regexp.MustCompile(`<source\s+file=["']([^"']+)["']\s*((?:/>)|(?:></source>))`)
 
 func injectSharedDiskSeclabels(in io.Reader, out io.Writer) error {
 	xmlBytes, err := io.ReadAll(in)
@@ -95,15 +123,14 @@ func injectSharedDiskSeclabels(in io.Reader, out io.Writer) error {
 
 	modified := sourceLineRE.ReplaceAllStringFunc(string(xmlBytes), func(match string) string {
 		groups := sourceLineRE.FindStringSubmatch(match)
-		if len(groups) < 4 {
+		if len(groups) < 3 {
 			return match
 		}
-		quote := groups[1]
-		path := groups[2]
+		path := groups[1]
 		if !pathInShared(path, sharedPaths) {
 			return match
 		}
-		return fmt.Sprintf("<source file=%s%s%s><seclabel relabel='no'/></source>", quote, path, quote)
+		return fmt.Sprintf(`<source file="%s"><seclabel relabel='no'/></source>`, path)
 	})
 
 	_, err = io.WriteString(out, modified)
