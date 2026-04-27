@@ -130,7 +130,7 @@ func injectSharedDiskSeclabels(in io.Reader, out io.Writer) error {
 		if !pathInShared(path, sharedPaths) {
 			return match
 		}
-		return fmt.Sprintf(`<source file="%s"><seclabel relabel='no'/></source>`, path)
+		return fmt.Sprintf(`<source file="%s"><seclabel model='dac' relabel='no'/></source>`, path)
 	})
 
 	_, err = io.WriteString(out, modified)

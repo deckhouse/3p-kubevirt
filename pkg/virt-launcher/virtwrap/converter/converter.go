@@ -699,7 +699,7 @@ func isSharedFilesystemVolume(c *ConverterContext, name string) bool {
 
 func applySharedFsSeclabel(c *ConverterContext, name string, disk *api.Disk) {
 	if isSharedFilesystemVolume(c, name) {
-		disk.Source.Seclabel = &api.DiskSeclabel{Relabel: "no"}
+		disk.Source.Seclabel = &api.DiskSeclabel{Model: "dac", Relabel: "no"}
 	}
 }
 

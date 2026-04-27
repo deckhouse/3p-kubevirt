@@ -719,6 +719,7 @@ type DiskSource struct {
 }
 
 type DiskSeclabel struct {
+	Model   string `xml:"model,attr,omitempty"`
 	Relabel string `xml:"relabel,attr"`
 }
 
