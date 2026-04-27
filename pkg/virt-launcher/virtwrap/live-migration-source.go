@@ -775,6 +775,11 @@ func (m *migrationMonitor) startMonitor() {
 		case libvirt.DOMAIN_JOB_CANCELLED:
 			logger.Info("Migration was canceled")
 			m.l.setMigrationResult(true, "Live migration aborted ", v1.MigrationAbortSucceeded)
+
+			logger.Info("Aborting failed block jobs")
+			if err := m.l.abortFailedBlockJobs(vmi); err != nil {
+				logger.Reason(err).Error("Failed to abort failed block jobs")
+			}
 			return
 		}
 	}
@@ -1308,7 +1313,7 @@ func (l *LibvirtDomainManager) abortFailedBlockJobs(vmi *v1.VirtualMachineInstan
 
 		err = dom.BlockJobAbort(d, libvirt.DOMAIN_BLOCK_JOB_ABORT_ASYNC)
 		if err != nil {
-			log.Log.Object(vmi).Errorf("Failed to abort block job for %s: %v", d, err)
+			log.Log.Reason(err).Errorf("Failed to abort block job for %s", d)
 		}
 
 		log.Log.Object(vmi).Infof("Block job async abort executed for %s", d)
