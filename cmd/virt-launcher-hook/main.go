@@ -26,15 +26,21 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
 	"time"
 )
 
 const (
 	conntrackHookSock = "/var/run/kubevirt/sockets/conntrack-hook.sock"
 	socketTimeout     = 1 * time.Second
+
+	qemuConfPath = "/etc/libvirt/qemu.conf"
 )
 
 func main() {
@@ -53,13 +59,105 @@ func main() {
 	operation := os.Args[2]
 	subOperation := os.Args[3]
 
+	if operation == "migrate" && subOperation == "begin" {
+		if err := injectSharedDiskSeclabels(os.Stdin, os.Stdout); err != nil {
+			log.Printf("seclabel injection error: %v", err)
+		}
+		return
+	}
+
 	// "started begin" fires on the destination after migration data transfer
 	// completes but before VM resumes. Used to gate conntrack injection.
 	if operation == "started" && subOperation == "begin" {
 		if err := waitForConntrackSync(); err != nil {
 			log.Printf("conntrack sync error: %v", err)
 		}
+		return
 	}
+}
+
+// sourceLineRE matches a libvirt disk <source file='X'/> or <source file='X'></source>
+// line that does NOT already carry child elements
+var sourceLineRE = regexp.MustCompile(`<source\s+file=(['"])([^'"]+)\1\s*((?:/>)|(?:></source>))`)
+
+func injectSharedDiskSeclabels(in io.Reader, out io.Writer) error {
+	xmlBytes, err := io.ReadAll(in)
+	if err != nil {
+		return fmt.Errorf("reading stdin: %w", err)
+	}
+
+	sharedPaths := getSharedFilesystemPaths()
+	if len(sharedPaths) == 0 {
+		// No shared paths declared — passthrough original XML unchanged.
+		_, err = out.Write(xmlBytes)
+		return err
+	}
+
+	modified := sourceLineRE.ReplaceAllStringFunc(string(xmlBytes), func(match string) string {
+		groups := sourceLineRE.FindStringSubmatch(match)
+		if len(groups) < 4 {
+			return match
+		}
+		quote := groups[1]
+		path := groups[2]
+		if !pathInShared(path, sharedPaths) {
+			return match
+		}
+		return fmt.Sprintf("<source file=%s%s%s><seclabel relabel='no'/></source>", quote, path, quote)
+	})
+
+	_, err = io.WriteString(out, modified)
+	return err
+}
+
+func getSharedFilesystemPaths() []string {
+	if env := os.Getenv("SHARED_FILESYSTEM_PATHS"); env != "" {
+		return splitNonEmpty(env, ":")
+	}
+	return parseSharedFilesystemsFromQemuConf(qemuConfPath)
+}
+
+func splitNonEmpty(s, sep string) []string {
+	var out []string
+	for _, part := range strings.Split(s, sep) {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
+}
+
+var sharedFsConfRE = regexp.MustCompile(`(?m)^\s*shared_filesystems\s*=\s*\[\s*([^\]]*)\]`)
+var quotedPathRE = regexp.MustCompile(`"([^"]+)"`)
+
+func parseSharedFilesystemsFromQemuConf(path string) []string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	m := sharedFsConfRE.FindStringSubmatch(string(data))
+	if len(m) < 2 {
+		return nil
+	}
+	var out []string
+	for _, mm := range quotedPathRE.FindAllStringSubmatch(m[1], -1) {
+		if len(mm) >= 2 && mm[1] != "" {
+			out = append(out, mm[1])
+		}
+	}
+	return out
+}
+
+func pathInShared(path string, sharedPaths []string) bool {
+	clean := filepath.Clean(path)
+	for _, sp := range sharedPaths {
+		c := filepath.Clean(sp)
+		if clean == c || strings.HasPrefix(clean, c+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
 }
 
 func waitForConntrackSync() error {
