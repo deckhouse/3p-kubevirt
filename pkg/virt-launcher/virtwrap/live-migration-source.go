@@ -1254,6 +1254,69 @@ func (l *LibvirtDomainManager) migrateHelper(vmi *v1.VirtualMachineInstance, opt
 	return nil
 }
 
+func (l *LibvirtDomainManager) abortFailedBlockJobs(vmi *v1.VirtualMachineInstance) error {
+	if len(vmi.Status.MigratedVolumes) == 0 {
+		log.Log.Object(vmi).Info("Abort failed block jobs no needed, migrated volumes not found")
+		return nil
+	}
+
+	migratedVolumeNames := make(map[string]struct{}, len(vmi.Status.MigratedVolumes))
+	for _, volume := range vmi.Status.MigratedVolumes {
+		migratedVolumeNames[volume.VolumeName] = struct{}{}
+	}
+
+	domName := api.VMINamespaceKeyFunc(vmi)
+	dom, err := l.virConn.LookupDomainByName(domName)
+	if err != nil {
+		return err
+	}
+	defer dom.Free()
+
+	jobsStatus, err := l.GetBlockJobsStatus(dom)
+	if err != nil {
+		return fmt.Errorf("failed to get block jobs status: %w", err)
+	}
+	if len(jobsStatus.Return) == 0 {
+		log.Log.Object(vmi).Info("Abort failed block jobs no needed, no block jobs found")
+		return nil
+	}
+
+	log.Log.Object(vmi).Infof("Found %d block jobs: %v", len(jobsStatus.Return), jobsStatus.Return)
+
+	domSpec, err := l.getDomainSpec(dom)
+	if err != nil {
+		return fmt.Errorf("failed to get domain spec: %w", err)
+	}
+
+	for _, disk := range domSpec.Devices.Disks {
+		if _, ok := migratedVolumeNames[disk.Alias.GetName()]; !ok {
+			continue
+		}
+
+		d := disk.Source.Dev
+		if d == "" {
+			d = disk.Source.File
+		}
+
+		blockJobInfo, err := dom.GetBlockJobInfo(d, 0)
+		if err != nil {
+			log.Log.Object(vmi).Errorf("Failed to get block job info for %s: %v", d, err)
+			continue
+		}
+
+		log.Log.Object(vmi).Infof("Found block job for %s. curr: %d, end: %d", d, blockJobInfo.Cur, blockJobInfo.End)
+
+		err = dom.BlockJobAbort(d, libvirt.DOMAIN_BLOCK_JOB_ABORT_ASYNC)
+		if err != nil {
+			log.Log.Object(vmi).Errorf("Failed to abort block job for %s: %v", d, err)
+		}
+
+		log.Log.Object(vmi).Infof("Block job async abort executed for %s", d)
+	}
+
+	return nil
+}
+
 func getHostDevicesForDetach(vmi *v1.VirtualMachineInstance) map[string]struct{} {
 	switch v1.GetUSBMigrationStrategy(vmi) {
 	case v1.USBMigrationStrategyPrevent, v1.USBMigrationStrategyIgnore:
@@ -1321,6 +1384,11 @@ func (l *LibvirtDomainManager) migrate(vmi *v1.VirtualMachineInstance, options *
 	if err != nil {
 		log.Log.Object(vmi).Reason(err).Error(liveMigrationFailed)
 		migrationErrorChan <- err
+
+		if err := l.abortFailedBlockJobs(vmi); err != nil {
+			log.Log.Object(vmi).Reason(err).Error("Failed to abort failed block jobs")
+		}
+
 		return
 	}
 
