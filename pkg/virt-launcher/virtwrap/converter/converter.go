@@ -674,44 +674,11 @@ func GetHotplugContainerDiskPath(volumeName string) string {
 	return filepath.Join(string(filepath.Separator), "var", "run", "kubevirt", "hotplug-disks", fmt.Sprintf("%s.img", volumeName))
 }
 
-func isSharedFilesystemVolume(c *ConverterContext, name string) bool {
-	if c.IsBlockPVC[name] || c.IsBlockDV[name] {
-		return false
-	}
-	status, ok := c.PermanentVolumes[name]
-	if !ok {
-		status, ok = c.HotplugVolumes[name]
-	}
-	if !ok || status.PersistentVolumeClaimInfo == nil {
-		return false
-	}
-	pvcInfo := status.PersistentVolumeClaimInfo
-	if pvcInfo.VolumeMode != nil && *pvcInfo.VolumeMode != k8sv1.PersistentVolumeFilesystem {
-		return false
-	}
-	for _, mode := range pvcInfo.AccessModes {
-		if mode == k8sv1.ReadWriteMany {
-			return true
-		}
-	}
-	return false
-}
-
-func applySharedFsSeclabel(c *ConverterContext, name string, disk *api.Disk) {
-	if isSharedFilesystemVolume(c, name) {
-		disk.Source.Seclabel = &api.DiskSeclabel{Model: "dac", Relabel: "no"}
-	}
-}
-
 func Convert_v1_PersistentVolumeClaim_To_api_Disk(name string, disk *api.Disk, c *ConverterContext) error {
 	if c.IsBlockPVC[name] {
 		return Convert_v1_BlockVolumeSource_To_api_Disk(name, disk, c.VolumesDiscardIgnore)
 	}
-	if err := Convert_v1_FilesystemVolumeSource_To_api_Disk(name, disk, c.VolumesDiscardIgnore); err != nil {
-		return err
-	}
-	applySharedFsSeclabel(c, name, disk)
-	return nil
+	return Convert_v1_FilesystemVolumeSource_To_api_Disk(name, disk, c.VolumesDiscardIgnore)
 }
 
 // Convert_v1_Hotplug_PersistentVolumeClaim_To_api_Disk converts a Hotplugged PVC to an api disk
@@ -719,22 +686,14 @@ func Convert_v1_Hotplug_PersistentVolumeClaim_To_api_Disk(name string, disk *api
 	if c.IsBlockPVC[name] {
 		return Convert_v1_Hotplug_BlockVolumeSource_To_api_Disk(name, disk, c.VolumesDiscardIgnore)
 	}
-	if err := Convert_v1_Hotplug_FilesystemVolumeSource_To_api_Disk(name, disk, c.VolumesDiscardIgnore); err != nil {
-		return err
-	}
-	applySharedFsSeclabel(c, name, disk)
-	return nil
+	return Convert_v1_Hotplug_FilesystemVolumeSource_To_api_Disk(name, disk, c.VolumesDiscardIgnore)
 }
 
 func Convert_v1_DataVolume_To_api_Disk(name string, disk *api.Disk, c *ConverterContext) error {
 	if c.IsBlockDV[name] {
 		return Convert_v1_BlockVolumeSource_To_api_Disk(name, disk, c.VolumesDiscardIgnore)
 	}
-	if err := Convert_v1_FilesystemVolumeSource_To_api_Disk(name, disk, c.VolumesDiscardIgnore); err != nil {
-		return err
-	}
-	applySharedFsSeclabel(c, name, disk)
-	return nil
+	return Convert_v1_FilesystemVolumeSource_To_api_Disk(name, disk, c.VolumesDiscardIgnore)
 }
 
 // Convert_v1_Hotplug_DataVolume_To_api_Disk converts a Hotplugged DataVolume to an api disk
@@ -742,11 +701,7 @@ func Convert_v1_Hotplug_DataVolume_To_api_Disk(name string, disk *api.Disk, c *C
 	if c.IsBlockDV[name] {
 		return Convert_v1_Hotplug_BlockVolumeSource_To_api_Disk(name, disk, c.VolumesDiscardIgnore)
 	}
-	if err := Convert_v1_Hotplug_FilesystemVolumeSource_To_api_Disk(name, disk, c.VolumesDiscardIgnore); err != nil {
-		return err
-	}
-	applySharedFsSeclabel(c, name, disk)
-	return nil
+	return Convert_v1_Hotplug_FilesystemVolumeSource_To_api_Disk(name, disk, c.VolumesDiscardIgnore)
 }
 
 // Convert_v1_FilesystemVolumeSource_To_api_Disk takes a FS source and builds the domain Disk representation

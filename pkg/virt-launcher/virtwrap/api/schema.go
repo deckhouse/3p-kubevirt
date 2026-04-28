@@ -715,12 +715,6 @@ type DiskSource struct {
 	Host          *DiskSourceHost `xml:"host,omitempty"`
 	Reservations  *Reservations   `xml:"reservations,omitempty"`
 	Slices        []Slice         `xml:"slices,omitempty"`
-	Seclabel      *DiskSeclabel   `xml:"seclabel,omitempty"`
-}
-
-type DiskSeclabel struct {
-	Model   string `xml:"model,attr,omitempty"`
-	Relabel string `xml:"relabel,attr"`
 }
 
 type DiskTarget struct {
