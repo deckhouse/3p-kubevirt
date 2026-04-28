@@ -41,7 +41,8 @@ const (
 	conntrackHookSock = "/var/run/kubevirt/sockets/conntrack-hook.sock"
 	socketTimeout     = 1 * time.Second
 
-	qemuConfPath = "/etc/libvirt/qemu.conf"
+	qemuConfPath             = "/etc/libvirt/qemu.conf"
+	envSharedFilesystemPaths = "SHARED_FILESYSTEM_PATHS"
 )
 
 func main() {
@@ -77,12 +78,18 @@ func main() {
 
 // runMigrateBeginHook reads the original XML from stdin, attempts to inject
 // per-disk seclabel relabel='no' for shared filesystem PVCs, and writes either
-// the modified XML or the original XML (on any error/panic) to stdout.
 func runMigrateBeginHook(in io.Reader, out io.Writer) {
+	sharedPaths := getSharedFilesystemPaths()
+	if len(sharedPaths) == 0 {
+		if _, err := io.Copy(out, in); err != nil {
+			log.Printf("passthrough copy failed: %v", err)
+		}
+		return
+	}
+
 	xmlBytes, err := io.ReadAll(in)
 	if err != nil {
 		log.Printf("read stdin failed: %v", err)
-		// Empty stdout means libvirt uses its own input XML unchanged.
 		return
 	}
 
@@ -93,60 +100,62 @@ func runMigrateBeginHook(in io.Reader, out io.Writer) {
 		}
 	}()
 
-	var buf bytes.Buffer
-	if err := injectSharedDiskSeclabels(bytes.NewReader(xmlBytes), &buf); err != nil {
+	if err := injectSharedDiskSeclabels(xmlBytes, sharedPaths, out); err != nil {
 		log.Printf("seclabel injection error: %v; passing through original XML", err)
 		_, _ = out.Write(xmlBytes)
-		return
 	}
-	_, _ = out.Write(buf.Bytes())
 }
 
 // sourceLineRE matches a libvirt disk <source file="X"/> or <source file="X"></source>
-// or single-quoted variants, with no child elements yet (so injection is safe).
-// RE2 doesn't support backreferences, so we accept any combination of quote
-// characters around the path; libvirt always emits a consistent pair.
+// (single-quoted variants too) with no child elements — required so we never
+// double-inject a seclabel into a source that already has one.
 var sourceLineRE = regexp.MustCompile(`<source\s+file=["']([^"']+)["']\s*((?:/>)|(?:></source>))`)
 
-func injectSharedDiskSeclabels(in io.Reader, out io.Writer) error {
-	xmlBytes, err := io.ReadAll(in)
-	if err != nil {
-		return fmt.Errorf("reading stdin: %w", err)
-	}
-
-	sharedPaths := getSharedFilesystemPaths()
-	if len(sharedPaths) == 0 {
-		// No shared paths declared — passthrough original XML unchanged.
-		_, err = out.Write(xmlBytes)
+func injectSharedDiskSeclabels(xmlBytes []byte, sharedPaths []string, out io.Writer) error {
+	matches := sourceLineRE.FindAllSubmatchIndex(xmlBytes, -1)
+	if len(matches) == 0 {
+		_, err := out.Write(xmlBytes)
 		return err
 	}
 
-	modified := sourceLineRE.ReplaceAllStringFunc(string(xmlBytes), func(match string) string {
-		groups := sourceLineRE.FindStringSubmatch(match)
-		if len(groups) < 3 {
-			return match
-		}
-		path := groups[1]
-		if !pathInShared(path, sharedPaths) {
-			return match
-		}
-		return fmt.Sprintf(`<source file="%s"><seclabel model='dac' relabel='no'/></source>`, path)
-	})
+	var buf bytes.Buffer
+	buf.Grow(len(xmlBytes) + len(matches)*64)
 
-	_, err = io.WriteString(out, modified)
+	last := 0
+	for _, m := range matches {
+		matchStart, matchEnd := m[0], m[1]
+		path := string(xmlBytes[m[2]:m[3]])
+
+		buf.Write(xmlBytes[last:matchStart])
+		if pathInShared(path, sharedPaths) {
+			fmt.Fprintf(&buf, `<source file="%s"><seclabel model='dac' relabel='no'/></source>`, path)
+		} else {
+			buf.Write(xmlBytes[matchStart:matchEnd])
+		}
+		last = matchEnd
+	}
+	buf.Write(xmlBytes[last:])
+
+	_, err := out.Write(buf.Bytes())
 	return err
 }
 
 func getSharedFilesystemPaths() []string {
-	if env := os.Getenv("SHARED_FILESYSTEM_PATHS"); env != "" {
-		return splitNonEmpty(env, ":")
+	var raw []string
+	if env := os.Getenv(envSharedFilesystemPaths); env != "" {
+		raw = splitNonEmpty(env, ":")
+	} else {
+		raw = parseSharedFilesystemsFromQemuConf(qemuConfPath)
 	}
-	return parseSharedFilesystemsFromQemuConf(qemuConfPath)
+	for i, p := range raw {
+		raw[i] = filepath.Clean(p)
+	}
+	return raw
 }
 
 func splitNonEmpty(s, sep string) []string {
 	var out []string
-	for _, part := range strings.Split(s, sep) {
+	for part := range strings.SplitSeq(s, sep) {
 		part = strings.TrimSpace(part)
 		if part != "" {
 			out = append(out, part)
@@ -156,7 +165,6 @@ func splitNonEmpty(s, sep string) []string {
 }
 
 var sharedFsConfRE = regexp.MustCompile(`(?m)^\s*shared_filesystems\s*=\s*\[\s*([^\]]*)\]`)
-var quotedPathRE = regexp.MustCompile(`"([^"]+)"`)
 
 func parseSharedFilesystemsFromQemuConf(path string) []string {
 	data, err := os.ReadFile(path)
@@ -168,19 +176,19 @@ func parseSharedFilesystemsFromQemuConf(path string) []string {
 		return nil
 	}
 	var out []string
-	for _, mm := range quotedPathRE.FindAllStringSubmatch(m[1], -1) {
-		if len(mm) >= 2 && mm[1] != "" {
-			out = append(out, mm[1])
+	for part := range strings.SplitSeq(m[1], ",") {
+		part = strings.Trim(strings.TrimSpace(part), `"'`)
+		if part != "" {
+			out = append(out, part)
 		}
 	}
 	return out
 }
 
 func pathInShared(path string, sharedPaths []string) bool {
-	clean := filepath.Clean(path)
+	p := filepath.Clean(path)
 	for _, sp := range sharedPaths {
-		c := filepath.Clean(sp)
-		if clean == c || strings.HasPrefix(clean, c+string(filepath.Separator)) {
+		if p == sp || strings.HasPrefix(p, sp+string(filepath.Separator)) {
 			return true
 		}
 	}
