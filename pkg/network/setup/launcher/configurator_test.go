@@ -98,6 +98,7 @@ var _ = Describe("SetupPodNetworkPhase2", func() {
 
 	DescribeTable("should panic when DHCP server fails to start",
 		func(vmi *v1.VirtualMachineInstance) {
+			DeferCleanup(launcher.EnableInternalDHCP())
 			configurator := launcher.NewVMNetworkConfigurator(vmi, nil,
 				launcher.WithNetworkHandler(newStubNetworkHandler(podIfaceName)),
 				launcher.WithDomainAttachments(map[string]string{v1.DefaultPodNetwork().Name: string(v1.Tap)}),

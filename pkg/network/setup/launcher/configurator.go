@@ -136,9 +136,13 @@ func (n *VMNetworkConfigurator) enrichTapDomainInterface(
 	}
 }
 
+// internalDHCPDisabled turns off the DHCP server that virt-launcher runs for tap interfaces.
+// Guest addressing is provided by the platform network instead.
+var internalDHCPDisabled = true
+
 func (n *VMNetworkConfigurator) ensureDHCP(iface *v1.Interface, network *v1.Network, podIfaceName string) error {
-	if network.Pod != nil && network.Name != "default" {
-		log.Log.Infof("Skipping DHCP configurator for network %q", network.Name)
+	if internalDHCPDisabled {
+		log.Log.Infof("DHCP configurator is disabled for network %q", network.Name)
 		return nil
 	}
 

@@ -23,6 +23,7 @@ go_test(
     name = "go_default_test",
     srcs = [
         "configurator_test.go",
+        "export_test.go",
         "launcher_suite_test.go",
     ],
     race = "on",
