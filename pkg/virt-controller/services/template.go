@@ -1482,6 +1482,23 @@ func addDisksOverheads(vmi *v1.VirtualMachineInstance, overallOverhead *resource
 
 	overheadValue := resource.MustParse("60Mi")
 
+	if vmi.IsCPUFractioned() {
+		if vmi.IsCPUGuaranteed() {
+			// Add overhead for requests and limits for the domain with guaranteed CPU cores.
+			if overallOverhead != nil {
+				overallOverhead.Add(overheadValue)
+			}
+		} else {
+			// Add overhead only for memory limits if CPU cores are not guaranteed (domain CPU requests are not equal to limits).
+			if limitOnlyOverhead != nil {
+				limitOnlyOverhead.Add(overheadValue)
+			}
+		}
+		return
+	}
+
+	// Previous DVP implementation: explicit resources in VM spec.
+	// TODO: remove it after full migration to hotpluggable resources spec generator in DVP.
 	reqCPU := vmi.Spec.Domain.Resources.Requests.Cpu()
 	limitCPU := vmi.Spec.Domain.Resources.Limits.Cpu()
 	if reqCPU != nil && limitCPU != nil {
@@ -1781,13 +1798,14 @@ func (t *templateService) VMIResourcePredicates(vmi *v1.VirtualMachineInstance, 
 			NewVMIResourceRule(doesVMIRequireFractionCPU, WithCPUFractionRequests(vmi, cpuFraction)),
 			NewVMIResourceRule(hasHugePages, WithHugePages(vmi.Spec.Domain.Memory, memoryOverhead)),
 			NewVMIResourceRule(not(hasHugePages), WithMemoryOverhead(vmi.Spec.Domain.Resources, memoryOverhead)),
+			NewVMIResourceRule(func(vmi *v1.VirtualMachineInstance) bool {
+				return true
+			}, EnsureMemoryLimits()),
 			NewVMIResourceRule(func(_ *v1.VirtualMachineInstance) bool {
 				return memoryLimitsOverhead.Value() > 0
 			}, WithMemoryLimitsOverhead(memoryLimitsOverhead)),
-			NewVMIResourceRule(t.doesVMIRequireAutoMemoryLimits, WithAutoMemoryLimits(vmi.Namespace, t.namespaceStore)),
-			NewVMIResourceRule(func(*v1.VirtualMachineInstance) bool {
-				return true
-			}, EnsureMemoryLimits()),
+			// Memory limits are set earlier with EnsureMemoryLimits. Auto memory limiting with ratio become redundant.
+			// NewVMIResourceRule(t.doesVMIRequireAutoMemoryLimits, WithAutoMemoryLimits(vmi.Namespace, t.namespaceStore)),
 			NewVMIResourceRule(func(*v1.VirtualMachineInstance) bool {
 				return len(networkToResourceMap) > 0
 			}, WithNetworkResources(networkToResourceMap)),
