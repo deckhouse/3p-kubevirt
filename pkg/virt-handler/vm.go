@@ -1329,8 +1329,87 @@ func (c *VirtualMachineController) updateVMIConditions(vmi *v1.VirtualMachineIns
 		return err
 	}
 	c.updatePausedConditions(vmi, domain, condManager)
+	c.updateBootFailedCondition(vmi, domain, condManager)
+	c.updateBootFailedConditionHeuristic(vmi, domain, condManager)
 
 	return nil
+}
+
+const bootFailedMaxRunningDuration = 60 * time.Second
+
+func (c *VirtualMachineController) updateBootFailedCondition(vmi *v1.VirtualMachineInstance, domain *api.Domain, condManager *controller.VirtualMachineInstanceConditionManager) {
+	if domain == nil {
+		return
+	}
+
+	// Reset the condition when firmware no longer reports boot failure (i.e. on reboot).
+	if !domain.Spec.Metadata.KubeVirt.BootFailed {
+		condManager.RemoveCondition(vmi, v1.VirtualMachineInstanceBootFailed)
+		return
+	}
+
+	// Firmware reported "No bootable device." via the dedicated 0x403 debugcon.
+	if condManager.HasCondition(vmi, v1.VirtualMachineInstanceBootFailed) {
+		return
+	}
+
+	vmi.Status.Conditions = append(vmi.Status.Conditions, v1.VirtualMachineInstanceCondition{
+		Type:               v1.VirtualMachineInstanceBootFailed,
+		Status:             k8sv1.ConditionTrue,
+		LastProbeTime:      metav1.Now(),
+		LastTransitionTime: metav1.Now(),
+		Reason:             "NoBootableDevice",
+		Message:            "No bootable device.",
+	})
+	log.Log.Object(vmi).Infof("Boot failure detected: firmware reported 'No bootable device.' on domain %s", domain.ObjectMeta.Name)
+}
+
+func (c *VirtualMachineController) updateBootFailedConditionHeuristic(vmi *v1.VirtualMachineInstance, domain *api.Domain, condManager *controller.VirtualMachineInstanceConditionManager) {
+	if domain == nil {
+		return
+	}
+
+	if domain.Status.Status != api.Shutoff && domain.Status.Status != api.Crashed {
+		return
+	}
+
+	if c.hasGracefulShutdownTrigger(domain) {
+		return
+	}
+
+	if condManager.HasCondition(vmi, v1.VirtualMachineInstanceAgentConnected) {
+		return
+	}
+
+	var runningTs *metav1.Time
+	for i := range vmi.Status.PhaseTransitionTimestamps {
+		if vmi.Status.PhaseTransitionTimestamps[i].Phase == v1.Running {
+			runningTs = &vmi.Status.PhaseTransitionTimestamps[i].PhaseTransitionTimestamp
+			break
+		}
+	}
+	if runningTs == nil {
+		return
+	}
+
+	runningDuration := time.Since(runningTs.Time)
+	if runningDuration > bootFailedMaxRunningDuration {
+		return
+	}
+
+	if condManager.HasCondition(vmi, v1.VirtualMachineInstanceBootFailed) {
+		return
+	}
+
+	vmi.Status.Conditions = append(vmi.Status.Conditions, v1.VirtualMachineInstanceCondition{
+		Type:               v1.VirtualMachineInstanceBootFailed,
+		Status:             k8sv1.ConditionTrue,
+		LastProbeTime:      metav1.Now(),
+		LastTransitionTime: metav1.Now(),
+		Reason:             "NoBootableDevice",
+		Message:            "The VM domain shut off shortly after starting without a graceful shutdown request. This typically indicates no bootable device was found.",
+	})
+	log.Log.Object(vmi).Infof("Boot failure detected: domain %s shut off after %v without guest agent connection or graceful shutdown", domain.ObjectMeta.Name, runningDuration)
 }
 
 func (c *VirtualMachineController) updateVMIStatus(oldStatus *v1.VirtualMachineInstanceStatus, vmi *v1.VirtualMachineInstance, domain *api.Domain, syncError error) (err error) {
