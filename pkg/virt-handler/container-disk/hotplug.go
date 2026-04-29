@@ -585,6 +585,7 @@ func (m *hotplugMounter) UmountAll(vmi *v1.VirtualMachineInstance) error {
 
 	log.DefaultLogger().Object(vmi).Infof("Found container disk mount entries")
 
+	deferred := false
 	for _, entry := range mountEntries {
 		log.DefaultLogger().Object(vmi).Infof("Looking to see if containerdisk is mounted at path %s", entry.TargetFile)
 		file, err := safepath.NewFileNoFollow(entry.TargetFile)
@@ -605,13 +606,30 @@ func (m *hotplugMounter) UmountAll(vmi *v1.VirtualMachineInstance) error {
 				return fmt.Errorf(failedUnmountFmt, file, string(out), err)
 			}
 			if err = safepath.UnlinkAtNoFollow(file.Path()); err != nil {
+				if errors.Is(err, syscall.EBUSY) {
+					log.DefaultLogger().Object(vmi).Infof(
+						"Bind-mount target %v still busy after umount; deferred to next reconcile",
+						file.Path())
+					deferred = true
+					continue
+				}
 				return fmt.Errorf("failed to delete file %s: %w", file.Path(), err)
 			}
 		} else {
 			if err = safepath.UnlinkAtNoFollow(file.Path()); err != nil {
+				if errors.Is(err, syscall.EBUSY) {
+					log.DefaultLogger().Object(vmi).Infof(
+						"Bind-mount target %v still busy; deferred to next reconcile",
+						file.Path())
+					deferred = true
+					continue
+				}
 				return fmt.Errorf("failed to delete file %s: %w", file.Path(), err)
 			}
 		}
+	}
+	if deferred {
+		return nil
 	}
 	err = m.deleteMountTargetRecord(vmi)
 	if err != nil {
