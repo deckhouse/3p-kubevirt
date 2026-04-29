@@ -2027,7 +2027,7 @@ func Convert_v1_VirtualMachineInstance_To_api_Domain(vmi *v1.VirtualMachineInsta
 			api.Arg{Value: "-chardev"},
 			api.Arg{Value: "null,id=bootfailurelog"},
 			api.Arg{Value: "-device"},
-			api.Arg{Value: "isa-debugcon,iobase=0x403,chardev=bootfailurelog"},
+			api.Arg{Value: "isa-debugcon,iobase=0x403,chardev=bootfailurelog,watch-no-bootable=on"},
 		)
 	}
 
