@@ -1,0 +1,76 @@
+version: "3"
+
+silent: true
+
+vars:
+  Namespace: d8-virtualization
+  Deployment: virt-controller
+  Container: virt-controller
+  MirrorName: mirrord-copy-virt-controller
+  BinDir: ./bin
+
+tasks:
+  dev:run:virt-controller:
+    desc: "Build and run local virt-controller in cluster"
+    cmds:
+      - mkdir -p {{ .BinDir }}
+      - echo "Building virt-controller..."
+      - CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o {{ .BinDir }}/virt-controller ./cmd/virt-controller/
+
+      - echo "Scaling down virt-operator to prevent reconciliation..."
+      - kubectl -n {{ .Namespace }} scale deployment virt-operator --replicas 0
+
+      - |
+        ORIG_CMD=$(kubectl -n {{ .Namespace }} get deployment {{ .Deployment }} -o jsonpath='{.spec.template.spec.containers[?(@.name=="virt-controller")].command}')
+        ORIG_ARGS=$(kubectl -n {{ .Namespace }} get deployment {{ .Deployment }} -o jsonpath='{.spec.template.spec.containers[?(@.name=="virt-controller")].args}')
+        echo "$ORIG_CMD" "$ORIG_ARGS" | jq -rs '.[0][1:] + .[1] | join(" ")' > /tmp/virt-controller-flags.txt
+
+      - |
+        if ! kubectl -n {{ .Namespace }} get deployment/{{ .MirrorName }} &>/dev/null; then
+          echo "Creating copy deployment..."
+          kubectl -n {{ .Namespace }} get deployment/{{ .Deployment }} -ojson | \
+            jq --arg NEW_NAME "{{ .MirrorName }}" '
+              .metadata.name = $NEW_NAME |
+              del(.metadata.resourceVersion, .metadata.uid, .metadata.creationTimestamp, .metadata.generation, .metadata.annotations["deployment.kubernetes.io/revision"]) |
+              (.spec.template.spec.containers[] | select(.name == "virt-controller")) |=
+                (.command = ["/bin/sh","-c","--"] |
+                 .args = ["while true; do sleep 60; done;"] |
+                 .image = "alpine:3.20.1" |
+                 .securityContext.runAsUser = 64535 |
+                 .securityContext.readOnlyRootFilesystem = false |
+                 del(.livenessProbe) | del(.readinessProbe)) |
+              (.spec.template.spec.containers[] | select(.name != "virt-controller")) |=
+                (del(.livenessProbe) | del(.readinessProbe)) |
+              .spec.replicas = 1 |
+              .spec.template.metadata.labels.mirror = "true" |
+              .spec.template.metadata.labels.ownerName = $NEW_NAME
+            ' | kubectl create -f -
+        fi
+
+      - echo "Waiting for pod to be running..."
+      - kubectl -n {{ .Namespace }} wait pod --for=jsonpath='{.status.phase}'=Running -l mirror=true,ownerName={{ .MirrorName }} --timeout 120s
+
+      - echo "Scaling down original deployment..."
+      - kubectl -n {{ .Namespace }} scale deployment {{ .Deployment }} --replicas 0
+      - kubectl -n {{ .Namespace }} wait --for=jsonpath='{.spec.replicas}'=0 deployment {{ .Deployment }}
+
+      - |
+        POD=$(kubectl -n {{ .Namespace }} get pod -l mirror=true,ownerName={{ .MirrorName }} -o jsonpath='{.items[0].metadata.name}')
+        FLAGS=$(cat /tmp/virt-controller-flags.txt)
+
+        echo "Copying binary to pod/$POD..."
+        kubectl -n {{ .Namespace }} cp {{ .BinDir }}/virt-controller "$POD":/tmp/virt-controller -c {{ .Container }}
+        kubectl -n {{ .Namespace }} exec "$POD" -c {{ .Container }} -- chmod +x /tmp/virt-controller
+
+        echo "Starting virt-controller with flags: $FLAGS"
+        kubectl -n {{ .Namespace }} exec -it "$POD" -c {{ .Container }} -- /tmp/virt-controller $FLAGS
+
+  dev:wipe:virt-controller:
+    desc: "Stop and cleanup dev virt-controller"
+    cmds:
+      - echo "Deleting copy deployment..."
+      - kubectl -n {{ .Namespace }} delete --cascade=foreground --grace-period 0 deployment {{ .MirrorName }} --ignore-not-found
+      - echo "Scaling original deployment back up..."
+      - kubectl -n {{ .Namespace }} scale deployment {{ .Deployment }} --replicas 1
+      - echo "Scaling virt-operator back up..."
+      - kubectl -n {{ .Namespace }} scale deployment virt-operator --replicas 1
