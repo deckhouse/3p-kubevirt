@@ -856,6 +856,7 @@ func (m *volumeMounter) UnmountAll(vmi *v1.VirtualMachineInstance, cgroupManager
 		// Collect all device rules for removal first
 		var deviceRules []*devices.Rule
 
+		deferred := false
 		for _, entry := range record.MountTargetEntries {
 			diskPath, err := safepath.NewFileNoFollow(entry.TargetFile)
 			if err != nil {
@@ -879,6 +880,11 @@ func (m *volumeMounter) UnmountAll(vmi *v1.VirtualMachineInstance, cgroupManager
 				}
 			} else {
 				if err := m.unmountFileSystemHotplugVolumes(diskPath.Path()); err != nil {
+					if errors.Is(err, syscall.EBUSY) {
+						logger.Infof("Hotplug volume %v still busy after umount; deferred to next reconcile", diskPath)
+						deferred = true
+						continue
+					}
 					logger.Warningf("Unable to unmount volume at path %s: %v", diskPath, err)
 					// Don't return error, try next.
 				}
@@ -901,6 +907,10 @@ func (m *volumeMounter) UnmountAll(vmi *v1.VirtualMachineInstance, cgroupManager
 					logger.Infof("cgroup %s device rules for removal are set successfully. rules count: %d", cgroupManager.GetCgroupVersion(), len(deviceRules))
 				}
 			}
+		}
+
+		if deferred {
+			return nil
 		}
 
 		err = m.deleteMountTargetRecord(vmi)
