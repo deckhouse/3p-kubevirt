@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	hotplugdisk "kubevirt.io/kubevirt/pkg/hotplug-disk"
@@ -498,6 +499,12 @@ func (m *hotplugMounter) Umount(vmi *v1.VirtualMachineInstance) error {
 			}
 			if !mounted {
 				if err = safepath.UnlinkAtNoFollow(file.Path()); err != nil {
+					if errors.Is(err, syscall.EBUSY) {
+						log.DefaultLogger().Object(vmi).Infof(
+							"Bind-mount target %v still busy; deferred to next reconcile",
+							file.Path())
+						continue
+					}
 					return fmt.Errorf("failed to delete file %s: %w", file.Path(), err)
 				}
 				entriesTargetForDelete[r.TargetFile] = struct{}{}
@@ -509,6 +516,12 @@ func (m *hotplugMounter) Umount(vmi *v1.VirtualMachineInstance) error {
 				return fmt.Errorf(failedUnmountFmt, file, string(out), err)
 			}
 			if err = safepath.UnlinkAtNoFollow(file.Path()); err != nil {
+				if errors.Is(err, syscall.EBUSY) {
+					log.DefaultLogger().Object(vmi).Infof(
+						"Bind-mount target %v still busy after umount; deferred to next reconcile",
+						file.Path())
+					continue
+				}
 				return fmt.Errorf("failed to delete file %s: %w", file.Path(), err)
 			}
 			entriesTargetForDelete[r.TargetFile] = struct{}{}
