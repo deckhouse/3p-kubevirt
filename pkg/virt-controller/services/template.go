@@ -569,6 +569,9 @@ func (t *templateService) renderLaunchManifest(vmi *v1.VirtualMachineInstance, i
 					})
 			}
 		}
+		if len(requestedHookSidecar.Volumes) > 0 {
+			sidecarVolumes = append(sidecarVolumes, requestedHookSidecar.Volumes...)
+		}
 		containers = append(containers, sidecarContainer)
 	}
 
@@ -796,11 +799,29 @@ func newSidecarContainerRenderer(sidecarName string, vmiSpec *v1.VirtualMachineI
 	if requestedHookSidecar.PVC != nil {
 		mounts = append(mounts, pvcVolumeMount(*requestedHookSidecar.PVC))
 	}
+	if len(requestedHookSidecar.VolumeMounts) > 0 {
+		mounts = append(mounts, requestedHookSidecar.VolumeMounts...)
+	}
 	sidecarOpts = append(sidecarOpts, WithVolumeMounts(mounts...))
 
 	if util.IsNonRootVMI(vmiSpec) {
 		sidecarOpts = append(sidecarOpts, WithNonRoot(userId))
-		sidecarOpts = append(sidecarOpts, WithDropALLCapabilities())
+		if requestedHookSidecar.Capabilities == nil && !requestedHookSidecar.Privileged {
+			sidecarOpts = append(sidecarOpts, WithDropALLCapabilities())
+		}
+	}
+	if requestedHookSidecar.Capabilities != nil {
+		sidecarOpts = append(sidecarOpts, func(renderer *ContainerSpecRenderer) {
+			renderer.capabilities = requestedHookSidecar.Capabilities
+		})
+	}
+	if requestedHookSidecar.Privileged {
+		sidecarOpts = append(sidecarOpts, WithPrivileged())
+		sidecarOpts = append(sidecarOpts, WithResourceRequirements(k8sv1.ResourceRequirements{
+			Limits: k8sv1.ResourceList{
+				TunDevice: resource.MustParse("1"),
+			},
+		}))
 	}
 	if requestedHookSidecar.Image == "" {
 		requestedHookSidecar.Image = os.Getenv(operatorutil.SidecarShimImageEnvName)

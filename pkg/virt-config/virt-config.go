@@ -462,10 +462,23 @@ func (c *ClusterConfig) IsVMRolloutStrategyLiveUpdate() bool {
 
 func (c *ClusterConfig) GetNetworkBindings() map[string]v1.InterfaceBindingPlugin {
 	networkConfig := c.GetConfig().NetworkConfiguration
-	if networkConfig != nil {
-		return networkConfig.Binding
+	bindings := make(map[string]v1.InterfaceBindingPlugin)
+	
+	if networkConfig != nil && networkConfig.Binding != nil {
+		for k, v := range networkConfig.Binding {
+			bindings[k] = v
+		}
 	}
-	return nil
+	
+	// HARDCODED: bpfbridge binding plugin - for testing/development
+	// TODO: remove this and register via KubeVirt CR
+	bindings["bpfbridge"] = v1.InterfaceBindingPlugin{
+		SidecarImage:         "kubevirt/network-bpf-bridge-binding:latest",
+		DomainAttachmentType: "tap",
+		Migration:            &v1.InterfaceBindingMigration{},
+	}
+	
+	return bindings
 }
 
 func (config *ClusterConfig) VGADisplayForEFIGuestsEnabled() bool {

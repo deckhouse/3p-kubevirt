@@ -49,7 +49,7 @@ func (c NetworkConfigurator) Mutate(domainSpec *domainschema.DomainSpec) (*domai
 	if iface.Type != "ethernet" {
 		return nil, fmt.Errorf("interface %q: expected type ethernet for tap attachment, got %q", c.vmiSpecIface.Name, iface.Type)
 	}
-	iface.Target = &domainschema.InterfaceTarget{Device: c.tapDevName}
+	iface.Target = &domainschema.InterfaceTarget{Device: c.tapDevName, Managed: "no"}
 	return domainSpecCopy, nil
 }
 

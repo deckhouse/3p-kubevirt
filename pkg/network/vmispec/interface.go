@@ -23,6 +23,7 @@ import (
 	"fmt"
 
 	v1 "kubevirt.io/api/core/v1"
+	"kubevirt.io/client-go/log"
 )
 
 func FilterSRIOVInterfaces(ifaces []v1.Interface) []v1.Interface {
@@ -84,8 +85,10 @@ func IsPodNetworkWithMigratableBindingPlugin(
 		if podInterface := LookupInterfaceByName(ifaces, podNetwork.Name); podInterface != nil {
 			if podInterface.Binding != nil {
 				binding, exist := bindingPlugins[podInterface.Binding.Name]
+				log.Log.Infof("migratable-check: podNetwork=%s iface=%s binding=%s exist=%t migration=%t totalBindings=%d", podNetwork.Name, podInterface.Name, podInterface.Binding.Name, exist, exist && binding.Migration != nil, len(bindingPlugins))
 				return exist && binding.Migration != nil
 			}
+			log.Log.Infof("migratable-check: podNetwork=%s iface=%s has no plugin binding", podNetwork.Name, podInterface.Name)
 		}
 	}
 	return false

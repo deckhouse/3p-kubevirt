@@ -134,24 +134,14 @@ var _ = Describe("podNIC", func() {
 		Expect(generator).ToNot(BeNil())
 	})
 
-	It("skips bridge DHCP configurator when disable DHCP annotation is set", func() {
-		vmi := newVMIBridgeInterface("testnamespace", "testVmName")
-		vmi.Annotations = map[string]string{disableDHCPAnnotation: "true"}
-		podnic, err := newPodNIC(vmi, &vmi.Spec.Networks[0], &vmi.Spec.Domain.Devices.Interfaces[0], mockNetwork, &baseCacheCreator, nil)
-		Expect(err).ToNot(HaveOccurred())
-
-		configurator := podnic.newDHCPConfigurator()
-		Expect(configurator).To(BeNil())
-	})
-
-	It("keeps bridge DHCP disabled by disable tap-veth-bridge annotation", func() {
+	It("keeps bridge DHCP configurator enabled even when disable tap-veth-bridge annotation is set", func() {
 		vmi := newVMIBridgeInterface("testnamespace", "testVmName")
 		vmi.Annotations = map[string]string{disableTapVethBridgeAnnotation: "true"}
 		podnic, err := newPodNIC(vmi, &vmi.Spec.Networks[0], &vmi.Spec.Domain.Devices.Interfaces[0], mockNetwork, &baseCacheCreator, nil)
 		Expect(err).ToNot(HaveOccurred())
 
 		configurator := podnic.newDHCPConfigurator()
-		Expect(configurator).To(BeNil())
+		Expect(configurator).ToNot(BeNil())
 	})
 })
 

@@ -129,7 +129,8 @@ func (c *NetConf) Setup(vmi *v1.VirtualMachineInstance, networks []v1.Network, l
 		ownerID = util.NonRootUID
 	}
 	queuesCapacity := int(converter.NetworkQueuesCapacity(vmi))
-	disableTapVethBridge := vmi.GetAnnotations()[netpod.DisableTapVethBridgeAnnotation] == "true"
+	// PoC mode: always disable legacy tap-veth-bridge wiring for bridge networking.
+	disableTapVethBridge := true
 	log.Log.Object(vmi).Infof("bridge network setup mode: disableTapVethBridge=%t", disableTapVethBridge)
 	netpod := netpod.NewNetPod(
 		networks,
