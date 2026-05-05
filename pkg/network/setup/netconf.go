@@ -109,7 +109,7 @@ func (c *NetConf) Setup(vmi *v1.VirtualMachineInstance, networks []v1.Network, l
 			return err
 		}
 		log.Log.Object(vmi).Infof("DEBUG-NETCONF: !ok branch diskPid=%d launcherPid=%d", diskPid, launcherPid)
-		if diskPid != 0 && diskPid != launcherPid {
+		if diskPid != launcherPid {
 			log.Log.Object(vmi).Infof("DEBUG-NETCONF: disk PID mismatch, Teardown")
 			if err := c.Teardown(vmi); err != nil {
 				return fmt.Errorf("netconf teardown for replaced launcher pod failed: %w", err)
