@@ -94,7 +94,9 @@ func (c *NetConf) Setup(vmi *v1.VirtualMachineInstance, networks []v1.Network, l
 	state, ok := c.state[string(vmi.UID)]
 	cachedPid := c.statePid[string(vmi.UID)]
 	c.configStateMutex.RUnlock()
+	log.Log.Object(vmi).Infof("DEBUG-NETCONF: enter ok=%v cachedPid=%d launcherPid=%d", ok, cachedPid, launcherPid)
 	if ok && cachedPid != launcherPid {
+		log.Log.Object(vmi).Infof("DEBUG-NETCONF: in-memory PID mismatch, Teardown")
 		if err := c.Teardown(vmi); err != nil {
 			return fmt.Errorf("netconf teardown for replaced launcher pod failed: %w", err)
 		}
@@ -103,16 +105,21 @@ func (c *NetConf) Setup(vmi *v1.VirtualMachineInstance, networks []v1.Network, l
 	if !ok {
 		diskPid, err := readPersistedLauncherPid(string(vmi.UID))
 		if err != nil {
+			log.Log.Object(vmi).Reason(err).Errorf("DEBUG-NETCONF: readPersistedLauncherPid failed")
 			return err
 		}
+		log.Log.Object(vmi).Infof("DEBUG-NETCONF: !ok branch diskPid=%d launcherPid=%d", diskPid, launcherPid)
 		if diskPid != 0 && diskPid != launcherPid {
+			log.Log.Object(vmi).Infof("DEBUG-NETCONF: disk PID mismatch, Teardown")
 			if err := c.Teardown(vmi); err != nil {
 				return fmt.Errorf("netconf teardown for replaced launcher pod failed: %w", err)
 			}
 		}
 		if err := writePersistedLauncherPid(string(vmi.UID), launcherPid); err != nil {
+			log.Log.Object(vmi).Reason(err).Errorf("DEBUG-NETCONF: writePersistedLauncherPid failed")
 			return err
 		}
+		log.Log.Object(vmi).Infof("DEBUG-NETCONF: writePersistedLauncherPid done")
 		cache := NewConfigStateCache(string(vmi.UID), c.cacheCreator)
 		configStateCache, err := upgradeConfigStateCache(&cache, networks, c.cacheCreator, string(vmi.UID))
 		if err != nil {
@@ -146,9 +153,12 @@ func (c *NetConf) Setup(vmi *v1.VirtualMachineInstance, networks []v1.Network, l
 		netpod.WithVMIIfaceStatuses(vmi.Status.Interfaces),
 	)
 
+	log.Log.Object(vmi).Infof("DEBUG-NETCONF: calling netpod.Setup")
 	if err := netpod.Setup(); err != nil {
+		log.Log.Object(vmi).Reason(err).Errorf("DEBUG-NETCONF: netpod.Setup failed")
 		return fmt.Errorf("setup failed, err: %w", err)
 	}
+	log.Log.Object(vmi).Infof("DEBUG-NETCONF: netpod.Setup returned nil")
 	return nil
 }
 
