@@ -764,6 +764,11 @@ func (c *MigrationTargetController) processVMI(vmi *v1.VirtualMachineInstance) e
 		return c.finalizeMigration(vmi)
 	}
 
+	client, err := c.launcherClients.GetLauncherClient(vmi)
+	if err != nil {
+		return fmt.Errorf(unableCreateVirtLauncherConnectionFmt, err)
+	}
+
 	isUnresponsive, isInitialized, err := c.launcherClients.IsLauncherClientUnresponsive(vmi)
 	if err != nil {
 		return err
@@ -774,11 +779,6 @@ func (c *MigrationTargetController) processVMI(vmi *v1.VirtualMachineInstance) e
 		return nil
 	} else if isUnresponsive {
 		return goerror.New(fmt.Sprintf("Can not update a VirtualMachineInstance with unresponsive command server."))
-	}
-
-	client, err := c.launcherClients.GetLauncherClient(vmi)
-	if err != nil {
-		return fmt.Errorf(unableCreateVirtLauncherConnectionFmt, err)
 	}
 
 	if migrations.IsMigrating(vmi) {
