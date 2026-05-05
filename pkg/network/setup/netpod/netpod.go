@@ -171,7 +171,6 @@ func (n NetPod) Setup() error {
 		iface := vmispec.LookupInterfaceByName(n.vmiSpecIfaces, net.Name)
 		return iface != nil && iface.State != v1.InterfaceStateAbsent
 	})
-	n.log.Infof("DEBUG-NETPOD: pendingNets=%d startedNets=%d finishedNets=%d unplugIfaces=%d", len(pendingNets), len(startedNets), len(finishedNets), len(unplugIfaces))
 	if len(pendingNets) == 0 && len(unplugIfaces) == 0 {
 		return nil
 	}

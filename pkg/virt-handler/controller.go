@@ -262,17 +262,14 @@ func (c *BaseController) setupDevicesOwnerships(vmi *v1.VirtualMachineInstance, 
 
 func (c *BaseController) setupNetwork(vmi *v1.VirtualMachineInstance, networks []v1.Network, netConf netconf) error {
 	if len(networks) == 0 {
-		log.Log.Object(vmi).Infof("DEBUG-NETSETUP: skip, len(networks)==0")
 		return nil
 	}
 
 	isolationRes, err := c.podIsolationDetector.Detect(vmi)
 	if err != nil {
-		log.Log.Object(vmi).Reason(err).Errorf("DEBUG-NETSETUP: Detect failed")
 		return fmt.Errorf(failedDetectIsolationFmt, err)
 	}
 
-	log.Log.Object(vmi).Infof("DEBUG-NETSETUP: calling netConf.Setup pid=%d networks=%d", isolationRes.Pid(), len(networks))
 	return netConf.Setup(vmi, networks, isolationRes.Pid())
 }
 
