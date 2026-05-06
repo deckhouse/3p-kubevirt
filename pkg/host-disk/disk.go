@@ -59,5 +59,5 @@ func (c PVCDiskImgCreator) Create(vmi *v1.VirtualMachineInstance, volumeName, di
 	}
 
 	diskDir := filepath.Dir(diskPath)
-	return c.diskImgCreator.CreateDiskAndSetOwnership(vmi, diskDir, diskPath, pvcInfo.ClaimName, requestedSize)
+	return c.diskImgCreator.CreateDiskAndSetOwnership(vmi, diskDir, diskPath, pvcInfo.ClaimName, requestedSize, true)
 }

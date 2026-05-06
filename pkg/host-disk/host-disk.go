@@ -257,14 +257,14 @@ func (hdc *HostDiskImgCreator) setlessPVCSpaceToleration(toleration int) {
 	hdc.diskImgCreator.lessPVCSpaceToleration = toleration
 }
 
-func (hdc *HostDiskImgCreator) Create(vmi *v1.VirtualMachineInstance) error {
+func (hdc *HostDiskImgCreator) Create(vmi *v1.VirtualMachineInstance, chownExisting bool) error {
 	for _, volume := range vmi.Spec.Volumes {
 		if hostDisk := volume.VolumeSource.HostDisk; shouldMountHostDisk(hostDisk) {
 			diskPath := hdc.diskPath(volume.Name, hostDisk.Path)
 			diskDir := hdc.diskDir(volume.Name)
 
 			requestedSize, _ := hostDisk.Capacity.AsInt64()
-			if err := hdc.diskImgCreator.CreateDiskAndSetOwnership(vmi, diskDir, diskPath, volume.Name, requestedSize); err != nil {
+			if err := hdc.diskImgCreator.CreateDiskAndSetOwnership(vmi, diskDir, diskPath, volume.Name, requestedSize, chownExisting); err != nil {
 				return err
 			}
 		}
