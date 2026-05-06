@@ -42,6 +42,7 @@ func (c diskImgCreator) CreateDiskAndSetOwnership(vmi *v1.VirtualMachineInstance
 	} else if !chownExisting {
 		return nil
 	}
+	// Change file ownership to the qemu user.
 	if err := ephemeraldiskutils.DefaultOwnershipManager.UnsafeSetFileOwnership(diskPath); err != nil {
 		log.Log.Reason(err).Errorf("Couldn't set Ownership on %s: %v", diskPath, err)
 		return err
