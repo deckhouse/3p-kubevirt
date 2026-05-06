@@ -1497,8 +1497,8 @@ func addDisksOverheads(vmi *v1.VirtualMachineInstance, overallOverhead *resource
 		return
 	}
 
-	// Previous DVP implementation: explicit resources in VM spec.
-	// TODO: remove it after full migration to hotpluggable resources spec generator in DVP.
+	// Previous DVP implementation: virtualization-controller specifies explicit resources in VM spec.
+	// TODO: remove this section after full migration to hotpluggable resources spec generator in DVP.
 	reqCPU := vmi.Spec.Domain.Resources.Requests.Cpu()
 	limitCPU := vmi.Spec.Domain.Resources.Limits.Cpu()
 	if reqCPU != nil && limitCPU != nil {
@@ -1805,6 +1805,7 @@ func (t *templateService) VMIResourcePredicates(vmi *v1.VirtualMachineInstance, 
 				return memoryLimitsOverhead.Value() > 0
 			}, WithMemoryLimitsOverhead(memoryLimitsOverhead)),
 			// Memory limits are set earlier with EnsureMemoryLimits. Auto memory limiting with ratio become redundant.
+			// TODO rethink to re-enable it in the future: just need to find proper distinguisher between "vm needs ratio based autolimit" and "vm requires limits equal to requests".
 			// NewVMIResourceRule(t.doesVMIRequireAutoMemoryLimits, WithAutoMemoryLimits(vmi.Namespace, t.namespaceStore)),
 			NewVMIResourceRule(func(*v1.VirtualMachineInstance) bool {
 				return len(networkToResourceMap) > 0
