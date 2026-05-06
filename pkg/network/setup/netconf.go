@@ -20,12 +20,8 @@
 package network
 
 import (
-	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strconv"
-	"strings"
 	"sync"
 
 	"kubevirt.io/client-go/log"
@@ -101,7 +97,8 @@ func (c *NetConf) Setup(vmi *v1.VirtualMachineInstance, networks []v1.Network, l
 		ok = false
 	}
 	if !ok {
-		diskPid, err := readPersistedLauncherPid(string(vmi.UID))
+		launcherPidCache := cache.NewLauncherPidCache(c.cacheCreator, string(vmi.UID))
+		diskPid, err := launcherPidCache.Read()
 		if err != nil {
 			return err
 		}
@@ -110,11 +107,11 @@ func (c *NetConf) Setup(vmi *v1.VirtualMachineInstance, networks []v1.Network, l
 				return fmt.Errorf("netconf teardown for replaced launcher pod failed: %w", err)
 			}
 		}
-		if err := writePersistedLauncherPid(string(vmi.UID), launcherPid); err != nil {
+		if err := launcherPidCache.Write(launcherPid); err != nil {
 			return err
 		}
-		cache := NewConfigStateCache(string(vmi.UID), c.cacheCreator)
-		configStateCache, err := upgradeConfigStateCache(&cache, networks, c.cacheCreator, string(vmi.UID))
+		stateCache := NewConfigStateCache(string(vmi.UID), c.cacheCreator)
+		configStateCache, err := upgradeConfigStateCache(&stateCache, networks, c.cacheCreator, string(vmi.UID))
 		if err != nil {
 			return err
 		}
@@ -185,43 +182,6 @@ func (c *NetConf) Teardown(vmi *v1.VirtualMachineInstance) error {
 	podCache := cache.NewPodInterfaceCache(c.cacheCreator, string(vmi.UID))
 	if err := podCache.Remove(); err != nil {
 		return fmt.Errorf("teardown failed, err: %w", err)
-	}
-	_ = removePersistedLauncherPid(string(vmi.UID))
-
-	return nil
-}
-
-func persistedLauncherPidPath(vmiUID string) string {
-	return filepath.Join(util.VirtPrivateDir, "network-info-cache", vmiUID, ".launcher-pid")
-}
-
-func readPersistedLauncherPid(vmiUID string) (int, error) {
-	data, err := os.ReadFile(persistedLauncherPidPath(vmiUID))
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return 0, nil
-		}
-		return 0, err
-	}
-	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
-	if err != nil {
-		return 0, nil
-	}
-	return pid, nil
-}
-
-func writePersistedLauncherPid(vmiUID string, launcherPid int) error {
-	path := persistedLauncherPidPath(vmiUID)
-	if err := os.MkdirAll(filepath.Dir(path), 0750); err != nil {
-		return err
-	}
-	return os.WriteFile(path, []byte(strconv.Itoa(launcherPid)), 0640)
-}
-
-func removePersistedLauncherPid(vmiUID string) error {
-	err := os.Remove(persistedLauncherPidPath(vmiUID))
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
 	}
 	return nil
 }
