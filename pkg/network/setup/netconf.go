@@ -90,14 +90,13 @@ func (c *NetConf) Setup(vmi *v1.VirtualMachineInstance, networks []v1.Network, l
 	state, ok := c.state[string(vmi.UID)]
 	cachedPid := c.statePid[string(vmi.UID)]
 	c.configStateMutex.RUnlock()
+	launcherPidCache := cache.NewLauncherPidCache(c.cacheCreator, string(vmi.UID))
 	if ok && cachedPid != launcherPid {
 		if err := c.Teardown(vmi); err != nil {
 			return fmt.Errorf("netconf teardown for replaced launcher pod failed: %w", err)
 		}
 		ok = false
-	}
-	if !ok {
-		launcherPidCache := cache.NewLauncherPidCache(c.cacheCreator, string(vmi.UID))
+	} else if !ok {
 		diskPid, err := launcherPidCache.Read()
 		if err != nil {
 			return err
@@ -107,6 +106,8 @@ func (c *NetConf) Setup(vmi *v1.VirtualMachineInstance, networks []v1.Network, l
 				return fmt.Errorf("netconf teardown for replaced launcher pod failed: %w", err)
 			}
 		}
+	}
+	if !ok {
 		if err := launcherPidCache.Write(launcherPid); err != nil {
 			return err
 		}
