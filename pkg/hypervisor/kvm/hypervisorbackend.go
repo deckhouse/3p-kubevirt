@@ -193,6 +193,23 @@ func AddDisksOverheads(vmi *v1.VirtualMachineInstance, overallOverhead *resource
 
 	overheadValue := resource.MustParse("60Mi")
 
+	if vmi.IsCPUFractioned() {
+		if vmi.IsCPUGuaranteed() {
+			// Add overhead for requests and limits for the domain with guaranteed CPU cores.
+			if overallOverhead != nil {
+				overallOverhead.Add(overheadValue)
+			}
+		} else {
+			// Add overhead only for memory limits if CPU cores are not guaranteed (domain CPU requests are not equal to limits).
+			if limitOnlyOverhead != nil {
+				limitOnlyOverhead.Add(overheadValue)
+			}
+		}
+		return
+	}
+
+	// Previous DVP implementation: virtualization-controller specifies explicit resources in VM spec.
+	// TODO: remove this section after full migration to hotpluggable resources spec generator in DVP.
 	reqCPU := vmi.Spec.Domain.Resources.Requests.Cpu()
 	limitCPU := vmi.Spec.Domain.Resources.Limits.Cpu()
 	if reqCPU != nil && limitCPU != nil {

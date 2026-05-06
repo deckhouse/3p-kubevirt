@@ -1863,13 +1863,15 @@ func (t *TemplateService) VMIResourcePredicates(vmi *v1.VirtualMachineInstance, 
 			NewVMIResourceRule(doesVMIRequireFractionCPU, WithCPUFractionRequests(vmi, cpuFraction)),
 			NewVMIResourceRule(hasHugePages, WithHugePages(vmi.Spec.Domain.Memory, memoryOverhead)),
 			NewVMIResourceRule(not(hasHugePages), WithMemoryOverhead(vmi.Spec.Domain.Resources, memoryOverhead)),
+			NewVMIResourceRule(func(vmi *v1.VirtualMachineInstance) bool {
+				return true
+			}, EnsureMemoryLimits()),
 			NewVMIResourceRule(func(_ *v1.VirtualMachineInstance) bool {
 				return memoryLimitsOverhead.Value() > 0
 			}, WithMemoryLimitsOverhead(memoryLimitsOverhead)),
-			NewVMIResourceRule(t.doesVMIRequireAutoMemoryLimits, WithAutoMemoryLimits(vmi.Namespace, t.namespaceStore)),
-			NewVMIResourceRule(func(*v1.VirtualMachineInstance) bool {
-				return true
-			}, EnsureMemoryLimits()),
+			// Memory limits are set earlier with EnsureMemoryLimits. Auto memory limiting with ratio become redundant.
+			// TODO rethink to re-enable it in the future: just need to find proper distinguisher between "vm needs ratio based autolimit" and "vm requires limits equal to requests".
+			// NewVMIResourceRule(t.doesVMIRequireAutoMemoryLimits, WithAutoMemoryLimits(vmi.Namespace, t.namespaceStore)),
 			NewVMIResourceRule(func(*v1.VirtualMachineInstance) bool {
 				return len(networkToResourceMap) > 0
 			}, WithNetworkResources(networkToResourceMap)),
