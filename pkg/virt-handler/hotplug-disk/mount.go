@@ -742,9 +742,6 @@ func (m *volumeMounter) Unmount(vmi *v1.VirtualMachineInstance, cgroupManager cg
 		for _, entry := range record.MountTargetEntries {
 			fd, err := safepath.NewFileNoFollow(entry.TargetFile)
 			if err != nil {
-				if errors.Is(err, os.ErrNotExist) {
-					continue
-				}
 				return err
 			}
 			fd.Close()
