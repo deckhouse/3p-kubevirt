@@ -2015,10 +2015,26 @@ func checkIfDiskReadyToUseFunc(filename string) (bool, error) {
 	return true, nil
 }
 
+// diskKey returns a stable identity for a Disk. Prefers the user-defined alias,
+// then the hotplug source-path basename, and falls back to target.device for
+// non-hotplug disks. Target letters can shift between hotplug attachment pod
+// rotations, so they must not be used to match the same disk across syncs.
+func diskKey(disk api.Disk) string {
+	if disk.Alias != nil {
+		if name := disk.Alias.GetName(); name != "" {
+			return name
+		}
+	}
+	if ds := disksource.Resolve(disk); ds.IsHotplugDisk() {
+		return filepath.Base(ds.BackendPath())
+	}
+	return disk.Target.Device
+}
+
 func getDetachedDisks(oldDisks, newDisks []api.Disk) []api.Disk {
 	newDiskMap := make(map[string]api.Disk)
 	for _, disk := range newDisks {
-		newDiskMap[disk.Target.Device] = disk
+		newDiskMap[diskKey(disk)] = disk
 	}
 	res := make([]api.Disk, 0)
 	for _, oldDisk := range oldDisks {
@@ -2029,7 +2045,7 @@ func getDetachedDisks(oldDisks, newDisks []api.Disk) []api.Disk {
 		if oldDisk.Target.Bus != "" && oldDisk.Target.Bus != v1.DiskBusVirtio && oldDisk.Target.Bus != v1.DiskBusSCSI {
 			continue
 		}
-		if _, ok := newDiskMap[oldDisk.Target.Device]; !ok {
+		if _, ok := newDiskMap[diskKey(oldDisk)]; !ok {
 			// This disk got detached, add it to the list
 			res = append(res, oldDisk)
 		}
@@ -2040,7 +2056,7 @@ func getDetachedDisks(oldDisks, newDisks []api.Disk) []api.Disk {
 func getAttachedDisks(oldDisks, newDisks []api.Disk) []api.Disk {
 	oldDiskMap := make(map[string]api.Disk)
 	for _, disk := range oldDisks {
-		oldDiskMap[disk.Target.Device] = disk
+		oldDiskMap[diskKey(disk)] = disk
 	}
 	res := make([]api.Disk, 0)
 	for _, newDisk := range newDisks {
@@ -2052,7 +2068,7 @@ func getAttachedDisks(oldDisks, newDisks []api.Disk) []api.Disk {
 		if newDisk.Target.Bus != "" && newDisk.Target.Bus != v1.DiskBusVirtio && newDisk.Target.Bus != v1.DiskBusSCSI {
 			continue
 		}
-		if _, ok := oldDiskMap[newDisk.Target.Device]; !ok {
+		if _, ok := oldDiskMap[diskKey(newDisk)]; !ok {
 			// This disk got attached, add it to the list
 			res = append(res, newDisk)
 		}
@@ -2061,6 +2077,9 @@ func getAttachedDisks(oldDisks, newDisks []api.Disk) []api.Disk {
 }
 
 func getUpdatedDisks(oldDisks, newDisks []api.Disk) []api.Disk {
+	// A cd-rom media change swaps the source while the target stays put, so
+	// disks are matched by target device here: diskKey would key hotplug
+	// disks by their source basename and never pair the old and new disk.
 	newDiskMap := make(map[string]api.Disk)
 	for _, disk := range newDisks {
 		newDiskMap[disk.Target.Device] = disk
