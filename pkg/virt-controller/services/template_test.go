@@ -5248,6 +5248,8 @@ var _ = Describe("Template", func() {
 
 				When("vmi does not have memory limits set", func() {
 					It("should automatically set limits using the default ratio", func() {
+						Skip("Memory limit is always set by EnsureMemoryLimits, auto memory limiting is redundant")
+
 						vmi := v1.VirtualMachineInstance{
 							ObjectMeta: metav1.ObjectMeta{
 								Name:      "testvmi",
@@ -5272,6 +5274,8 @@ var _ = Describe("Template", func() {
 
 					When("there is the custom ratio label in the namespace", func() {
 						DescribeTable("should set limits", func(ratioLabelValue string, expectedUsedRatio float64) {
+							Skip("Memory limit is always set by EnsureMemoryLimits, auto memory limiting is redundant")
+
 							namespaceWithCustomMemoryRatio := k8sv1.Namespace{
 								TypeMeta: metav1.TypeMeta{
 									Kind: "Namespace",
@@ -5329,7 +5333,7 @@ var _ = Describe("Template", func() {
 			})
 
 			Context("when the creation namespace have a resource quota without memory limits associated to it", func() {
-				It("should not set memory limits", func() {
+				It("should set memory limits to requests", func() {
 					vmi := v1.VirtualMachineInstance{
 						ObjectMeta: metav1.ObjectMeta{
 							Name:      "testvmi",
@@ -5348,7 +5352,8 @@ var _ = Describe("Template", func() {
 					pod, err := svc.RenderLaunchManifest(&vmi)
 					Expect(err).ToNot(HaveOccurred())
 					Expect(pod.Spec.Containers[0].Name).To(Equal("d8v-compute"))
-					Expect(pod.Spec.Containers[0].Resources.Limits.Memory().Value()).To(BeZero())
+					expectedValue := pod.Spec.Containers[0].Resources.Requests.Memory().Value()
+					Expect(pod.Spec.Containers[0].Resources.Limits.Memory().Value()).To(BeEquivalentTo(expectedValue))
 				})
 			})
 		})
