@@ -314,7 +314,7 @@ var _ = Describe("HostDisk", func() {
 				)
 
 				By("Executing CreateHostDisks which should not create a disk.img")
-				err := hostDiskCreator.Create(vmi, true)
+				err := hostDiskCreator.Create(vmi, false)
 				Expect(err).NotTo(HaveOccurred())
 
 				// check if disk.img has the same modification time
