@@ -922,7 +922,12 @@ func (t *templateService) newResourceRenderer(vmi *v1.VirtualMachineInstance, ne
 		return nil, err
 	}
 
-	options := append(baseOptions, t.VMIResourcePredicates(vmi, networkToResourceMap).Apply()...)
+	cpuFraction, err := parseCPUFraction(vmi)
+	if err != nil {
+		return nil, err
+	}
+
+	options := append(baseOptions, t.VMIResourcePredicates(vmi, networkToResourceMap, cpuFraction).Apply()...)
 	return NewResourceRenderer(vmiResources.Limits, vmiResources.Requests, options...), nil
 }
 
@@ -1477,6 +1482,23 @@ func addDisksOverheads(vmi *v1.VirtualMachineInstance, overallOverhead *resource
 
 	overheadValue := resource.MustParse("60Mi")
 
+	if vmi.IsCPUFractioned() {
+		if vmi.IsCPUGuaranteed() {
+			// Add overhead for requests and limits for the domain with guaranteed CPU cores.
+			if overallOverhead != nil {
+				overallOverhead.Add(overheadValue)
+			}
+		} else {
+			// Add overhead only for memory limits if CPU cores are not guaranteed (domain CPU requests are not equal to limits).
+			if limitOnlyOverhead != nil {
+				limitOnlyOverhead.Add(overheadValue)
+			}
+		}
+		return
+	}
+
+	// Previous DVP implementation: virtualization-controller specifies explicit resources in VM spec.
+	// TODO: remove this section after full migration to hotpluggable resources spec generator in DVP.
 	reqCPU := vmi.Spec.Domain.Resources.Requests.Cpu()
 	limitCPU := vmi.Spec.Domain.Resources.Limits.Cpu()
 	if reqCPU != nil && limitCPU != nil {
@@ -1740,7 +1762,7 @@ func (t *templateService) doesVMIRequireAutoCPULimits(vmi *v1.VirtualMachineInst
 	return false
 }
 
-func (t *templateService) VMIResourcePredicates(vmi *v1.VirtualMachineInstance, networkToResourceMap map[string]string) VMIResourcePredicates {
+func (t *templateService) VMIResourcePredicates(vmi *v1.VirtualMachineInstance, networkToResourceMap map[string]string, cpuFraction int) VMIResourcePredicates {
 	// Set default with vmi Architecture. compatible with multi-architecture hybrid environments
 	vmiCPUArch := vmi.Spec.Architecture
 	if vmiCPUArch == "" {
@@ -1772,13 +1794,20 @@ func (t *templateService) VMIResourcePredicates(vmi *v1.VirtualMachineInstance, 
 				return t.clusterConfig.GetMemoryOvercommit() != 100
 			}, WithMemoryOvercommit(t.clusterConfig.GetMemoryOvercommit())),
 			NewVMIResourceRule(doesVMIRequireDedicatedCPU, WithCPUPinning(vmi, vmi.Annotations, additionalCPUs)),
-			NewVMIResourceRule(not(doesVMIRequireDedicatedCPU), WithoutDedicatedCPU(vmi, t.clusterConfig.GetCPUAllocationRatio(), withCPULimits)),
+			NewVMIResourceRule(doesVMIRequireFractionCPU, WithCPUFractionRequests(vmi, cpuFraction)),
+			// Apply "auto CPU constraints" if there is no explicit CPU resources constraints in VMI.
+			NewVMIResourceRule(not(doesSpecifyAnyCPUConstraints), WithoutDedicatedCPU(vmi, t.clusterConfig.GetCPUAllocationRatio(), withCPULimits)),
 			NewVMIResourceRule(hasHugePages, WithHugePages(vmi.Spec.Domain.Memory, memoryOverhead)),
 			NewVMIResourceRule(not(hasHugePages), WithMemoryOverhead(vmi.Spec.Domain.Resources, memoryOverhead)),
+			NewVMIResourceRule(func(vmi *v1.VirtualMachineInstance) bool {
+				return true
+			}, EnsureMemoryLimits()),
 			NewVMIResourceRule(func(_ *v1.VirtualMachineInstance) bool {
 				return memoryLimitsOverhead.Value() > 0
 			}, WithMemoryLimitsOverhead(memoryLimitsOverhead)),
-			NewVMIResourceRule(t.doesVMIRequireAutoMemoryLimits, WithAutoMemoryLimits(vmi.Namespace, t.namespaceStore)),
+			// Memory limits are set earlier with EnsureMemoryLimits. Auto memory limiting with ratio become redundant.
+			// TODO rethink to re-enable it in the future: just need to find proper distinguisher between "vm needs ratio based autolimit" and "vm requires limits equal to requests".
+			// NewVMIResourceRule(t.doesVMIRequireAutoMemoryLimits, WithAutoMemoryLimits(vmi.Namespace, t.namespaceStore)),
 			NewVMIResourceRule(func(*v1.VirtualMachineInstance) bool {
 				return len(networkToResourceMap) > 0
 			}, WithNetworkResources(networkToResourceMap)),
