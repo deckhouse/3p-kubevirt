@@ -42,11 +42,10 @@ func (s InfoServer) Info(_ context.Context, _ *hooksInfo.InfoParams) (*hooksInfo
 }
 
 type V1alpha3Server struct {
-	Done      chan struct{}
-	BPFObj    string
-	TapName   string
-	VethLocal string
-	VethPeer  string
+	Done     chan struct{}
+	BPFObj   string
+	TapName  string
+	PodIface string
 
 	once     sync.Once
 	setup    *setupResult
@@ -54,7 +53,7 @@ type V1alpha3Server struct {
 }
 
 type setupResult struct {
-	tapIdx, vethIdx int
+	tapIdx, podIdx int
 }
 
 func (s *V1alpha3Server) ensureNetAndBPF() error {
@@ -71,26 +70,22 @@ func (s *V1alpha3Server) ensureNetAndBPF() error {
 		if tap == "" {
 			tap = netsetup.DefaultTapName
 		}
-		vL := s.VethLocal
-		if vL == "" {
-			vL = netsetup.DefaultVethLocal
-		}
-		vP := s.VethPeer
-		if vP == "" {
-			vP = netsetup.DefaultVethPeerName
+		pod := s.PodIface
+		if pod == "" {
+			pod = netsetup.DefaultPodIface
 		}
 
-		tapIdx, vethIdx, err := netsetup.EnsureBridgeWiring(tap, vL, vP)
+		tapIdx, podIdx, err := netsetup.EnsureWiring(tap, pod)
 		if err != nil {
 			s.setupErr = fmt.Errorf("net setup: %w", err)
 			return
 		}
-		if err := bpfattach.Attach(obj, tap, vL, tapIdx, vethIdx); err != nil {
+		if err := bpfattach.Attach(obj, tap, pod, tapIdx, podIdx); err != nil {
 			s.setupErr = fmt.Errorf("bpf attach: %w", err)
 			return
 		}
-		s.setup = &setupResult{tapIdx: tapIdx, vethIdx: vethIdx}
-		log.Log.Infof("bpf-bridge-binding: tap %s idx %d, veth %s idx %d", tap, tapIdx, vL, vethIdx)
+		s.setup = &setupResult{tapIdx: tapIdx, podIdx: podIdx}
+		log.Log.Infof("bpf-bridge-binding: tap %s idx %d, pod %s idx %d", tap, tapIdx, pod, podIdx)
 	})
 	return s.setupErr
 }
@@ -136,11 +131,11 @@ func (s *V1alpha3Server) Shutdown(_ context.Context, _ *hooksV1alpha3.ShutdownPa
 	if tap == "" {
 		tap = netsetup.DefaultTapName
 	}
-	vL := s.VethLocal
-	if vL == "" {
-		vL = netsetup.DefaultVethLocal
+	pod := s.PodIface
+	if pod == "" {
+		pod = netsetup.DefaultPodIface
 	}
-	bpfattach.Detach(tap, vL)
+	bpfattach.Detach(tap, pod)
 	log.Log.Info("Shutdown bpf-bridge network binding")
 	select {
 	case s.Done <- struct{}{}:

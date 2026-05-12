@@ -6,9 +6,12 @@
 #include <linux/ip.h>
 #include <bpf/bpf_helpers.h>
 
+// bridge_ports holds the L2 endpoints both living in the pod netns:
+//   tap_ifindex - the TAP attached to the VM (kvbpf0 by default)
+//   pod_ifindex - the pod-side interface provided by CNI (eth0 by default)
 struct bridge_ports {
 	__u32 tap_ifindex;
-	__u32 veth_ifindex;
+	__u32 pod_ifindex;
 };
 
 struct {
@@ -23,16 +26,17 @@ int tc_l2_proxy(struct __sk_buff *ctx)
 {
 	__u32 k = 0;
 	struct bridge_ports *cfg = bpf_map_lookup_elem(&bridge_cfg, &k);
-	if (!cfg || cfg->tap_ifindex == 0 || cfg->veth_ifindex == 0)
+	if (!cfg || cfg->tap_ifindex == 0 || cfg->pod_ifindex == 0)
 		return TC_ACT_OK;
 
 	int in_ifindex = ctx->ifindex;
 
-	if (in_ifindex == cfg->tap_ifindex) {
-		bpf_skb_change_type(ctx, PACKET_HOST);
-		return bpf_redirect_peer(cfg->veth_ifindex, 0);
-	}
-	if (in_ifindex == cfg->veth_ifindex)
+	// VM -> outside: frame entered TAP ingress, redirect to pod iface egress.
+	if (in_ifindex == cfg->tap_ifindex)
+		return bpf_redirect(cfg->pod_ifindex, 0);
+
+	// Outside -> VM: frame entered pod iface ingress, redirect to TAP egress.
+	if (in_ifindex == cfg->pod_ifindex)
 		return bpf_redirect(cfg->tap_ifindex, 0);
 
 	return TC_ACT_OK;

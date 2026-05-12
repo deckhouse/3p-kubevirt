@@ -13,13 +13,14 @@ import (
 const pinSubdir = "kubevirt-bpf-bridge-binding"
 
 type bridgePorts struct {
-	TapIfindex  uint32
-	VethIfindex uint32
+	TapIfindex uint32
+	PodIfindex uint32
 }
 
-// Attach loads bpf_bridge.o, writes tap/veth ifindexes into bridge_cfg, pins prog + map,
-// and attaches the TC program via tc (clsact ingress) on both interfaces.
-func Attach(objPath string, tapName, vethName string, tapIdx, vethIdx int) error {
+// Attach loads bpf_bridge.o, writes tap/pod ifindexes into bridge_cfg, pins prog + map,
+// and attaches the TC program via tc (clsact ingress) on both interfaces in the
+// current (pod) network namespace.
+func Attach(objPath string, tapName, podName string, tapIdx, podIdx int) error {
 	spec, err := ebpf.LoadCollectionSpec(objPath)
 	if err != nil {
 		return fmt.Errorf("load BPF spec: %w", err)
@@ -42,8 +43,8 @@ func Attach(objPath string, tapName, vethName string, tapIdx, vethIdx int) error
 
 	k := uint32(0)
 	val := bridgePorts{
-		TapIfindex:  uint32(tapIdx),
-		VethIfindex: uint32(vethIdx),
+		TapIfindex: uint32(tapIdx),
+		PodIfindex: uint32(podIdx),
 	}
 	if err := cfgMap.Update(k, val, ebpf.UpdateAny); err != nil {
 		return fmt.Errorf("update bridge_cfg: %w", err)
@@ -67,7 +68,7 @@ func Attach(objPath string, tapName, vethName string, tapIdx, vethIdx int) error
 		return fmt.Errorf("pin program: %w", err)
 	}
 
-	for _, dev := range []string{tapName, vethName} {
+	for _, dev := range []string{tapName, podName} {
 		if err := ensureClsact(dev); err != nil {
 			return err
 		}

@@ -7,66 +7,50 @@ import (
 )
 
 const (
-	DefaultTapName      = "kvbpf0"
-	DefaultVethLocal    = "kvbpf-veth"
-	DefaultVethPeerName = "kvbpf-peer"
+	DefaultTapName  = "kvbpf0"
+	DefaultPodIface = "eth0"
 )
 
-// EnsureBridgeWiring creates a persistent TAP and a veth pair in the current network namespace.
-// BPF attaches to the TAP and to the veth leg named DefaultVethLocal; the peer is available for
-// whatever upstream wiring the embedding environment expects.
-func EnsureBridgeWiring(tapName, vethLocal, vethPeer string) (tapIdx, vethIdx int, err error) {
+// EnsureWiring creates a persistent TAP in the current (pod) network namespace and
+// returns the ifindexes of both the TAP and the pod-side interface (e.g. eth0)
+// to be wired together by the BPF L2 proxy program.
+//
+// The caller is expected to attach the BPF program to TC ingress on both devices
+// in the same netns; no veth pair and no host-side wiring is created here.
+func EnsureWiring(tapName, podIface string) (tapIdx, podIdx int, err error) {
 	if tapName == "" {
 		tapName = DefaultTapName
 	}
-	if vethLocal == "" {
-		vethLocal = DefaultVethLocal
-	}
-	if vethPeer == "" {
-		vethPeer = DefaultVethPeerName
+	if podIface == "" {
+		podIface = DefaultPodIface
 	}
 
-	if err := ensureVeth(vethLocal, vethPeer); err != nil {
-		return 0, 0, err
+	pod, err := netlink.LinkByName(podIface)
+	if err != nil {
+		return 0, 0, fmt.Errorf("lookup pod interface %q: %w", podIface, err)
 	}
+
 	if err := ensureTAP(tapName); err != nil {
 		return 0, 0, err
 	}
-
-	tapLink, err := netlink.LinkByName(tapName)
+	tap, err := netlink.LinkByName(tapName)
 	if err != nil {
 		return 0, 0, fmt.Errorf("lookup tap %q: %w", tapName, err)
 	}
-	vethLink, err := netlink.LinkByName(vethLocal)
-	if err != nil {
-		return 0, 0, fmt.Errorf("lookup veth %q: %w", vethLocal, err)
-	}
 
-	for _, l := range []netlink.Link{tapLink, vethLink} {
-		if err := netlink.LinkSetUp(l); err != nil {
-			return 0, 0, fmt.Errorf("set %q up: %w", l.Attrs().Name, err)
+	// Match TAP MTU to the pod-side interface so frames are not truncated when
+	// redirected between them by the BPF program.
+	if podMTU := pod.Attrs().MTU; podMTU > 0 && tap.Attrs().MTU != podMTU {
+		if err := netlink.LinkSetMTU(tap, podMTU); err != nil {
+			return 0, 0, fmt.Errorf("set %q mtu %d: %w", tapName, podMTU, err)
 		}
 	}
-	peer, err := netlink.LinkByName(vethPeer)
-	if err == nil {
-		_ = netlink.LinkSetUp(peer)
+
+	if err := netlink.LinkSetUp(tap); err != nil {
+		return 0, 0, fmt.Errorf("set %q up: %w", tapName, err)
 	}
 
-	return tapLink.Attrs().Index, vethLink.Attrs().Index, nil
-}
-
-func ensureVeth(local, peer string) error {
-	if _, err := netlink.LinkByName(local); err == nil {
-		return nil
-	}
-	v := &netlink.Veth{
-		LinkAttrs: netlink.LinkAttrs{Name: local},
-		PeerName:  peer,
-	}
-	if err := netlink.LinkAdd(v); err != nil {
-		return fmt.Errorf("add veth %s <-> %s: %w", local, peer, err)
-	}
-	return nil
+	return tap.Attrs().Index, pod.Attrs().Index, nil
 }
 
 func ensureTAP(name string) error {

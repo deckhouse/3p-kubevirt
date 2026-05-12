@@ -1,6 +1,8 @@
 /*
-Network binding sidecar for KubeVirt: creates TAP + veth in the pod netns, loads bpf_bridge.o,
-attaches TC (clsact ingress) on TAP and veth, and sets libvirt ethernet target to the TAP.
+Network binding sidecar for KubeVirt: creates a TAP in the pod netns, loads bpf_bridge.o,
+attaches TC (clsact ingress) on the TAP and the pod-side interface (eth0 by default) so
+the BPF program acts as an L2 proxy between them, and sets the libvirt ethernet target
+to the TAP.
 */
 package main
 
@@ -25,8 +27,7 @@ const hookSocket = "bpfbridge.sock"
 func main() {
 	bpfObj := flag.String("bpf-obj", envOrDefault("BPF_BRIDGE_OBJ", ""), "path to compiled bpf_bridge.o (default: /opt/network-bpf-bridge-binding/bpf_bridge.o)")
 	tapName := flag.String("tap-name", envOrDefault("BPF_BRIDGE_TAP", ""), "TAP interface name (default kvbpf0)")
-	vethLocal := flag.String("veth-local", envOrDefault("BPF_BRIDGE_VETH", ""), "veth leg for BPF (default kvbpf-veth)")
-	vethPeer := flag.String("veth-peer", envOrDefault("BPF_BRIDGE_VETH_PEER", ""), "veth peer name (default kvbpf-peer)")
+	podIface := flag.String("pod-iface", envOrDefault("BPF_BRIDGE_POD_IFACE", ""), "pod-side interface bridged with the TAP (default eth0)")
 	flag.Parse()
 
 	socketPath := filepath.Join(hooks.HookSocketsSharedDirectory, hookSocket)
@@ -42,11 +43,10 @@ func main() {
 
 	shutdownChan := make(chan struct{})
 	hooksV1alpha3.RegisterCallbacksServer(grpcServer, &srv.V1alpha3Server{
-		Done:      shutdownChan,
-		BPFObj:    *bpfObj,
-		TapName:   *tapName,
-		VethLocal: *vethLocal,
-		VethPeer:  *vethPeer,
+		Done:     shutdownChan,
+		BPFObj:   *bpfObj,
+		TapName:  *tapName,
+		PodIface: *podIface,
 	})
 	log.Log.Infof("bpf-bridge-binding sidecar on %s (API v1alpha3)", socketPath)
 	srv.Serve(grpcServer, socket, shutdownChan)
