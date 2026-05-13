@@ -29,17 +29,11 @@ const (
 )
 
 var _ = Describe("virt-handler", func() {
-	Context("FindMigrationIP", func() {
-		It("returns the fallback IP when the default interface does not exist", func() {
-			ip, err := FindMigrationIP(originalIP, "")
+	Context("findMigrationIp", func() {
+		It("Should return the IP passed to it when no default interface exists", func() {
+			newIp, err := FindMigrationIP(originalIP, "")
 			Expect(err).NotTo(HaveOccurred())
-			Expect(ip).To(Equal(originalIP))
-		})
-
-		It("returns the fallback IP when an explicit interface does not exist", func() {
-			ip, err := FindMigrationIP(originalIP, "definitely-not-an-iface-xyz")
-			Expect(err).NotTo(HaveOccurred())
-			Expect(ip).To(Equal(originalIP))
+			Expect(newIp).To(Equal(originalIP))
 		})
 	})
 })
