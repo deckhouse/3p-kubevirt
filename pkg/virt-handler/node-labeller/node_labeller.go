@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -44,6 +45,8 @@ import (
 	"kubevirt.io/kubevirt/pkg/apimachinery/patch"
 	virtconfig "kubevirt.io/kubevirt/pkg/virt-config"
 )
+
+const hackOverrideTSCFrequencyLabel = "hack.override.cpu-timer/tsc-frequency"
 
 var nodeLabellerLabels = []string{
 	kubevirtv1.CPUFeatureLabel,
@@ -264,6 +267,19 @@ func (n *NodeLabeller) prepareLabels(node *v1.Node) map[string]string {
 
 	if n.hasTSCCounter() {
 		newLabels[kubevirtv1.CPUTimerLabel+"tsc-frequency"] = fmt.Sprintf("%d", n.cpuCounter.Frequency)
+		{
+			// Override node tsc frequency if override label is present.
+			// TODO remove this section after testing.
+			value, exists := node.Labels[hackOverrideTSCFrequencyLabel]
+			if exists && value != "" {
+				freq, err := strconv.ParseInt(value, 10, 64)
+				if err != nil {
+					n.logger.Warningf("failed to parse TSC frequency override label, using capabilities value: invalid value %q", value)
+				} else if freq > 0 {
+					newLabels[kubevirtv1.CPUTimerLabel+"tsc-frequency"] = fmt.Sprintf("%d", freq)
+				}
+			}
+		}
 		newLabels[kubevirtv1.CPUTimerLabel+"tsc-scalable"] = fmt.Sprintf("%t", n.cpuCounter.Scaling == "yes")
 	}
 
