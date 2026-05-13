@@ -80,6 +80,24 @@ var _ = Describe("TSC", func() {
 			[]int64{123123, 123120, 123130},
 			[]int64{2, 4},
 		),
+		Entry(
+			"preserves already present compatible labels on a non-scalable node",
+			[]int64{123120},
+			[]int64{123123, 123130},
+			int64(123123),
+			false,
+			[]int64{123123, 123120, 123130},
+			[]int64{},
+		),
+		Entry(
+			"removes already present incompatible labels on a non-scalable node",
+			[]int64{123120},
+			[]int64{123123, 200000},
+			int64(123123),
+			false,
+			[]int64{123123, 123120},
+			[]int64{200000},
+		),
 	)
 
 	Context("needs to be set when", func() {

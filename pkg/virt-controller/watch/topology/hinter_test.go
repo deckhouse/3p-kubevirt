@@ -61,6 +61,57 @@ var _ = Describe("Hinter", func() {
 		))
 	})
 
+	It("should prefer a compatible frequency already in use over a drifted cluster minimum", func() {
+		hinter := hinterWithNodes(
+			NodeWithTSC("node1", 3599973000, false),
+			NodeWithTSC("node2", 3599996000, false),
+		)
+		hinter.vmiStore = &cache.FakeCustomStore{ListFunc: func() []interface{} {
+			return VMIsToObjects(
+				vmiWithTSCFrequencyOnNode("existing", 3599975000, "node2"),
+			)
+		}}
+		vmi := vmiWithTSCFrequencyOnNode("newvmi", 12, "oldnode")
+		g.Expect(hinter.TopologyHintsForVMI(vmi)).To(g.Equal(
+			&virtv1.TopologyHints{
+				TSCFrequency: pointer.P(int64(3599975000)),
+			},
+		))
+	})
+
+	It("should prefer the lowest compatible measured frequency that exists on at least two nodes when no frequencies are in use", func() {
+		hinter := hinterWithNodes(
+			NodeWithTSC("node1", 3599973000, false),
+			NodeWithTSC("node2", 3599975000, false),
+			NodeWithTSC("node3", 3599975000, false),
+			NodeWithTSC("node4", 3599996000, false),
+		)
+		vmi := vmiWithTSCFrequencyOnNode("newvmi", 12, "oldnode")
+		g.Expect(hinter.TopologyHintsForVMI(vmi)).To(g.Equal(
+			&virtv1.TopologyHints{
+				TSCFrequency: pointer.P(int64(3599975000)),
+			},
+		))
+	})
+
+	It("should fall back to the raw cluster minimum when no compatible frequency is in use", func() {
+		hinter := hinterWithNodes(
+			NodeWithTSC("node1", 3599973000, false),
+			NodeWithTSC("node2", 3599996000, false),
+		)
+		hinter.vmiStore = &cache.FakeCustomStore{ListFunc: func() []interface{} {
+			return VMIsToObjects(
+				vmiWithTSCFrequencyOnNode("existing", 3500000000, "node2"),
+			)
+		}}
+		vmi := vmiWithTSCFrequencyOnNode("newvmi", 12, "oldnode")
+		g.Expect(hinter.TopologyHintsForVMI(vmi)).To(g.Equal(
+			&virtv1.TopologyHints{
+				TSCFrequency: pointer.P(int64(3599973000)),
+			},
+		))
+	})
+
 	It("should frequencies in use on VMIs", func() {
 		hinter := hinterWithVMIs(
 			vmiWithTSCFrequencyOnNode("myvm", 100, "node1"),
