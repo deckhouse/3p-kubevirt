@@ -92,7 +92,7 @@ type MigrationTargetController struct {
 	hotplugVolumeMounter             hotplug_volume.VolumeMounter
 	queue                            workqueue.TypedRateLimitingInterface[string]
 	launcherClients                  launcher_clients.LauncherClientsManager
-	migrationIpAddress               string
+	podIpAddress                     string
 	migrationProxy                   migrationproxy.ProxyManager
 	netBindingPluginMemoryCalculator netBindingPluginMemoryCalculator
 	netConf                          netconf
@@ -112,7 +112,7 @@ func NewMigrationTargetController(
 	host string,
 	virtPrivateDir string,
 	kubeletPodsDir string,
-	migrationIpAddress string,
+	podIpAddress string,
 	launcherClients launcher_clients.LauncherClientsManager,
 	vmiInformer cache.SharedIndexInformer,
 	domainInformer cache.SharedInformer,
@@ -162,7 +162,7 @@ func NewMigrationTargetController(
 		hotplugVolumeMounter:             hotplug_volume.NewVolumeMounter(hotplugState, kubeletPodsDir, host),
 		queue:                            queue,
 		launcherClients:                  launcherClients,
-		migrationIpAddress:               migrationIpAddress,
+		podIpAddress:                     podIpAddress,
 		migrationProxy:                   migrationProxy,
 		netBindingPluginMemoryCalculator: netBindingPluginMemoryCalculator,
 		netConf:                          netConf,
@@ -201,6 +201,21 @@ func NewMigrationTargetController(
 
 	c.checksumCtrl = checksum_controller.NewController(vmiInformer, c.clientset)
 	return c, nil
+}
+
+func (c *MigrationTargetController) resolveMigrationIP() (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	node, err := c.clientset.CoreV1().Nodes().Get(ctx, c.host, metav1.GetOptions{})
+	if err != nil {
+		log.Log.Reason(err).Warningf("failed to get node %q for migration interface annotation lookup", c.host)
+		return c.podIpAddress, nil
+	}
+	ifaceName := node.Annotations[MigrationInterfaceNodeAnnotation]
+	if ifaceName == "" {
+		return c.podIpAddress, nil
+	}
+	return FindMigrationIP(c.podIpAddress, ifaceName)
 }
 
 func domainIsActiveOnTarget(domain *api.Domain) bool {
@@ -305,18 +320,19 @@ func (c *MigrationTargetController) updateStatus(vmi *v1.VirtualMachineInstance,
 	if vmi.Status.MigrationState != nil {
 		hostAddress = vmi.Status.MigrationState.TargetNodeAddress
 	}
-	if hostAddress != c.migrationIpAddress {
+	boundAddress := c.migrationProxy.GetTargetBindAddress(vmiUID)
+	if boundAddress != "" && hostAddress != boundAddress {
 		portsList := make([]string, 0, len(destSrcPortsMap))
 
 		for k := range destSrcPortsMap {
 			portsList = append(portsList, k)
 		}
 		portsStrList := strings.Trim(strings.Join(strings.Fields(fmt.Sprint(portsList)), ","), "[]")
-		c.recorder.Event(vmi, k8sv1.EventTypeNormal, v1.PreparingTarget.String(), fmt.Sprintf("Migration Target is listening at %s, on ports: %s", c.migrationIpAddress, portsStrList))
-		vmi.Status.MigrationState.TargetNodeAddress = c.migrationIpAddress
+		c.recorder.Event(vmi, k8sv1.EventTypeNormal, v1.PreparingTarget.String(), fmt.Sprintf("Migration Target is listening at %s, on ports: %s", boundAddress, portsStrList))
+		vmi.Status.MigrationState.TargetNodeAddress = boundAddress
 		vmi.Status.MigrationState.TargetDirectMigrationNodePorts = destSrcPortsMap
 		if vmi.Status.MigrationState.TargetState != nil {
-			vmi.Status.MigrationState.TargetState.NodeAddress = pointer.P(c.migrationIpAddress)
+			vmi.Status.MigrationState.TargetState.NodeAddress = pointer.P(boundAddress)
 			vmi.Status.MigrationState.TargetState.DirectMigrationNodePorts = destSrcPortsMap
 		}
 	}
@@ -629,7 +645,11 @@ func (c *MigrationTargetController) handleTargetMigrationProxy(vmi *v1.VirtualMa
 	if err != nil {
 		return err
 	}
-	err = c.migrationProxy.StartTargetListener(vmiUID, migrationTargetSockets)
+	bindAddress, err := c.resolveMigrationIP()
+	if err != nil {
+		return fmt.Errorf("resolve migration IP for vmi %s: %w", vmiUID, err)
+	}
+	err = c.migrationProxy.StartTargetListener(vmiUID, migrationTargetSockets, bindAddress)
 	if err != nil {
 		return err
 	}

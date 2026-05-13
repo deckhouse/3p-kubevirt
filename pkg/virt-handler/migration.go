@@ -22,20 +22,18 @@ package virthandler
 import (
 	"fmt"
 	"net"
-
-	v1 "kubevirt.io/api/core/v1"
 )
 
-// FindMigrationIP returns the IP to bind live migration to. When ifaceName is
-// empty, the upstream default v1.MigrationInterfaceName ("migration0") is
-// used. If the interface is not present, migrationIp is returned unchanged.
+// MigrationInterfaceNodeAnnotation is the Node annotation written by the
+// Deckhouse virtualization module to name a dedicated migration interface
+// resolved from a SystemNetwork CR (sdn module).
+const MigrationInterfaceNodeAnnotation = "virtualization.deckhouse.io/migration-iface"
+
+// FindMigrationIP returns the IP to bind live migration to.
 func FindMigrationIP(migrationIp, ifaceName string) (string, error) {
-	if ifaceName == "" {
-		ifaceName = v1.MigrationInterfaceName
-	}
 	ief, err := net.InterfaceByName(ifaceName)
 	if err != nil {
-		return migrationIp, nil
+		return migrationIp, fmt.Errorf("migration interface %q not present on host", ifaceName)
 	}
 	addrs, err := ief.Addrs()
 	if err != nil { // get addresses

@@ -344,23 +344,6 @@ func (app *virtHandlerApp) Run() {
 
 	go nodeLabellerController.Run(10, stop)
 
-	migrationIpAddress := app.PodIpAddress
-	// Optional dedicated migration interface from a Node annotation written by
-	// the Deckhouse virtualization module (sourced from a SystemNetwork CR).
-	migrationIfaceName := ""
-	nodeCtx, nodeCancel := context.WithTimeout(context.Background(), 30*time.Second)
-	node, getErr := app.virtCli.CoreV1().Nodes().Get(nodeCtx, app.HostOverride, metav1.GetOptions{})
-	nodeCancel()
-	if getErr != nil {
-		log.Log.Reason(getErr).Warningf("failed to get node %q for migration interface annotation lookup", app.HostOverride)
-	} else {
-		migrationIfaceName = node.Annotations["virtualization.deckhouse.io/migration-iface"]
-	}
-	migrationIpAddress, err = virthandler.FindMigrationIP(migrationIpAddress, migrationIfaceName)
-	if err != nil {
-		panic(err)
-	}
-
 	downwardMetricsManager := dmetricsmanager.NewDownwardMetricsManager(app.HostOverride)
 
 	launcherClientsManager := launcher_clients.NewLauncherClientsManager(app.VirtShareDir, podIsolationDetector)
@@ -389,7 +372,7 @@ func (app *virtHandlerApp) Run() {
 		}
 	}
 
-	migrationProxy := migrationproxy.NewMigrationProxyManager(migrationIpAddress, portRange, app.serverTLSConfig, app.clientTLSConfig, app.clusterConfig)
+	migrationProxy := migrationproxy.NewMigrationProxyManager(portRange, app.serverTLSConfig, app.clientTLSConfig, app.clusterConfig)
 
 	migrationSourceController, err := virthandler.NewMigrationSourceController(
 		recorder,
@@ -416,7 +399,7 @@ func (app *virtHandlerApp) Run() {
 		app.HostOverride,
 		app.VirtPrivateDir,
 		app.KubeletPodsDir,
-		migrationIpAddress,
+		app.PodIpAddress,
 		launcherClientsManager,
 		vmiTargetInformer,
 		domainSharedInformer,

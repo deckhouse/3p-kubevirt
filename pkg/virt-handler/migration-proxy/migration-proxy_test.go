@@ -162,8 +162,8 @@ var _ = Describe("MigrationProxy", func() {
 				config, _, _ := testutils.NewFakeClusterConfigUsingKVConfig(&v1.KubeVirtConfiguration{
 					MigrationConfiguration: migrationConfig,
 				})
-				manager := NewMigrationProxyManager("0.0.0.0", nil, tlsConfig, tlsConfig, config)
-				manager.StartTargetListener("mykey", []string{virtqemudSock, directSock})
+				manager := NewMigrationProxyManager(nil, tlsConfig, tlsConfig, config)
+				manager.StartTargetListener("mykey", []string{virtqemudSock, directSock}, "0.0.0.0")
 				destSrcPortMap := manager.GetTargetListenerPorts("mykey")
 				manager.StartSourceListener("mykey", "127.0.0.1", destSrcPortMap, tmpDir)
 
@@ -230,8 +230,8 @@ var _ = Describe("MigrationProxy", func() {
 				config, _, _ := testutils.NewFakeClusterConfigUsingKVConfig(&v1.KubeVirtConfiguration{
 					MigrationConfiguration: migrationConfig,
 				})
-				manager := NewMigrationProxyManager("0.0.0.0", nil, tlsConfig, tlsConfig, config)
-				err = manager.StartTargetListener(key1, []string{virtqemudSock, directSock})
+				manager := NewMigrationProxyManager(nil, tlsConfig, tlsConfig, config)
+				err = manager.StartTargetListener(key1, []string{virtqemudSock, directSock}, "0.0.0.0")
 				Expect(err).ShouldNot(HaveOccurred())
 				destSrcPortMap := manager.GetTargetListenerPorts(key1)
 				err = manager.StartSourceListener(key1, "127.0.0.1", destSrcPortMap, tmpDir)
@@ -245,7 +245,7 @@ var _ = Describe("MigrationProxy", func() {
 				count := manager.OpenListenerCount()
 				Expect(count).To(Equal(2))
 
-				err = manager.StartTargetListener(key2, []string{virtqemudSock, directSock})
+				err = manager.StartTargetListener(key2, []string{virtqemudSock, directSock}, "0.0.0.0")
 				Expect(err).Should(HaveOccurred())
 				Expect(err.Error()).To(Equal("unable to process new migration connections during virt-handler shutdown"))
 
