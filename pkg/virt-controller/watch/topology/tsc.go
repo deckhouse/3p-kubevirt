@@ -73,6 +73,10 @@ func TSCFrequenciesFromNodes(nodes []*v1.Node) (frequencies []int64) {
 		freq, _, err := TSCFrequencyFromNode(node)
 		if err != nil {
 			log.DefaultLogger().Reason(err).Errorf("Excluding node %s with invalid tsc-frequency", node.Name)
+			continue
+		}
+		if freq <= 0 {
+			continue
 		}
 		frequencies = append(frequencies, freq)
 	}
@@ -98,25 +102,43 @@ func IsTSCFrequencyCompatible(nodeFrequency int64, scalable bool, freq int64) bo
 	return freq <= nodeFrequency || distance(freq, nodeFrequency) <= tolerance
 }
 
-func CalculateTSCLabelDiff(frequenciesInUse []int64, frequenciesOnNode []int64, nodeFrequency int64, scalable bool) (toAdd []int64, toRemove []int64) {
+func CalculateTSCLabelDiff(frequenciesInUse []int64, frequenciesOnNode []int64, frequenciesFromNodes []int64, nodeFrequency int64, scalable bool) (toAdd []int64, toRemove []int64) {
 	requiredMap := map[int64]struct{}{}
 	// Always preserve the node's own frequency label.
 	requiredMap[nodeFrequency] = struct{}{}
 
-	// Preserve all frequencies currently in use that compatible with node.
+	// Preserve all frequencies currently in use that are compatible with node.
 	for _, freq := range frequenciesInUse {
 		if IsTSCFrequencyCompatible(nodeFrequency, scalable, freq) {
 			requiredMap[freq] = struct{}{}
 		}
 	}
 
-	// Keep compatible frequencies that already on node.
+	// Make index of compatible measured frequencies still present on nodes in the cluster.
+	nodesOwnFrequencies := map[int64]struct{}{}
+	for _, freq := range frequenciesFromNodes {
+		if IsTSCFrequencyCompatible(nodeFrequency, scalable, freq) {
+			nodesOwnFrequencies[freq] = struct{}{}
+		}
+	}
+
+	// Keep compatible frequencies that already on node:
+	// 1. If already in requiredMap (own and in use)
+	// 2. If present as "own" on other nodes.
+	// Remove non-compatible and unused frequencies.
 	for _, freq := range frequenciesOnNode {
 		if !IsTSCFrequencyCompatible(nodeFrequency, scalable, freq) {
 			toRemove = append(toRemove, freq)
 			continue
 		}
-		requiredMap[freq] = struct{}{}
+		if _, exists := requiredMap[freq]; exists {
+			continue
+		}
+		if _, exists := nodesOwnFrequencies[freq]; exists {
+			requiredMap[freq] = struct{}{}
+			continue
+		}
+		toRemove = append(toRemove, freq)
 	}
 
 	for freq := range requiredMap {

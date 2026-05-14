@@ -149,6 +149,11 @@ func hinterWithNodes(nodes ...*v1.Node) *topologyHinter {
 				return NodesToObjects(nodes...)
 			},
 		},
+		vmiStore: &cache.FakeCustomStore{
+			ListFunc: func() []interface{} {
+				return []interface{}{}
+			},
+		},
 	}
 }
 
