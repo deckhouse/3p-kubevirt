@@ -98,20 +98,13 @@ func IsTSCFrequencyCompatible(nodeFrequency int64, scalable bool, freq int64) bo
 	return freq <= nodeFrequency || distance(freq, nodeFrequency) <= tolerance
 }
 
-func CalculateTSCLabelDiff(frequenciesInUse []int64, frequenciesOnNode []int64, frequenciesFromNodes []int64, nodeFrequency int64, scalable bool) (toAdd []int64, toRemove []int64) {
+func CalculateTSCLabelDiff(frequenciesInUse []int64, frequenciesOnNode []int64, nodeFrequency int64, scalable bool) (toAdd []int64, toRemove []int64) {
 	requiredMap := map[int64]struct{}{}
 	// Always preserve the node's own frequency label.
 	requiredMap[nodeFrequency] = struct{}{}
 
 	// Preserve all frequencies currently in use that compatible with node.
 	for _, freq := range frequenciesInUse {
-		if IsTSCFrequencyCompatible(nodeFrequency, scalable, freq) {
-			requiredMap[freq] = struct{}{}
-		}
-	}
-
-	// Preserve compatible frequencies from other nodes.
-	for _, freq := range frequenciesFromNodes {
 		if IsTSCFrequencyCompatible(nodeFrequency, scalable, freq) {
 			requiredMap[freq] = struct{}{}
 		}
