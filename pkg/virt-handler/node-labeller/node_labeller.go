@@ -129,7 +129,9 @@ func (n *NodeLabeller) Run(threadiness int, stop chan struct{}) {
 		n.queue.Add(n.host)
 	})
 
-	interval := 3 * time.Minute
+	// original: interval := 3 * time.Minute
+	// TODO restore original interval after testing.
+	interval := 15 * time.Second
 	go wait.JitterUntil(func() { n.queue.Add(n.host) }, interval, 1.2, true, stop)
 
 	for i := 0; i < threadiness; i++ {
