@@ -805,7 +805,7 @@ func (c *MigrationTargetController) processVMI(vmi *v1.VirtualMachineInstance) e
 		return fmt.Errorf("failed to configure vmi network for migration target: %w", err)
 	}
 
-	if err := c.setupDevicesOwnerships(vmi, c.recorder, false); err != nil {
+	if err := c.setupDevicesOwnerships(vmi, c.recorder); err != nil {
 		return err
 	}
 

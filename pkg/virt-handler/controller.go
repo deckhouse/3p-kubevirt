@@ -179,13 +179,12 @@ func (c *BaseController) claimDeviceOwnership(virtLauncherRootMount *safepath.Pa
 func (c *BaseController) configureHostDisks(
 	vmi *v1.VirtualMachineInstance,
 	virtLauncherRootMount *safepath.Path,
-	recorder record.EventRecorder,
-	chownExisting bool) error {
+	recorder record.EventRecorder) error {
 	lessPVCSpaceToleration := c.clusterConfig.GetLessPVCSpaceToleration()
 	minimumPVCReserveBytes := c.clusterConfig.GetMinimumReservePVCBytes()
 
 	hostDiskCreator := hostdisk.NewHostDiskImgCreator(recorder, lessPVCSpaceToleration, minimumPVCReserveBytes, virtLauncherRootMount)
-	if err := hostDiskCreator.Create(vmi, chownExisting); err != nil {
+	if err := hostDiskCreator.Create(vmi); err != nil {
 		return fmt.Errorf("preparing host-disks failed: %v", err)
 	}
 	return nil
@@ -217,7 +216,7 @@ func (c *BaseController) configureVirtioFS(vmi *v1.VirtualMachineInstance, isola
 	return nil
 }
 
-func (c *BaseController) setupDevicesOwnerships(vmi *v1.VirtualMachineInstance, recorder record.EventRecorder, chownExistingHostDisks bool) error {
+func (c *BaseController) setupDevicesOwnerships(vmi *v1.VirtualMachineInstance, recorder record.EventRecorder) error {
 	isolationRes, err := c.podIsolationDetector.Detect(vmi)
 	if err != nil {
 		return fmt.Errorf(failedDetectIsolationFmt, err)
@@ -239,7 +238,7 @@ func (c *BaseController) setupDevicesOwnerships(vmi *v1.VirtualMachineInstance, 
 		}
 	}
 
-	if err := c.configureHostDisks(vmi, virtLauncherRootMount, recorder, chownExistingHostDisks); err != nil {
+	if err := c.configureHostDisks(vmi, virtLauncherRootMount, recorder); err != nil {
 		return err
 	}
 

@@ -27,6 +27,7 @@ const (
 
 	NonRootUID        = 64535
 	NonRootUserString = "deckhouse"
+	QemuUID           = 107
 	RootUser          = 0
 )
 

@@ -37,7 +37,6 @@ import (
 	v1 "kubevirt.io/api/core/v1"
 	"kubevirt.io/client-go/kubecli"
 
-	ephemeraldiskutils "kubevirt.io/kubevirt/pkg/ephemeral-disk-utils"
 	"kubevirt.io/kubevirt/pkg/libvmi"
 	libvmistatus "kubevirt.io/kubevirt/pkg/libvmi/status"
 	"kubevirt.io/kubevirt/pkg/safepath"
@@ -109,7 +108,7 @@ var _ = Describe("HostDisk", func() {
 			)
 
 			By("Executing CreateHostDisks which should not create a disk.img")
-			err := hostDiskCreator.Create(vmi, true)
+			err := hostDiskCreator.Create(vmi)
 			Expect(err).NotTo(HaveOccurred())
 
 			// check if disk.img has the same modification time
@@ -124,7 +123,7 @@ var _ = Describe("HostDisk", func() {
 			)
 
 			By("Executing CreateHostDisks which should not create disk.img")
-			err := hostDiskCreator.Create(vmi, true)
+			err := hostDiskCreator.Create(vmi)
 			Expect(err).NotTo(HaveOccurred())
 
 			// disk.img should not exist
@@ -145,7 +144,7 @@ var _ = Describe("HostDisk", func() {
 					)
 
 					By("Executing CreateHostDisks which should create disk.img")
-					err := hostDiskCreator.Create(vmi, true)
+					err := hostDiskCreator.Create(vmi)
 					Expect(err).NotTo(HaveOccurred())
 
 					// Check if images exist and the size is adequate to requirements
@@ -170,7 +169,7 @@ var _ = Describe("HostDisk", func() {
 					)
 
 					By("Executing CreateHostDisks func which should not create a disk.img")
-					err := hostDiskCreator.Create(vmi, true)
+					err := hostDiskCreator.Create(vmi)
 					Expect(err).To(HaveOccurred())
 
 					// only first disk.img should be created
@@ -193,7 +192,7 @@ var _ = Describe("HostDisk", func() {
 					)
 
 					By("Executing CreateHostDisks func which should create a full-size disk.img")
-					err := hostDiskCreatorWithReserve.Create(vmi, true)
+					err := hostDiskCreatorWithReserve.Create(vmi)
 					Expect(err).NotTo(HaveOccurred())
 
 					img1, err := os.Stat(vmi.Spec.Volumes[0].HostDisk.Path)
@@ -213,7 +212,7 @@ var _ = Describe("HostDisk", func() {
 					}
 
 					By("Executing CreateHostDisks function which should create disk.img minus reserve")
-					err := hostDiskCreatorWithReserve.Create(vmi, true)
+					err := hostDiskCreatorWithReserve.Create(vmi)
 					Expect(err).NotTo(HaveOccurred())
 
 					img1, err := os.Stat(vmi.Spec.Volumes[0].HostDisk.Path)
@@ -234,7 +233,7 @@ var _ = Describe("HostDisk", func() {
 					hostDiskCreatorWithReserve.setlessPVCSpaceToleration(1) // 1% of 64Mi, tolerate up to 671088 bytes lost
 
 					By("Executing CreateHostDisks func which should NOT create disk.img minus reserve")
-					err := hostDiskCreatorWithReserve.Create(vmi, true)
+					err := hostDiskCreatorWithReserve.Create(vmi)
 					Expect(err).To(HaveOccurred())
 					Expect(err.Error()).To(ContainSubstring("unable to create"))
 
@@ -276,7 +275,7 @@ var _ = Describe("HostDisk", func() {
 
 					By("Executing CreateHostDisks func which should not create a disk.img")
 					hostDiskCreator.diskImgCreator.dirBytesAvailableFunc = fakeDirBytesAvailable
-					err := hostDiskCreator.Create(vmi, true)
+					err := hostDiskCreator.Create(vmi)
 					Expect(err).To(HaveOccurred())
 
 					// only first and second disk.img should be created, with the exact available size
@@ -298,14 +297,7 @@ var _ = Describe("HostDisk", func() {
 			})
 		})
 		Context("With existing disk.img", func() {
-			AfterEach(func() {
-				By("Switching back to the regular mock ownership manager")
-				ephemeraldiskutils.MockDefaultOwnershipManager()
-			})
-
-			It("Should not re-create or chown disk.img", func() {
-				By("Switching to an ownership manager that panics when called")
-				ephemeraldiskutils.MockDefaultOwnershipManagerWithFailure()
+			It("Should not re-create disk.img", func() {
 				By("Creating a disk.img before adding a HostDisk volume")
 				tmpDiskImg := createTempDiskImg("volume1")
 				By("Creating a new VMI with a HostDisk volumes")
@@ -314,7 +306,7 @@ var _ = Describe("HostDisk", func() {
 				)
 
 				By("Executing CreateHostDisks which should not create a disk.img")
-				err := hostDiskCreator.Create(vmi, false)
+				err := hostDiskCreator.Create(vmi)
 				Expect(err).NotTo(HaveOccurred())
 
 				// check if disk.img has the same modification time
@@ -338,7 +330,7 @@ var _ = Describe("HostDisk", func() {
 			)
 
 			By("Executing CreateHostDisks which should not create a disk.img")
-			err := hostDiskCreator.Create(vmi, true)
+			err := hostDiskCreator.Create(vmi)
 			Expect(err).NotTo(HaveOccurred())
 
 			// disk.img should not exist
