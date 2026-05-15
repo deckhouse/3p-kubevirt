@@ -643,6 +643,19 @@ func (v *VirtualMachineInstance) IsCPUFractioned() bool {
 	return v.Spec.Domain.CPU != nil && hasFraction
 }
 
+// HasCPUResourcesConstraints checks if CPU resources constraints are specified in VMI spec.
+// Note: That was an old non-hotplug version. We should not break it with "auto CPU constraints".
+func (v *VirtualMachineInstance) HasCPUResourcesConstraints() bool {
+	resources := v.Spec.Domain.Resources
+	return !resources.Requests.Cpu().IsZero() && !resources.Limits.Cpu().IsZero()
+}
+
+// IsCPUGuaranteed checks if CPU resources are guaranteed with fraction 100.
+func (v *VirtualMachineInstance) IsCPUGuaranteed() bool {
+	cpuFraction := v.Annotations[CPUResourcesRequestsFraction]
+	return v.Spec.Domain.CPU != nil && cpuFraction == "100"
+}
+
 func (v *VirtualMachineInstance) IsBootloaderEFI() bool {
 	return v.Spec.Domain.Firmware != nil && v.Spec.Domain.Firmware.Bootloader != nil &&
 		v.Spec.Domain.Firmware.Bootloader.EFI != nil
