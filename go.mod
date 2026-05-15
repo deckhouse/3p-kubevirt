@@ -10,7 +10,7 @@ require (
 	github.com/containernetworking/plugins v1.7.1
 	github.com/containers/common v0.64.2
 	github.com/coreos/go-semver v0.3.1
-	github.com/deckhouse/kube-api-rewriter v0.2.0
+	github.com/deckhouse/kube-api-rewriter v0.2.1
 	github.com/deckhouse/virtualization/src/kubevirt-rules v0.0.0-00010101000000-000000000000
 	github.com/emicklei/go-restful/v3 v3.13.0
 	github.com/fsnotify/fsnotify v1.9.0
@@ -194,7 +194,7 @@ require (
 require github.com/google/goterm v0.0.0-20190311235235-ce302be1d114 // indirect; indirect github.com/gophercloud/gophercloud v0.4.0 // indirect
 
 replace (
-	github.com/deckhouse/kube-api-rewriter => github.com/deckhouse/kube-api-rewriter v0.2.0
+	github.com/deckhouse/kube-api-rewriter => github.com/deckhouse/kube-api-rewriter v0.2.1
 	github.com/deckhouse/virtualization/src/kubevirt-rules => github.com/deckhouse/virtualization/src/kubevirt-rules v1.7.0
 	github.com/nxadm/tail => github.com/nxadm/tail v0.0.0-20211216163028-4472660a31a6
 	github.com/openshift/api => github.com/openshift/api v0.0.0-20210105115604-44119421ec6b

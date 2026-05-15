@@ -90,7 +90,7 @@ github.com/cyphar/filepath-securejoin/pathrs-lite/procfs
 # github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc
 ## explicit
 github.com/davecgh/go-spew/spew
-# github.com/deckhouse/kube-api-rewriter v0.2.0 => github.com/deckhouse/kube-api-rewriter v0.2.0
+# github.com/deckhouse/kube-api-rewriter v0.2.1 => github.com/deckhouse/kube-api-rewriter v0.2.1
 ## explicit; go 1.24.0
 github.com/deckhouse/kube-api-rewriter/pkg/labels
 github.com/deckhouse/kube-api-rewriter/pkg/log
@@ -1554,7 +1554,7 @@ sigs.k8s.io/yaml
 # k8s.io/sample-cli-plugin => k8s.io/sample-cli-plugin v0.34.2
 # k8s.io/sample-controller => k8s.io/sample-controller v0.34.2
 # k8s.io/kube-openapi => k8s.io/kube-openapi v0.0.0-20250710124328-f3f2b991d03b
-# github.com/deckhouse/kube-api-rewriter => github.com/deckhouse/kube-api-rewriter v0.2.0
+# github.com/deckhouse/kube-api-rewriter => github.com/deckhouse/kube-api-rewriter v0.2.1
 # github.com/deckhouse/virtualization/src/kubevirt-rules => github.com/deckhouse/virtualization/src/kubevirt-rules v1.7.0
 # github.com/nxadm/tail => github.com/nxadm/tail v0.0.0-20211216163028-4472660a31a6
 # github.com/openshift/api => github.com/openshift/api v0.0.0-20210105115604-44119421ec6b
