@@ -354,6 +354,9 @@ func (e *eventCaller) eventCallback(c cli.Connection, domain *api.Domain, libvir
 			updateEvents(event, domain, events)
 		}
 	default:
+		if libvirtEvent.Event != nil && libvirtEvent.Event.Event == libvirt.DOMAIN_EVENT_STARTED {
+			metadataCache.BootFailed.Set(false)
+		}
 		if libvirtEvent.Event != nil {
 			if libvirtEvent.Event.Event == libvirt.DOMAIN_EVENT_DEFINED && libvirt.DomainEventDefinedDetailType(libvirtEvent.Event.Detail) == libvirt.DOMAIN_EVENT_DEFINED_ADDED {
 				event := watch.Event{Type: watch.Added, Object: domain}
@@ -603,6 +606,16 @@ func (n *Notifier) StartDomainNotifier(
 		}
 	}
 
+	domainQemuMonitorEventNoBootableDeviceCallback := func(_ *libvirt.Connect, d *libvirt.Domain, event *libvirt.DomainQemuMonitorEvent) {
+		name, err := d.GetName()
+		if err != nil {
+			log.Log.Reason(err).Info(cantDetermineLibvirtDomainName)
+		}
+
+		log.Log.Infof("Domain Qemu Monitor %s event received for domain %s", event.Event, name)
+		metadataCache.BootFailed.Store(true)
+	}
+
 	err := domainConn.DomainEventLifecycleRegister(domainEventLifecycleCallback)
 	if err != nil {
 		log.Log.Reason(err).Errorf("failed to register event callback with libvirt")
@@ -650,6 +663,11 @@ func (n *Notifier) StartDomainNotifier(
 			log.Log.Reason(err).Errorf("failed to register event callback with libvirt")
 			return err
 		}
+	}
+	err = domainConn.DomainQemuMonitorEventRegister("NO_BOOTABLE_DEVICE", domainQemuMonitorEventNoBootableDeviceCallback)
+	if err != nil {
+		log.Log.Reason(err).Errorf("failed to register event callback with libvirt")
+		return err
 	}
 
 	log.Log.Infof("Registered libvirt event notify callback")
