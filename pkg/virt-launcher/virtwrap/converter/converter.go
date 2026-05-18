@@ -1897,6 +1897,14 @@ func Convert_v1_VirtualMachineInstance_To_api_Domain(vmi *v1.VirtualMachineInsta
 			})
 		}
 
+		_, ht := existingFeatures["ht"]
+		if !ht && vmi.Spec.Domain.CPU.Model != v1.CPUModeHostModel && vmi.Spec.Domain.CPU.Model != v1.CPUModeHostPassthrough {
+			domain.Spec.CPU.Features = append(domain.Spec.CPU.Features, api.CPUFeature{
+				Name:   "ht",
+				Policy: "disable",
+			})
+		}
+
 		// Adjust guest vcpu config. Currently will handle vCPUs to pCPUs pinning
 		if vmi.IsCPUDedicated() {
 			err = vcpu.AdjustDomainForTopologyAndCPUSet(domain, vmi, c.Topology, c.CPUSet, hasIOThreads(vmi))
