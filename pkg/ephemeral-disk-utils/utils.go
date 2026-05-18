@@ -33,11 +33,15 @@ import (
 )
 
 // TODO this should be part of structs, instead of a global
-var DefaultOwnershipManager OwnershipManagerInterface = &OwnershipManager{uid: util.QemuUID, gid: util.NonRootUID}
+var (
+	DefaultOwnershipManager  OwnershipManagerInterface = &OwnershipManager{uid: util.NonRootUID, gid: util.NonRootUID}
+	DiskFileOwnershipManager OwnershipManagerInterface = &OwnershipManager{uid: util.QemuUID, gid: util.NonRootUID}
+)
 
 // For testing
 func MockDefaultOwnershipManager() {
 	DefaultOwnershipManager = &nonOpManager{}
+	DiskFileOwnershipManager = &nonOpManager{}
 }
 
 type nonOpManager struct {
@@ -53,6 +57,7 @@ func (no *nonOpManager) SetFileOwnership(_ *safepath.Path) error {
 
 func MockDefaultOwnershipManagerWithFailure() {
 	DefaultOwnershipManager = &failureManager{}
+	DiskFileOwnershipManager = &failureManager{}
 }
 
 type failureManager struct {
