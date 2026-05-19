@@ -152,6 +152,8 @@ var _ = Describe("Notify", func() {
 				mockConn.ConnectionEXPECT().DomainEventMemoryDeviceSizeChangeRegister(gomock.Any()).Return(nil)
 				mockConn.ConnectionEXPECT().DomainEventJobCompletedRegister(gomock.Any()).Return(nil)
 				mockConn.ConnectionEXPECT().AgentEventLifecycleRegister(gomock.Any()).Return(nil)
+				// The fork listens for the NO_BOOTABLE_DEVICE QMP event.
+				mockConn.ConnectionEXPECT().DomainQemuMonitorEventRegister(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
 
 				vmi := api2.NewMinimalVMI("test-vmi")
 				vmi.UID = "1234"
