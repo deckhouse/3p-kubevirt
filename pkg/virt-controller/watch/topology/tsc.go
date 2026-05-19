@@ -47,7 +47,7 @@ func TSCFrequencyFromNode(node *v1.Node) (frequency int64, scalable bool, err er
 		if err != nil {
 			return 0, false, fmt.Errorf("tsc frequency on node %v is not an int: %v", node.Name, err)
 		} else if freq <= 0 {
-			return 0, false, fmt.Errorf("tsc frequency on node %v is invalid: expected a frequenchy bigger than 0, but got %v", node.Name, freq)
+			return 0, false, fmt.Errorf("tsc frequency on node %v is invalid: expected a frequenсy bigger than 0, but got %v", node.Name, freq)
 		}
 		return freq, scalable, err
 	}
