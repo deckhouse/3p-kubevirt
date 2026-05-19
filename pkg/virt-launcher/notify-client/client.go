@@ -620,7 +620,7 @@ func (n *Notifier) StartDomainNotifier(
 
 	err = domainConn.DomainQemuMonitorEventRegister("NO_BOOTABLE_DEVICE", domainQemuMonitorEventNoBootableDeviceCallback)
 	if err != nil {
-		log.Log.Reason(err).Errorf("failed to register event callback with libvirt")
+		log.Log.Reason(err).Errorf("failed to register no bootable device event callback with libvirt")
 		return err
 	}
 
