@@ -135,7 +135,6 @@ type VirtualMachineController struct {
 	hotplugContainerDiskMounter containerdisk.HotplugMounter
 	nam                         *migrations.NetworkAccessibilityManager
 	checksumCtrl                *checksum_controller.Controller
-	pvcDiskImgCreator           func() hostdisk.PVCDiskImgCreator
 	hostDeviceAttacher          hotplug_hostdevice.HostDeviceAttacher
 }
 
@@ -243,7 +242,6 @@ func NewVirtualMachineController(
 	pvcDiskImgCreator := func() hostdisk.PVCDiskImgCreator {
 		return hostdisk.NewPVCDiskImgCreator(recorder, c.clusterConfig.GetLessPVCSpaceToleration(), c.clusterConfig.GetMinimumReservePVCBytes())
 	}
-	c.pvcDiskImgCreator = pvcDiskImgCreator
 	c.hotplugVolumeMounter = hotplugvolume.NewVolumeMounterWithCreator(volumeHotplugState, kubeletPodsDir, host, pvcDiskImgCreator)
 
 	_, err = vmiInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{

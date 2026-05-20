@@ -171,7 +171,6 @@ func NewMigrationTargetController(
 		BaseController:                   baseCtrl,
 		capabilities:                     capabilities,
 		containerDiskMounter:             containerdisk.NewMounter(podIsolationDetector, containerDiskState, clusterConfig),
-		hotplugVolumeMounter:             hotplugvolume.NewVolumeMounter(hotplugState, kubeletPodsDir, host),
 		migrationIpAddress:               migrationIpAddress,
 		netBindingPluginMemoryCalculator: netBindingPluginMemoryCalculator,
 		netConf:                          netConf,
@@ -187,6 +186,11 @@ func NewMigrationTargetController(
 			hotplugdisk.NewHotplugDiskManager(kubeletPodsDir),
 		),
 	}
+
+	pvcDiskImgCreator := func() hostdisk.PVCDiskImgCreator {
+		return hostdisk.NewPVCDiskImgCreator(recorder, c.clusterConfig.GetLessPVCSpaceToleration(), c.clusterConfig.GetMinimumReservePVCBytes())
+	}
+	c.hotplugVolumeMounter = hotplugvolume.NewVolumeMounterWithCreator(hotplugState, kubeletPodsDir, host, pvcDiskImgCreator)
 
 	_, err = vmiInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc:    c.addFunc,
