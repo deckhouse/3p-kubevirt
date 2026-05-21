@@ -161,20 +161,37 @@ func (l *launcherClientsManager) IsLauncherClientUnresponsive(vmi *v1.VirtualMac
 	var socketFile string
 
 	clientInfo, exists := l.launcherClients.Load(vmi.UID)
-	if exists && clientInfo.Ready && cmdclient.IsSocketUnresponsive(clientInfo.SocketFile) {
-		if clientInfo.Client != nil {
-			clientInfo.Client.Close()
+	if exists && clientInfo.Ready {
+		currentSocketFile, currentErr := cmdclient.FindSocket(vmi)
+		if currentErr == nil && currentSocketFile != clientInfo.SocketFile {
+			if clientInfo.Client != nil {
+				clientInfo.Client.Close()
+			}
+			if clientInfo.DomainPipeStopChan != nil {
+				close(clientInfo.DomainPipeStopChan)
+			}
+			l.launcherClients.Delete(vmi.UID)
+			exists = false
+		} else if currentErr == nil {
+			socketFile = currentSocketFile
+			clientInfo.SocketFile = currentSocketFile
+		} else if cmdclient.IsSocketUnresponsive(clientInfo.SocketFile) {
+			if clientInfo.Client != nil {
+				clientInfo.Client.Close()
+			}
+			if clientInfo.DomainPipeStopChan != nil {
+				close(clientInfo.DomainPipeStopChan)
+			}
+			l.launcherClients.Delete(vmi.UID)
+			exists = false
 		}
-		if clientInfo.DomainPipeStopChan != nil {
-			close(clientInfo.DomainPipeStopChan)
-		}
-		l.launcherClients.Delete(vmi.UID)
-		exists = false
 	}
 	if exists {
 		if clientInfo.Ready == true {
-			// use cached socket if we previously established a connection
-			socketFile = clientInfo.SocketFile
+			if socketFile == "" {
+				// use cached socket if we previously established a connection
+				socketFile = clientInfo.SocketFile
+			}
 		} else {
 			socketFile, err = cmdclient.FindSocket(vmi)
 			if err != nil {
