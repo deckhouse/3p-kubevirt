@@ -576,6 +576,10 @@ func (c *MigrationSourceController) migrateVMI(vmi *v1.VirtualMachineInstance, d
 		log.Log.Object(vmi).V(4).Info("waiting for target node to publish migration ports")
 		c.queue.AddAfter(controller.VirtualMachineInstanceKey(vmi), 1*time.Second)
 		return nil
+	} else if errors.Is(err, migrationproxy.ErrPreviousProxyActive) {
+		log.Log.Object(vmi).V(2).Info("previous virt-handler still serving the source migration proxy on this node, waiting to take over")
+		c.queue.AddAfter(controller.VirtualMachineInstanceKey(vmi), 2*time.Second)
+		return nil
 	} else if err != nil {
 		return fmt.Errorf("failed to handle migration proxy: %v", err)
 	}
