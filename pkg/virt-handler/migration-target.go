@@ -159,7 +159,6 @@ func NewMigrationTargetController(
 		capabilities:                     capabilities,
 		clientset:                        clientset,
 		containerDiskMounter:             container_disk.NewMounter(podIsolationDetector, containerDiskState, clusterConfig),
-		hotplugVolumeMounter:             hotplug_volume.NewVolumeMounter(hotplugState, kubeletPodsDir, host),
 		queue:                            queue,
 		launcherClients:                  launcherClients,
 		migrationIpAddress:               migrationIpAddress,
@@ -180,6 +179,11 @@ func NewMigrationTargetController(
 			hotplugdisk.NewHotplugDiskManager(kubeletPodsDir),
 		),
 	}
+
+	pvcDiskImgCreator := func() hostdisk.PVCDiskImgCreator {
+		return hostdisk.NewPVCDiskImgCreator(recorder, c.clusterConfig.GetLessPVCSpaceToleration(), c.clusterConfig.GetMinimumReservePVCBytes())
+	}
+	c.hotplugVolumeMounter = hotplug_volume.NewVolumeMounterWithCreator(hotplugState, kubeletPodsDir, host, pvcDiskImgCreator)
 
 	_, err = vmiInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc:    c.addFunc,
@@ -748,7 +752,7 @@ func (c *MigrationTargetController) unmountVolumes(vmi *v1.VirtualMachineInstanc
 		if err != nil {
 			return err
 		}
-		if err = c.hotplugVolumeMounter.Unmount(vmi, cgroupManager); err != nil {
+		if err = c.hotplugVolumeMounter.UnmountAll(vmi, cgroupManager); err != nil {
 			return fmt.Errorf("failed to unmount hotplug volumes: %v", err)
 		}
 	}
