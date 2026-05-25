@@ -129,10 +129,8 @@ func (c *NetConf) Setup(vmi *v1.VirtualMachineInstance, networks []v1.Network, l
 		ownerID = util.NonRootUID
 	}
 	queuesCapacity := int(converter.NetworkQueuesCapacity(vmi))
-	// PoC mode: always disable legacy tap-veth-bridge wiring for bridge networking.
-	disableTapVethBridge := true
-	log.Log.Object(vmi).Infof("bridge network setup mode: disableTapVethBridge=%t", disableTapVethBridge)
-	netpod := netpod.NewNetPod(
+	disableTapVethBridge := hasBPFBridgeBinding(vmi)
+	netPod := netpod.NewNetPod(
 		networks,
 		vmispec.FilterInterfacesByNetworks(vmi.Spec.Domain.Devices.Interfaces, networks),
 		string(vmi.UID),
@@ -148,7 +146,7 @@ func (c *NetConf) Setup(vmi *v1.VirtualMachineInstance, networks []v1.Network, l
 		netpod.WithVMIIfaceStatuses(vmi.Status.Interfaces),
 	)
 
-	if err := netpod.Setup(); err != nil {
+	if err := netPod.Setup(); err != nil {
 		return fmt.Errorf("setup failed, err: %w", err)
 	}
 	return nil
@@ -189,6 +187,15 @@ func (c *NetConf) Teardown(vmi *v1.VirtualMachineInstance) error {
 		return fmt.Errorf("teardown failed, err: %w", err)
 	}
 	return nil
+}
+
+func hasBPFBridgeBinding(vmi *v1.VirtualMachineInstance) bool {
+	for _, iface := range vmi.Spec.Domain.Devices.Interfaces {
+		if iface.Binding != nil && iface.Binding.Name == "bpfbridge" {
+			return true
+		}
+	}
+	return false
 }
 
 func newMasqueradeAdapter(vmi *v1.VirtualMachineInstance) masquerade.MasqPod {

@@ -1,26 +1,60 @@
-package bpfattach
+package bpfbridge
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 
 	"github.com/cilium/ebpf"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
 )
 
-const pinSubdir = "kubevirt-bpf-bridge-binding"
+const (
+	DefaultPodIface = "eth0"
+)
 
-type bridgePorts struct {
-	TapIfindex uint32
-	PodIfindex uint32
+// EnsureWiring validates and normalizes TAP wiring in the current netns, mirroring
+// the old sidecar runtime behavior: lookup pod iface, ensure tap exists, align MTU,
+// and set TAP link up before BPF attachment.
+func EnsureWiring(tapName, podIface string) error {
+	if podIface == "" {
+		podIface = DefaultPodIface
+	}
+
+	pod, err := netlink.LinkByName(podIface)
+	if err != nil {
+		return fmt.Errorf("lookup pod interface %q: %w", podIface, err)
+	}
+
+	tap, err := netlink.LinkByName(tapName)
+	if err != nil {
+		return fmt.Errorf("lookup tap %q: %w", tapName, err)
+	}
+
+	if podMTU := pod.Attrs().MTU; podMTU > 0 && tap.Attrs().MTU != podMTU {
+		if err := netlink.LinkSetMTU(tap, podMTU); err != nil {
+			return fmt.Errorf("set %q mtu %d: %w", tapName, podMTU, err)
+		}
+	}
+
+	if err := netlink.LinkSetUp(tap); err != nil {
+		return fmt.Errorf("set %q up: %w", tapName, err)
+	}
+
+	return nil
 }
 
-// Attach loads bpf_bridge.o, writes tap/pod ifindexes into bridge_cfg, pins prog + map,
-// and attaches the TC program via tc (clsact ingress) on both interfaces in the
-// current (pod) network namespace.
-func Attach(objPath string, tapName, podName string, tapIdx, podIdx int) error {
+// Attach loads bpf_bridge.o, writes tap/pod ifindexes into bridge_cfg,
+// and attaches the TC program on both interfaces in the current network namespace.
+func Attach(objPath, tapName, podName string) error {
+	tap, err := netlink.LinkByName(tapName)
+	if err != nil {
+		return fmt.Errorf("lookup tap %s: %w", tapName, err)
+	}
+	pod, err := netlink.LinkByName(podName)
+	if err != nil {
+		return fmt.Errorf("lookup pod iface %s: %w", podName, err)
+	}
+
 	spec, err := ebpf.LoadCollectionSpec(objPath)
 	if err != nil {
 		return fmt.Errorf("load BPF spec: %w", err)
@@ -41,31 +75,15 @@ func Attach(objPath string, tapName, podName string, tapIdx, podIdx int) error {
 		return fmt.Errorf("BPF object missing tc_l2_proxy program")
 	}
 
-	k := uint32(0)
-	val := bridgePorts{
-		TapIfindex: uint32(tapIdx),
-		PodIfindex: uint32(podIdx),
+	tapKey := uint32(tap.Attrs().Index)
+	podKey := uint32(pod.Attrs().Index)
+	podVal := uint32(pod.Attrs().Index)
+	tapVal := uint32(tap.Attrs().Index)
+	if err := cfgMap.Update(tapKey, podVal, ebpf.UpdateAny); err != nil {
+		return fmt.Errorf("update bridge_cfg tap->pod: %w", err)
 	}
-	if err := cfgMap.Update(k, val, ebpf.UpdateAny); err != nil {
-		return fmt.Errorf("update bridge_cfg: %w", err)
-	}
-
-	bpffs := "/sys/fs/bpf"
-	base := filepath.Join(bpffs, pinSubdir)
-	if err := os.MkdirAll(base, 0o755); err != nil {
-		return fmt.Errorf("mkdir %s: %w", base, err)
-	}
-
-	mapPin := filepath.Join(base, "bridge_cfg")
-	progPin := filepath.Join(base, "tc_l2_proxy")
-	_ = os.Remove(mapPin)
-	_ = os.Remove(progPin)
-
-	if err := cfgMap.Pin(mapPin); err != nil {
-		return fmt.Errorf("pin map: %w", err)
-	}
-	if err := prog.Pin(progPin); err != nil {
-		return fmt.Errorf("pin program: %w", err)
+	if err := cfgMap.Update(podKey, tapVal, ebpf.UpdateAny); err != nil {
+		return fmt.Errorf("update bridge_cfg pod->tap: %w", err)
 	}
 
 	for _, dev := range []string{tapName, podName} {
@@ -120,16 +138,4 @@ func replaceIngressBPF(dev string, prog *ebpf.Program) error {
 		return fmt.Errorf("attach bpf filter dev %s ingress: %w", dev, err)
 	}
 	return nil
-}
-
-// Detach removes TC filters and clsact qdisc from the devices; does not unpin pinned objects.
-func Detach(devices ...string) {
-	for _, dev := range devices {
-		link, err := netlink.LinkByName(dev)
-		if err != nil {
-			continue
-		}
-		_ = netlink.FilterDel(&netlink.BpfFilter{FilterAttrs: netlink.FilterAttrs{LinkIndex: link.Attrs().Index, Parent: netlink.HANDLE_MIN_INGRESS}})
-		_ = netlink.QdiscDel(&netlink.Clsact{QdiscAttrs: netlink.QdiscAttrs{LinkIndex: link.Attrs().Index, Handle: netlink.MakeHandle(0xffff, 0), Parent: netlink.HANDLE_CLSACT}})
-	}
 }

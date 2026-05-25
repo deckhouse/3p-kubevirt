@@ -25,7 +25,6 @@ import (
 	v1 "kubevirt.io/api/core/v1"
 )
 
-
 type netClusterConfigurer interface {
 	GetDefaultNetworkInterface() string
 	IsBridgeInterfaceOnPodNetworkEnabled() bool
@@ -52,8 +51,6 @@ func SetDefaultNetworkInterface(config netClusterConfigurer, spec *v1.VirtualMac
 	case v1.DeprecatedSlirpInterface:
 		return fmt.Errorf("slirp interface is deprecated as of v1.3")
 	case "bpfbridge":
-		// HARDCODED: bpfbridge binding plugin - for testing/development
-		// TODO: remove this and register via KubeVirt CR
 		spec.Domain.Devices.Interfaces = []v1.Interface{
 			{
 				Name: "default",

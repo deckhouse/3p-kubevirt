@@ -23,6 +23,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"path/filepath"
 	"strconv"
 
 	k8serrors "k8s.io/apimachinery/pkg/util/errors"
@@ -30,6 +31,7 @@ import (
 	"kubevirt.io/kubevirt/pkg/pointer"
 	"kubevirt.io/kubevirt/pkg/util"
 
+	"kubevirt.io/kubevirt/pkg/network/bpfbridge"
 	"kubevirt.io/kubevirt/pkg/network/cache"
 	"kubevirt.io/kubevirt/pkg/network/driver/nmstate"
 	"kubevirt.io/kubevirt/pkg/network/driver/procsys"
@@ -63,8 +65,6 @@ type cacheCreator interface {
 type NSExecutor interface {
 	Do(func() error) error
 }
-
-const DisableTapVethBridgeAnnotation = "virtualization.deckhouse.io/disable-tap-veth-bridge"
 
 type NetPod struct {
 	vmiSpecIfaces    []v1.Interface
@@ -257,6 +257,10 @@ func (n NetPod) config(currentStatus *nmstate.Status) error {
 		return err
 	}
 
+	if err = n.setupBPFBridge(currentStatus); err != nil {
+		return err
+	}
+
 	// Configuring NAT (nftables) is temporary done outside nmstate.
 	// This should be eventually embedded into the nmstate desired state and applied by it.
 	return n.setupNAT(desiredSpec, currentStatus)
@@ -319,7 +323,12 @@ func (n NetPod) composeDesiredSpec(currentStatus *nmstate.Status) (*nmstate.Spec
 		case iface.SRIOV != nil:
 		case iface.Binding != nil:
 			bindingPlugin, exists := n.bindingPluginsByName[iface.Binding.Name]
-			if exists && bindingPlugin.DomainAttachmentType == v1.ManagedTap {
+			if exists && iface.Binding.Name == "bpfbridge" {
+				if _, exists := podIfaceStatusByName[podIfaceName]; !exists {
+					return nil, fmt.Errorf("pod link (%s) is missing", podIfaceName)
+				}
+				ifacesSpec, err = n.bpfBridgeSpec(podIfaceName, ifIndex, podIfaceStatusByName)
+			} else if exists && bindingPlugin.DomainAttachmentType == v1.ManagedTap {
 				if _, exists := podIfaceStatusByName[podIfaceName]; !exists {
 					return nil, fmt.Errorf("pod link (%s) is missing", podIfaceName)
 				}
@@ -497,6 +506,27 @@ func (n NetPod) masqueradeBindingSpec(podIfaceName string, vmiIfaceIndex int, if
 	return []nmstate.Interface{bridgeIface, tapIface}, nil
 }
 
+func (n NetPod) bpfBridgeSpec(podIfaceName string, vmiIfaceIndex int, ifaceStatusByName map[string]nmstate.Interface) ([]nmstate.Interface, error) {
+	podIface := ifaceStatusByName[podIfaceName]
+	vmiNetworkName := n.vmiSpecIfaces[vmiIfaceIndex].Name
+	vmiNetwork := vmispec.LookupNetworkByName(n.vmiSpecNets, vmiNetworkName)
+
+	tapIface := nmstate.Interface{
+		Name:     link.GenerateTapDeviceName(podIfaceName, *vmiNetwork),
+		TypeName: nmstate.TypeTap,
+		State:    nmstate.IfaceStateUp,
+		MTU:      podIface.MTU,
+		Tap: &nmstate.TapDevice{
+			Queues: n.networkQueues(vmiIfaceIndex),
+			UID:    n.ownerID,
+			GID:    n.ownerID,
+		},
+		Metadata: &nmstate.IfaceMetadata{Pid: n.podPID, NetworkName: vmiNetworkName},
+	}
+
+	return []nmstate.Interface{tapIface}, nil
+}
+
 func (n NetPod) managedTapSpec(podIfaceName string, vmiIfaceIndex int, ifaceStatusByName map[string]nmstate.Interface) ([]nmstate.Interface, error) {
 
 	vmiNetworkName := n.vmiSpecIfaces[vmiIfaceIndex].Name
@@ -553,6 +583,30 @@ func (n NetPod) managedTapSpec(podIfaceName string, vmiIfaceIndex int, ifaceStat
 	}
 
 	return []nmstate.Interface{bridgeIface, podIface, tapIface, dummyIface}, nil
+}
+
+func (n NetPod) setupBPFBridge(currentStatus *nmstate.Status) error {
+	podIfaceNameByVMINetwork := createNetworkNameScheme(n.vmiSpecNets, n.vmiIfaceStatuses, currentStatus.Interfaces)
+	for ifIndex, iface := range n.vmiSpecIfaces {
+		if iface.Binding == nil || iface.Binding.Name != "bpfbridge" {
+			continue
+		}
+
+		podIfaceName := podIfaceNameByVMINetwork[iface.Name]
+		vmiNetwork := vmispec.LookupNetworkByName(n.vmiSpecNets, iface.Name)
+		if vmiNetwork == nil {
+			return fmt.Errorf("network %s not found for bpfbridge interface", iface.Name)
+		}
+		tapName := link.GenerateTapDeviceName(podIfaceName, *vmiNetwork)
+		objPath := filepath.Join("/usr", "share", "network-bpf-bridge-binding", "bpf_bridge.o")
+		if err := bpfbridge.EnsureWiring(tapName, podIfaceName); err != nil {
+			return fmt.Errorf("bpfbridge wiring failed for iface %s (index %d): %w", iface.Name, ifIndex, err)
+		}
+		if err := bpfbridge.Attach(objPath, tapName, podIfaceName); err != nil {
+			return fmt.Errorf("bpfbridge attach failed for iface %s (index %d): %w", iface.Name, ifIndex, err)
+		}
+	}
+	return nil
 }
 
 func (n NetPod) setupNAT(desiredSpec *nmstate.Spec, currentStatus *nmstate.Status) error {

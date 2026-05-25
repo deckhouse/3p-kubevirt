@@ -109,6 +109,17 @@ func (n NetPod) discover(currentStatus *nmstate.Status) error {
 					return err
 				}
 			}
+			if vmiSpecIface.Binding.Name == "bpfbridge" {
+				if !podIfaceExists {
+					return fmt.Errorf("pod link (%s) is missing", podIfaceName)
+				}
+				if err := n.storeBridgeBindingDHCPInterfaceData(currentStatus, podIfaceStatus, vmiSpecIface, podIfaceName); err != nil {
+					return err
+				}
+				if err := n.storeBridgeDomainInterfaceData(podIfaceStatus, vmiSpecIface); err != nil {
+					return err
+				}
+			}
 
 		// Skip the discovery for all other known network interface bindings.
 		// Macvtap is removed in v1.3. This scenario is tracking old VMIs that are still processed in the reconcile loop.

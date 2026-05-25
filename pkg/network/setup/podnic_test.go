@@ -122,27 +122,6 @@ var _ = Describe("podNIC", func() {
 
 		})
 	})
-
-	It("creates tap libvirt spec generator regardless of disable tap-veth-bridge annotation", func() {
-		vmi := newVMIBridgeInterface("testnamespace", "testVmName")
-		vmi.Annotations = map[string]string{disableTapVethBridgeAnnotation: "true"}
-		podnic, err := newPodNIC(vmi, &vmi.Spec.Networks[0], &vmi.Spec.Domain.Devices.Interfaces[0], mockNetwork, &baseCacheCreator, nil)
-		Expect(err).ToNot(HaveOccurred())
-
-		podnic.podInterfaceName = namescheme.PrimaryPodInterfaceName
-		generator := podnic.newLibvirtSpecGenerator(&api.Domain{}, string(v1.Tap))
-		Expect(generator).ToNot(BeNil())
-	})
-
-	It("keeps bridge DHCP configurator enabled even when disable tap-veth-bridge annotation is set", func() {
-		vmi := newVMIBridgeInterface("testnamespace", "testVmName")
-		vmi.Annotations = map[string]string{disableTapVethBridgeAnnotation: "true"}
-		podnic, err := newPodNIC(vmi, &vmi.Spec.Networks[0], &vmi.Spec.Domain.Devices.Interfaces[0], mockNetwork, &baseCacheCreator, nil)
-		Expect(err).ToNot(HaveOccurred())
-
-		configurator := podnic.newDHCPConfigurator()
-		Expect(configurator).ToNot(BeNil())
-	})
 })
 
 type fakeLibvirtSpecGenerator struct {

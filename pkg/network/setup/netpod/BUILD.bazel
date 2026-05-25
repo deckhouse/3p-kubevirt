@@ -11,6 +11,7 @@ go_library(
     importpath = "kubevirt.io/kubevirt/pkg/network/setup/netpod",
     visibility = ["//visibility:public"],
     deps = [
+        "//pkg/network/bpfbridge:go_default_library",
         "//pkg/network/cache:go_default_library",
         "//pkg/network/driver/nmstate:go_default_library",
         "//pkg/network/driver/procsys:go_default_library",
