@@ -231,17 +231,6 @@ func (app *virtHandlerApp) Run() {
 		os.Exit(2)
 	}
 
-	go func() {
-		sigint := make(chan os.Signal, 1)
-
-		signal.Notify(sigint, syscall.SIGTERM)
-
-		<-sigint
-
-		app.markNodeAsUnschedulable(logger)
-		os.Exit(0)
-	}()
-
 	// Create event recorder
 	broadcaster := record.NewBroadcaster()
 	broadcaster.StartRecordingToSink(&k8coresv1.EventSinkImpl{Interface: app.virtCli.CoreV1().Events(k8sv1.NamespaceAll)})
@@ -534,6 +523,8 @@ func (app *virtHandlerApp) Run() {
 
 		s := <-c
 		log.Log.Infof("Received signal %s, initiating graceful shutdown", s.String())
+
+		app.markNodeAsUnschedulable(logger)
 
 		// This triggers the migration proxy to no longer accept new connections
 		migrationProxy.InitiateGracefulShutdown()
