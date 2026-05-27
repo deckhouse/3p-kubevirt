@@ -1354,7 +1354,7 @@ func (c *VirtualMachineController) updateBootFailedCondition(vmi *v1.VirtualMach
 		LastProbeTime:      metav1.Now(),
 		LastTransitionTime: metav1.Now(),
 		Reason:             "NoBootableDevice",
-		Message:            "No bootable device.",
+		Message:            "System firmware (BIOS/UEFI) found no bootable device to start guest OS.",
 	})
 	log.Log.Object(vmi).Infof("Boot failure detected: firmware reported 'No bootable device.' on domain %s", domain.ObjectMeta.Name)
 }
