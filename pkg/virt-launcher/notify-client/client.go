@@ -390,6 +390,11 @@ func (e *eventCaller) eventCallback(c cli.Connection, domain *api.Domain, libvir
 		}
 	}
 
+	// A domain that started again has not hit "no bootable device" yet.
+	if libvirtEvent.Event != nil && libvirtEvent.Event.Event == libvirt.DOMAIN_EVENT_STARTED {
+		metadataCache.BootFailed.Set(false)
+	}
+
 	switch {
 	case libvirtEvent.JobCompletedEvent != nil:
 		if shouldAdd := processJobCompletedEvent(domain, d, libvirtEvent.JobCompletedEvent, metadataCache); shouldAdd {
@@ -641,6 +646,7 @@ func (n *Notifier) StartDomainNotifier(
 		}
 
 		log.Log.Infof("Domain Qemu Monitor %s event received for domain %s", event.Event, name)
+		metadataCache.BootFailed.Store(true)
 	}
 
 	err := domainConn.DomainEventLifecycleRegister(domainEventLifecycleCallback)

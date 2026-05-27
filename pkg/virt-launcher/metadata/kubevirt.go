@@ -47,5 +47,8 @@ func LoadKubevirtMetadata(metadataCache *Cache) api.KubeVirtMetadata {
 	if value, exists := metadataCache.MemoryDump.Load(); exists {
 		kubevirtMetadata.MemoryDump = &value
 	}
+	if value, exists := metadataCache.BootFailed.Load(); exists {
+		kubevirtMetadata.BootFailed = value
+	}
 	return kubevirtMetadata
 }
