@@ -53,6 +53,7 @@ type NetConf struct {
 	cacheCreator     cacheCreator
 	nsFactory        nsFactory
 	state            map[string]*netpod.State
+	statePid         map[string]int
 	configStateMutex *sync.RWMutex
 
 	clusterConfigurer clusterConfigurer
@@ -74,6 +75,7 @@ func NewNetConf(clusterConfigurer clusterConfigurer) *NetConf {
 func NewNetConfWithCustomFactoryAndConfigState(nsFactory nsFactory, cacheCreator cacheCreator, state map[string]*netpod.State, clusterConfigurer clusterConfigurer) *NetConf {
 	return &NetConf{
 		state:             state,
+		statePid:          map[string]int{},
 		configStateMutex:  &sync.RWMutex{},
 		cacheCreator:      cacheCreator,
 		nsFactory:         nsFactory,
@@ -85,13 +87,35 @@ func NewNetConfWithCustomFactoryAndConfigState(nsFactory nsFactory, cacheCreator
 func (c *NetConf) Setup(vmi *v1.VirtualMachineInstance, networks []v1.Network, launcherPid int) error {
 	c.configStateMutex.RLock()
 	state, ok := c.state[string(vmi.UID)]
+	cachedPid := c.statePid[string(vmi.UID)]
 	c.configStateMutex.RUnlock()
+	launcherPidCache := cache.NewLauncherPidCache(c.cacheCreator, string(vmi.UID))
+	if ok && cachedPid != launcherPid {
+		if err := c.Teardown(vmi); err != nil {
+			return fmt.Errorf("netconf teardown for replaced launcher pod failed: %w", err)
+		}
+		ok = false
+	} else if !ok {
+		diskPid, err := launcherPidCache.Read()
+		if err != nil {
+			return err
+		}
+		if diskPid != launcherPid {
+			if err := c.Teardown(vmi); err != nil {
+				return fmt.Errorf("netconf teardown for replaced launcher pod failed: %w", err)
+			}
+		}
+	}
 	if !ok {
+		if err := launcherPidCache.Write(launcherPid); err != nil {
+			return err
+		}
 		configStateCache := NewConfigStateCache(string(vmi.UID), c.cacheCreator)
 		ns := c.nsFactory(launcherPid)
 		state = netpod.NewState(&configStateCache, ns)
 		c.configStateMutex.Lock()
 		c.state[string(vmi.UID)] = state
+		c.statePid[string(vmi.UID)] = launcherPid
 		c.configStateMutex.Unlock()
 	}
 
@@ -124,12 +148,12 @@ func (c *NetConf) Setup(vmi *v1.VirtualMachineInstance, networks []v1.Network, l
 func (c *NetConf) Teardown(vmi *v1.VirtualMachineInstance) error {
 	c.configStateMutex.Lock()
 	delete(c.state, string(vmi.UID))
+	delete(c.statePid, string(vmi.UID))
 	c.configStateMutex.Unlock()
 	podCache := cache.NewPodInterfaceCache(c.cacheCreator, string(vmi.UID))
 	if err := podCache.Remove(); err != nil {
 		return fmt.Errorf("teardown failed, err: %w", err)
 	}
-
 	return nil
 }
 

@@ -601,7 +601,7 @@ var _ = Describe("Migration watcher", func() {
 	Context("Migration object in pending state", func() {
 		const defaultMaxOutboundMigrationsPerNode = 2
 
-		It("should patch VMI with nonroot user", func() {
+		It("should not change VMI RuntimeUser during migration", func() {
 			vmi := newVirtualMachine("testvmi", v1.Running)
 			delete(vmi.Annotations, v1.DeprecatedNonRootVMIAnnotation)
 			vmi.Status.RuntimeUser = 0
@@ -618,8 +618,8 @@ var _ = Describe("Migration watcher", func() {
 			expectPodCreation(vmi.Namespace, vmi.UID, migration.UID, 1, 0, 0)
 			updatedVMI, err := virtClientset.KubevirtV1().VirtualMachineInstances(vmi.Namespace).Get(context.Background(), vmi.Name, metav1.GetOptions{})
 			Expect(err).ToNot(HaveOccurred())
-			Expect(updatedVMI.Status.RuntimeUser).To(Equal(uint64(107)))
-			Expect(updatedVMI.Annotations).To(HaveKeyWithValue(v1.DeprecatedNonRootVMIAnnotation, "true"))
+			Expect(updatedVMI.Status.RuntimeUser).To(Equal(uint64(0)))
+			Expect(updatedVMI.Annotations).NotTo(HaveKey(v1.DeprecatedNonRootVMIAnnotation))
 		})
 
 		It("should create target pod", func() {

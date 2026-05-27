@@ -29,8 +29,9 @@ const (
 	HostRootMount                             = "/proc/1/root/"
 	ContainerBinary                           = "/container-disk-binary"
 
-	NonRootUID        = 107
-	NonRootUserString = "qemu"
+	NonRootUID        = 64535
+	NonRootUserString = "deckhouse"
+	QemuUID           = 107
 	RootUser          = 0
 
 	// extensive log verbosity threshold after which libvirt debug logs will be enabled

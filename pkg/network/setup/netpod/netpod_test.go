@@ -31,6 +31,7 @@ import (
 	dutils "kubevirt.io/kubevirt/pkg/ephemeral-disk-utils"
 	kfs "kubevirt.io/kubevirt/pkg/os/fs"
 	"kubevirt.io/kubevirt/pkg/pointer"
+	"kubevirt.io/kubevirt/pkg/util"
 
 	v1 "kubevirt.io/api/core/v1"
 
@@ -686,7 +687,7 @@ var _ = Describe("netpod", func() {
 				Interfaces: []nmstate.Interface{},
 				LinuxStack: nmstate.LinuxStack{
 					IPv4: nmstate.LinuxStackIP4{
-						PingGroupRange:        []int{107, 107},
+						PingGroupRange:        []int{util.NonRootUID, util.NonRootUID},
 						UnprivilegedPortStart: pointer.P(0),
 					},
 				},

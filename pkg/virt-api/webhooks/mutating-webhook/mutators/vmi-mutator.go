@@ -212,7 +212,7 @@ func (mutator *VMIsMutator) Mutate(ar *admissionv1.AdmissionReview) *admissionv1
 }
 
 func markAsNonroot(vmi *v1.VirtualMachineInstance) {
-	vmi.Status.RuntimeUser = 107
+	vmi.Status.RuntimeUser = util.NonRootUID
 }
 
 // setDefaultPciTopologyVersion sets the PCI topology version annotation to v3

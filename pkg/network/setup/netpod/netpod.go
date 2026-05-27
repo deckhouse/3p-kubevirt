@@ -28,6 +28,7 @@ import (
 	k8serrors "k8s.io/apimachinery/pkg/util/errors"
 
 	"kubevirt.io/kubevirt/pkg/pointer"
+	"kubevirt.io/kubevirt/pkg/util"
 
 	"kubevirt.io/kubevirt/pkg/network/cache"
 	"kubevirt.io/kubevirt/pkg/network/driver/nmstate"
@@ -307,7 +308,7 @@ func (n NetPod) composeDesiredSpec(currentStatus *nmstate.Status) (*nmstate.Spec
 				spec.LinuxStack.IPv6.Forwarding = pointer.P(true)
 			}
 		case iface.PasstBinding != nil:
-			spec.LinuxStack.IPv4.PingGroupRange = []int{107, 107}
+			spec.LinuxStack.IPv4.PingGroupRange = []int{util.NonRootUID, util.NonRootUID}
 			spec.LinuxStack.IPv4.UnprivilegedPortStart = pointer.P(0)
 
 		case iface.SRIOV != nil:

@@ -5005,7 +5005,7 @@ var _ = Describe("Template", func() {
 
 			for _, container := range pod.Spec.InitContainers {
 				Expect(*container.SecurityContext.RunAsNonRoot).To(BeTrue())
-				Expect(*container.SecurityContext.RunAsUser).To(Equal(int64(107)))
+				Expect(*container.SecurityContext.RunAsUser).To(Equal(int64(64535)))
 			}
 
 			for _, container := range pod.Spec.Containers {
@@ -5013,7 +5013,7 @@ var _ = Describe("Template", func() {
 					continue
 				}
 				Expect(*container.SecurityContext.RunAsNonRoot).To(BeTrue())
-				Expect(*container.SecurityContext.RunAsUser).To(Equal(int64(107)))
+				Expect(*container.SecurityContext.RunAsUser).To(Equal(int64(64535)))
 			}
 		})
 
