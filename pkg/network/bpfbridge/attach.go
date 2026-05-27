@@ -87,12 +87,33 @@ func Attach(objPath, tapName, podName string) error {
 	}
 
 	for _, dev := range []string{tapName, podName} {
+		if err := ensurePromisc(dev); err != nil {
+			return err
+		}
 		if err := ensureClsact(dev); err != nil {
 			return err
 		}
 		if err := replaceIngressBPF(dev, prog); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// ensurePromisc puts the device into promiscuous mode.
+// The call is idempotent: we skip it when the kernel reports the device is already in
+// promiscuous mode, so we do not bump the in-kernel IFF_PROMISC reference count on every
+// reconcile.
+func ensurePromisc(dev string) error {
+	link, err := netlink.LinkByName(dev)
+	if err != nil {
+		return fmt.Errorf("lookup link %s: %w", dev, err)
+	}
+	if link.Attrs().Promisc != 0 {
+		return nil
+	}
+	if err := netlink.SetPromiscOn(link); err != nil {
+		return fmt.Errorf("set %q promisc on: %w", dev, err)
 	}
 	return nil
 }
