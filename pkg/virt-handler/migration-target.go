@@ -38,7 +38,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
@@ -753,15 +752,12 @@ func (c *MigrationTargetController) unmountVolumes(vmi *v1.VirtualMachineInstanc
 		return err
 	}
 
-	// Mount hotplug disks
-	if attachmentPodUID := vmi.Status.MigrationState.TargetAttachmentPodUID; attachmentPodUID != types.UID("") {
-		cgroupManager, err := getCgroupManager(vmi, c.host)
-		if err != nil {
-			return err
-		}
-		if err = c.hotplugVolumeMounter.UnmountAll(vmi, cgroupManager); err != nil {
-			return fmt.Errorf("failed to unmount hotplug volumes: %v", err)
-		}
+	cgroupManager, err := getCgroupManager(vmi, c.host)
+	if err != nil {
+		return err
+	}
+	if err = c.hotplugVolumeMounter.UnmountAll(vmi, cgroupManager); err != nil {
+		return fmt.Errorf("failed to unmount hotplug volumes: %v", err)
 	}
 
 	return nil
