@@ -26,21 +26,19 @@ import (
 
 	k8serrors "k8s.io/apimachinery/pkg/util/errors"
 
-	"kubevirt.io/kubevirt/pkg/network/bpfbridge"
-	"kubevirt.io/kubevirt/pkg/network/link"
-
 	"kubevirt.io/client-go/log"
-
-	"kubevirt.io/kubevirt/pkg/network/namescheme"
 
 	v1 "kubevirt.io/api/core/v1"
 
 	"kubevirt.io/kubevirt/pkg/util"
 	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/converter"
 
+	"kubevirt.io/kubevirt/pkg/network/bpfbridge"
 	"kubevirt.io/kubevirt/pkg/network/cache"
 	netdriver "kubevirt.io/kubevirt/pkg/network/driver"
 	"kubevirt.io/kubevirt/pkg/network/istio"
+	"kubevirt.io/kubevirt/pkg/network/link"
+	"kubevirt.io/kubevirt/pkg/network/namescheme"
 	"kubevirt.io/kubevirt/pkg/network/netns"
 	"kubevirt.io/kubevirt/pkg/network/setup/netpod"
 	"kubevirt.io/kubevirt/pkg/network/setup/netpod/masquerade"
@@ -183,16 +181,21 @@ func upgradeConfigStateCache(stateCache *ConfigStateCache, networks []v1.Network
 }
 
 func (c *NetConf) Teardown(vmi *v1.VirtualMachineInstance) error {
-	var errs []error
-	// TODO detach disable
-	//if err := c.teardownBPFBridge(vmi); err != nil {
-	//	errs = append(errs, fmt.Errorf("bpfbridge teardown failed: %w", err))
-	//}
-
+	// Snapshot the per-VMI state under the same critical section that removes it from
+	// the map. teardownBPFBridge needs the cached NSExecutor (carrying the launcher
+	// PID's /proc/<pid>/ns/net path) to detach BPF resources inside the pod-netns
+	// *before* we forget about this VMI.
 	c.configStateMutex.Lock()
+	state := c.state[string(vmi.UID)]
 	delete(c.state, string(vmi.UID))
 	delete(c.statePid, string(vmi.UID))
 	c.configStateMutex.Unlock()
+
+	var errs []error
+	if err := c.teardownBPFBridge(vmi, state); err != nil {
+		errs = append(errs, fmt.Errorf("bpfbridge teardown failed: %w", err))
+	}
+
 	podCache := cache.NewPodInterfaceCache(c.cacheCreator, string(vmi.UID))
 	if err := podCache.Remove(); err != nil {
 		errs = append(errs, fmt.Errorf("pod cache teardown failed: %w", err))
@@ -204,6 +207,76 @@ func (c *NetConf) Teardown(vmi *v1.VirtualMachineInstance) error {
 	return nil
 }
 
+// teardownBPFBridge removes the TC ingress BPF filter and clsact qdisc that
+// bpfbridge.Attach installed on the TAP and pod-side interfaces of every VMI
+// interface bound to the "bpfbridge" plugin.
+//
+// The bulk of the work runs inside the pod-netns via state.NSExec.Do, because the
+// devices we are detaching from ("eth0", "tap0", ...) only exist by that name there;
+// running netlink calls from the host netns would either fail or — worse — touch
+// the wrong devices.
+//
+// If no NSExecutor was ever cached for this VMI (e.g. virt-handler restarted between
+// Setup and Teardown), we cannot enter the right netns and we bail with a warning.
+// That is safe: the pod-netns is about to die with the pod and the kernel reclaims
+// the TC filters, clsact qdiscs and BPF program objects on its own.
+//
+// Per-interface errors are accumulated and returned as a single aggregate; a failure
+// to enter the netns is returned separately so the caller can distinguish it from
+// per-device cleanup failures.
+func (c *NetConf) teardownBPFBridge(vmi *v1.VirtualMachineInstance, state *netpod.State) error {
+	if !hasBPFBridgeBinding(vmi) {
+		return nil
+	}
+	if state == nil || state.NSExec == nil {
+		log.Log.Object(vmi).Warning("bpfbridge teardown: no cached pod-netns executor, skipping detach")
+		return nil
+	}
+
+	podIfaceNameByVMINetwork := namescheme.CreateOrdinalNetworkNameScheme(vmi.Spec.Networks)
+
+	var errs []error
+	nsErr := state.NSExec.Do(func() error {
+		for _, iface := range vmi.Spec.Domain.Devices.Interfaces {
+			if iface.Binding == nil || iface.Binding.Name != "bpfbridge" {
+				continue
+			}
+
+			podIfaceName, exists := podIfaceNameByVMINetwork[iface.Name]
+			if !exists {
+				err := fmt.Errorf("pod interface name not found for network %q", iface.Name)
+				log.Log.Object(vmi).Reason(err).Warning("bpfbridge teardown skipped")
+				errs = append(errs, err)
+				continue
+			}
+
+			vmiNetwork := vmispec.LookupNetworkByName(vmi.Spec.Networks, iface.Name)
+			if vmiNetwork == nil {
+				err := fmt.Errorf("network %q not found", iface.Name)
+				log.Log.Object(vmi).Reason(err).Warning("bpfbridge teardown skipped")
+				errs = append(errs, err)
+				continue
+			}
+
+			tapName := link.GenerateTapDeviceName(podIfaceName, *vmiNetwork)
+			if err := bpfbridge.Detach(tapName, podIfaceName); err != nil {
+				log.Log.Object(vmi).Reason(err).Warningf("bpfbridge teardown failed for network %q", iface.Name)
+				errs = append(errs, fmt.Errorf("network %q: %w", iface.Name, err))
+			}
+		}
+		// NSExec.Do is used purely as a netns switcher here; we drain errs in the
+		// outer scope so a single device failure does not short-circuit the rest of
+		// the cleanup.
+		return nil
+	})
+	if nsErr != nil {
+		log.Log.Object(vmi).Reason(nsErr).Warning("bpfbridge teardown: failed to enter pod netns, skipping detach")
+		return fmt.Errorf("enter pod netns: %w", nsErr)
+	}
+
+	return k8serrors.NewAggregate(errs)
+}
+
 func hasBPFBridgeBinding(vmi *v1.VirtualMachineInstance) bool {
 	for _, iface := range vmi.Spec.Domain.Devices.Interfaces {
 		if iface.Binding != nil && iface.Binding.Name == "bpfbridge" {
@@ -211,46 +284,6 @@ func hasBPFBridgeBinding(vmi *v1.VirtualMachineInstance) bool {
 		}
 	}
 	return false
-}
-
-func (c *NetConf) teardownBPFBridge(vmi *v1.VirtualMachineInstance) error {
-	if !hasBPFBridgeBinding(vmi) {
-		return nil
-	}
-
-	var errs []error
-	podIfaceNameByVMINetwork := namescheme.CreateOrdinalNetworkNameScheme(vmi.Spec.Networks)
-	for _, iface := range vmi.Spec.Domain.Devices.Interfaces {
-		if iface.Binding == nil || iface.Binding.Name != "bpfbridge" {
-			continue
-		}
-
-		podIfaceName, exists := podIfaceNameByVMINetwork[iface.Name]
-		if !exists {
-			err := fmt.Errorf("pod interface name not found for network %q", iface.Name)
-			log.Log.Object(vmi).Reason(err).Warning("bpfbridge teardown skipped")
-			errs = append(errs, err)
-			continue
-		}
-
-		vmiNetwork := vmispec.LookupNetworkByName(vmi.Spec.Networks, iface.Name)
-		if vmiNetwork == nil {
-			err := fmt.Errorf("network %q not found", iface.Name)
-			log.Log.Object(vmi).Reason(err).Warning("bpfbridge teardown skipped")
-			errs = append(errs, err)
-			continue
-		}
-
-		if err := bpfbridge.Detach(
-			link.GenerateTapDeviceName(podIfaceName, *vmiNetwork),
-			podIfaceName,
-		); err != nil {
-			log.Log.Object(vmi).Reason(err).Warningf("bpfbridge teardown failed for network %q", iface.Name)
-			errs = append(errs, fmt.Errorf("network %q: %w", iface.Name, err))
-		}
-	}
-
-	return k8serrors.NewAggregate(errs)
 }
 
 func newMasqueradeAdapter(vmi *v1.VirtualMachineInstance) masquerade.MasqPod {
