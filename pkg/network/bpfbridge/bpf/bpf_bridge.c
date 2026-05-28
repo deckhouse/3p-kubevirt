@@ -32,7 +32,7 @@ int tc_l2_proxy(struct __sk_buff *ctx)
 	int in_ifindex = ctx->ifindex;
 
 	if (in_ifindex == TAP_IFINDEX)
-		return bpf_redirect(POD_IFINDEX, 0);
+		return bpf_redirect_peer(POD_IFINDEX, 0);
 
 	if (in_ifindex == POD_IFINDEX)
 		return bpf_redirect(TAP_IFINDEX, 0);
