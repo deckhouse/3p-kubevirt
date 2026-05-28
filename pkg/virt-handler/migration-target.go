@@ -718,7 +718,12 @@ func (c *MigrationTargetController) syncVolumes(vmi *v1.VirtualMachineInstance) 
 	}
 
 	// Mount hotplug disks
-	if attachmentPodUID := vmi.Status.MigrationState.TargetAttachmentPodUID; attachmentPodUID != types.UID("") {
+	if controller.VMIHasHotplugVolumes(vmi) {
+		attachmentPodUID := vmi.Status.MigrationState.TargetAttachmentPodUID
+		if attachmentPodUID == "" {
+			return errWaitingAttachmentPod
+		}
+
 		cgroupManager, err := getCgroupManager(vmi, c.host)
 		if err != nil {
 			return err
@@ -730,6 +735,8 @@ func (c *MigrationTargetController) syncVolumes(vmi *v1.VirtualMachineInstance) 
 
 	return nil
 }
+
+var errWaitingAttachmentPod = goerror.New("waiting for attachment pod")
 
 func (c *MigrationTargetController) unmountVolumes(vmi *v1.VirtualMachineInstance) error {
 	// The VolumeStatus is used to retrieve additional information for the volume handling.
@@ -797,6 +804,11 @@ func (c *MigrationTargetController) processVMI(vmi *v1.VirtualMachineInstance) e
 	err = c.syncVolumes(vmi)
 	if goerror.Is(err, container_disk.ErrWaitingForDisks) {
 		log.Log.Object(vmi).V(4).Info("waiting for container disks to become ready")
+		c.queue.AddAfter(controller.VirtualMachineInstanceKey(vmi), time.Second*1)
+		return nil
+	}
+	if goerror.Is(err, errWaitingAttachmentPod) {
+		log.Log.Object(vmi).V(4).Info("waiting for attachment pod to be present")
 		c.queue.AddAfter(controller.VirtualMachineInstanceKey(vmi), time.Second*1)
 		return nil
 	}
