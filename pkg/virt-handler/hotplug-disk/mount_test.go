@@ -1056,6 +1056,33 @@ var _ = Describe("HotplugVolume", func() {
 				},
 			})
 			vmi.Status.VolumeStatus = volumeStatuses
+			vmi.Spec.Volumes = []v1.Volume{
+				{
+					Name: "permanent",
+				},
+				{
+					Name: "filesystemvolume",
+					VolumeSource: v1.VolumeSource{
+						PersistentVolumeClaim: &v1.PersistentVolumeClaimVolumeSource{
+							PersistentVolumeClaimVolumeSource: k8sv1.PersistentVolumeClaimVolumeSource{
+								ClaimName: "filesystemvolume",
+							},
+							Hotpluggable: true,
+						},
+					},
+				},
+				{
+					Name: "blockvolume",
+					VolumeSource: v1.VolumeSource{
+						PersistentVolumeClaim: &v1.PersistentVolumeClaimVolumeSource{
+							PersistentVolumeClaimVolumeSource: k8sv1.PersistentVolumeClaimVolumeSource{
+								ClaimName: "blockvolume",
+							},
+							Hotpluggable: true,
+						},
+					},
+				},
+			}
 			deviceBasePath = func(podUID types.UID, kubeletPodDir string) (*safepath.Path, error) {
 				return newDir(tempDir, string(podUID), "volumeDevices")
 			}
@@ -1177,6 +1204,32 @@ var _ = Describe("HotplugVolume", func() {
 			Expect(json.Unmarshal(bytes, updated)).To(Succeed())
 			Expect(updated.MountTargetEntries).To(HaveLen(1))
 			Expect(updated.MountTargetEntries[0].TargetFile).To(Equal(badPathAbs))
+		})
+
+		It("Should skip hotplug volumes missing from spec", func() {
+			block := k8sv1.PersistentVolumeBlock
+			vmi.Status.VolumeStatus = []v1.VolumeStatus{
+				{
+					Name: "stalevolume",
+					PersistentVolumeClaimInfo: &v1.PersistentVolumeClaimInfo{
+						VolumeMode: &block,
+					},
+					HotplugVolume: &v1.HotplugVolumeStatus{
+						AttachPodName: "pod",
+						AttachPodUID:  types.UID("missing-source-pod"),
+					},
+				},
+			}
+			vmi.Spec.Volumes = []v1.Volume{
+				{
+					Name: "permanent",
+				},
+			}
+			deviceBasePath = func(podUID types.UID, kubeletPodDir string) (*safepath.Path, error) {
+				return nil, os.ErrNotExist
+			}
+
+			Expect(m.Mount(vmi, cgroupManagerMock)).To(Succeed())
 		})
 
 		It("Should not do anything if vmi has no hotplug volumes", func() {
