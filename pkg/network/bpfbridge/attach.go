@@ -1,7 +1,11 @@
 package bpfbridge
 
 import (
+	"errors"
 	"fmt"
+	"syscall"
+
+	k8serrors "k8s.io/apimachinery/pkg/util/errors"
 
 	"github.com/cilium/ebpf"
 	"github.com/vishvananda/netlink"
@@ -10,6 +14,7 @@ import (
 
 const (
 	DefaultPodIface = "eth0"
+	programName     = "tc_l2_proxy"
 )
 
 // EnsureWiring validates and normalizes TAP wiring in the current netns, mirroring
@@ -70,7 +75,7 @@ func Attach(objPath, tapName, podName string) error {
 	if !ok {
 		return fmt.Errorf("BPF object missing bridge_cfg map")
 	}
-	prog, ok := coll.Programs["tc_l2_proxy"]
+	prog, ok := coll.Programs[programName]
 	if !ok {
 		return fmt.Errorf("BPF object missing tc_l2_proxy program")
 	}
@@ -152,11 +157,47 @@ func replaceIngressBPF(dev string, prog *ebpf.Program) error {
 			Protocol:  unix.ETH_P_ALL,
 		},
 		Fd:           prog.FD(),
-		Name:         "tc_l2_proxy",
+		Name:         programName,
 		DirectAction: true,
 	}
 	if err := netlink.FilterReplace(filter); err != nil {
 		return fmt.Errorf("attach bpf filter dev %s ingress: %w", dev, err)
 	}
 	return nil
+}
+
+func Detach(devices ...string) error {
+	var errs []error
+
+	for _, dev := range devices {
+		if dev == "" {
+			continue
+		}
+
+		link, err := netlink.LinkByName(dev)
+		if err != nil {
+			if isIgnorableDetachError(err) {
+				continue
+			}
+			errs = append(errs, fmt.Errorf("lookup link %s: %w", dev, err))
+			continue
+		}
+
+		if err := netlink.FilterDel(&netlink.BpfFilter{FilterAttrs: netlink.FilterAttrs{LinkIndex: link.Attrs().Index, Parent: netlink.HANDLE_MIN_INGRESS}}); err != nil && !isIgnorableDetachError(err) {
+			errs = append(errs, fmt.Errorf("delete ingress filter dev %s: %w", dev, err))
+		}
+		if err := netlink.QdiscDel(&netlink.Clsact{QdiscAttrs: netlink.QdiscAttrs{LinkIndex: link.Attrs().Index, Handle: netlink.MakeHandle(0xffff, 0), Parent: netlink.HANDLE_CLSACT}}); err != nil && !isIgnorableDetachError(err) {
+			errs = append(errs, fmt.Errorf("delete clsact qdisc dev %s: %w", dev, err))
+		}
+	}
+
+	return k8serrors.NewAggregate(errs)
+}
+
+func isIgnorableDetachError(err error) bool {
+	var linkNotFoundErr netlink.LinkNotFoundError
+	if errors.As(err, &linkNotFoundErr) {
+		return true
+	}
+	return errors.Is(err, syscall.ENOENT) || errors.Is(err, syscall.ENODEV) || errors.Is(err, syscall.ESRCH)
 }
