@@ -898,7 +898,12 @@ func (c *MigrationTargetController) syncVolumes(vmi *v1.VirtualMachineInstance) 
 	}
 
 	// Mount hotplug disks
-	if attachmentPodUID := vmi.Status.MigrationState.TargetAttachmentPodUID; attachmentPodUID != "" {
+	if controller.VMIHasHotplugVolumes(vmi) {
+		attachmentPodUID := vmi.Status.MigrationState.TargetAttachmentPodUID
+		if attachmentPodUID == "" {
+			return errWaitingAttachmentPod
+		}
+
 		cgroupManager, err := getCgroupManager(vmi, c.host, c.hypervisorNodeInfo, c.clusterConfig.AllowEmulation())
 		if err != nil {
 			return err
@@ -910,6 +915,8 @@ func (c *MigrationTargetController) syncVolumes(vmi *v1.VirtualMachineInstance) 
 
 	return nil
 }
+
+var errWaitingAttachmentPod = goerror.New("waiting for attachment pod")
 
 func (c *MigrationTargetController) unmountVolumes(originalVMI *v1.VirtualMachineInstance) error {
 	// The VolumeStatus is used to retrieve additional information for the volume handling.
@@ -927,15 +934,13 @@ func (c *MigrationTargetController) unmountVolumes(originalVMI *v1.VirtualMachin
 		return err
 	}
 
-	// Unmount all hotplug volumes
-	if attachmentPodUID := vmiCopy.Status.MigrationState.TargetAttachmentPodUID; attachmentPodUID != "" {
-		cgroupManager, err := getCgroupManager(vmiCopy, c.host, c.hypervisorNodeInfo, c.clusterConfig.AllowEmulation())
-		if err != nil {
-			return err
-		}
-		if err = c.hotplugVolumeMounter.UnmountAll(vmiCopy, cgroupManager); err != nil {
-			return fmt.Errorf("failed to unmount all hotplug volumes: %v", err)
-		}
+	// Unmount all hotplug volumes, even if the attachment pod is already gone.
+	cgroupManager, err := getCgroupManager(vmiCopy, c.host, c.hypervisorNodeInfo, c.clusterConfig.AllowEmulation())
+	if err != nil {
+		return err
+	}
+	if err = c.hotplugVolumeMounter.UnmountAll(vmiCopy, cgroupManager); err != nil {
+		return fmt.Errorf("failed to unmount all hotplug volumes: %v", err)
 	}
 
 	return nil
@@ -1029,6 +1034,11 @@ func (c *MigrationTargetController) processVMI(vmi *v1.VirtualMachineInstance) (
 	}
 	if goerror.Is(err, hotplugvolume.ErrWaitingForHotplugMount) {
 		c.logger.Object(vmi).V(4).Infof("waiting for hotplug volumes to be mounted: %v", err)
+		c.queue.AddAfter(controller.VirtualMachineInstanceKey(vmi), time.Second*1)
+		return nil, true
+	}
+	if goerror.Is(err, errWaitingAttachmentPod) {
+		c.logger.Object(vmi).V(4).Info("waiting for attachment pod to be present")
 		c.queue.AddAfter(controller.VirtualMachineInstanceKey(vmi), time.Second*1)
 		return nil, true
 	}
