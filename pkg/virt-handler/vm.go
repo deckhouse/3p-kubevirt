@@ -131,7 +131,6 @@ type VirtualMachineController struct {
 	hotplugContainerDiskMounter container_disk.HotplugMounter
 	nam                         *migrations.NetworkAccessibilityManager
 	checksumCtrl                *checksum_controller.Controller
-	pvcDiskImgCreator           func() hostdisk.PVCDiskImgCreator
 	hostDeviceAttacher          hotplug_hostdevice.HostDeviceAttacher
 }
 
@@ -225,7 +224,6 @@ func NewVirtualMachineController(
 	pvcDiskImgCreator := func() hostdisk.PVCDiskImgCreator {
 		return hostdisk.NewPVCDiskImgCreator(recorder, c.clusterConfig.GetLessPVCSpaceToleration(), c.clusterConfig.GetMinimumReservePVCBytes())
 	}
-	c.pvcDiskImgCreator = pvcDiskImgCreator
 	c.hotplugVolumeMounter = hotplug_volume.NewVolumeMounterWithCreator(volumeHotplugState, kubeletPodsDir, "master", pvcDiskImgCreator)
 
 	_, err = vmiInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
@@ -1234,7 +1232,7 @@ func (d *VirtualMachineController) updatePVCSizeStatus(vmi *v1.VirtualMachineIns
 			}
 		case *volumeMode == k8sv1.PersistentVolumeFilesystem:
 			if hotplugged {
-				volPath = fmt.Sprintf("/var/run/kubevirt/hotplug-disks/%s/disk.img", volume.Name)
+				volPath = fmt.Sprintf("/var/run/kubevirt/hotplug-disks/%s.img", volume.Name)
 			} else {
 				volPath = fmt.Sprintf("/var/run/kubevirt-private/vmi-disks/%s/disk.img", volume.Name)
 			}
@@ -1329,8 +1327,36 @@ func (c *VirtualMachineController) updateVMIConditions(vmi *v1.VirtualMachineIns
 		return err
 	}
 	c.updatePausedConditions(vmi, domain, condManager)
+	c.updateBootFailedCondition(vmi, domain, condManager)
 
 	return nil
+}
+
+func (c *VirtualMachineController) updateBootFailedCondition(vmi *v1.VirtualMachineInstance, domain *api.Domain, condManager *controller.VirtualMachineInstanceConditionManager) {
+	if domain == nil {
+		return
+	}
+
+	// Reset the condition when firmware no longer reports boot failure (i.e. on reboot).
+	if !domain.Spec.Metadata.KubeVirt.BootFailed {
+		condManager.RemoveCondition(vmi, v1.VirtualMachineInstanceBootFailed)
+		return
+	}
+
+	// Firmware reported "No bootable device." via the dedicated 0x403 debugcon.
+	if condManager.HasCondition(vmi, v1.VirtualMachineInstanceBootFailed) {
+		return
+	}
+
+	vmi.Status.Conditions = append(vmi.Status.Conditions, v1.VirtualMachineInstanceCondition{
+		Type:               v1.VirtualMachineInstanceBootFailed,
+		Status:             k8sv1.ConditionTrue,
+		LastProbeTime:      metav1.Now(),
+		LastTransitionTime: metav1.Now(),
+		Reason:             "NoBootableDevice",
+		Message:            "System firmware (BIOS/UEFI) found no bootable device to start guest OS.",
+	})
+	log.Log.Object(vmi).Infof("Boot failure detected: firmware reported 'No bootable device.' on domain %s", domain.ObjectMeta.Name)
 }
 
 func (c *VirtualMachineController) updateVMIStatus(oldStatus *v1.VirtualMachineInstanceStatus, vmi *v1.VirtualMachineInstance, domain *api.Domain, syncError error) (err error) {
