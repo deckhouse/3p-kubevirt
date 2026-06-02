@@ -101,6 +101,11 @@ func calculatePodIfaceStatuses(
 			continue
 		}
 
+		iface := vmispec.LookupInterfaceByName(vmi.Spec.Domain.Devices.Interfaces, network.Name)
+		if iface != nil && iface.State == v1.InterfaceStateAbsent {
+			continue
+		}
+
 		var podIfaceName string
 		if isFirstDefaultNetwork {
 			podIfaceName = primaryPodIfaceName
