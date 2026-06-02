@@ -14,6 +14,7 @@ func getDRAUSBHostDevices(vmi *v1.VirtualMachineInstance) ([]api.HostDevice, []a
 	if vmi.Status.DeviceStatus == nil {
 		return nil, nil, fmt.Errorf("vmi has dra usb devices but no device status found")
 	}
+	setPolicy(vmi)
 
 	var (
 		hostDevices             []api.HostDevice
@@ -53,12 +54,20 @@ func getDRAUSBHostDevices(vmi *v1.VirtualMachineInstance) ([]api.HostDevice, []a
 	return hostDevices, hotpluggableHostDevices, nil
 }
 
+var policy = "requisite"
+
+func setPolicy(vmi *v1.VirtualMachineInstance) {
+	if ann, ok := vmi.Annotations["startupPolicy"]; ok {
+		policy = ann
+	}
+}
+
 func newUSBHostDevice(usbAddress *v1.USBAddress, name string, hotplug bool) api.HostDevice {
 	var alias *api.Alias
-	startupPolicy := "requisite"
+	startupPolicy := policy // "requisite"
 	if hotplug {
 		alias = api.NewUserDefinedAlias(DRAHotplugHostDeviceAliasPrefix + name)
-		startupPolicy = "requisite" // "optional"
+		startupPolicy = policy // "optional"
 	} else {
 		alias = api.NewUserDefinedAlias(DRAHostDeviceAliasPrefix + name)
 	}
