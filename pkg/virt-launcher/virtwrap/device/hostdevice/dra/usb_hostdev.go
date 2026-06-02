@@ -58,7 +58,7 @@ func newUSBHostDevice(usbAddress *v1.USBAddress, name string, hotplug bool) api.
 	startupPolicy := "required"
 	if hotplug {
 		alias = api.NewUserDefinedAlias(DRAHotplugHostDeviceAliasPrefix + name)
-		startupPolicy = "optional"
+		startupPolicy = "required" // "optional"
 	} else {
 		alias = api.NewUserDefinedAlias(DRAHostDeviceAliasPrefix + name)
 	}
