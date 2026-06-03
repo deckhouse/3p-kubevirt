@@ -58,7 +58,8 @@ func filterNetsToHotplug(
 	ifaceStatusesInPodAndNotInDomain := vmispec.IndexInterfaceStatusByName(
 		ifaceStatuses,
 		func(ifaceStatus v1.VirtualMachineInstanceNetworkInterface) bool {
-			return !vmispec.ContainsInfoSource(ifaceStatus.InfoSource, vmispec.InfoSourceDomain)
+			return vmispec.ContainsInfoSource(ifaceStatus.InfoSource, vmispec.InfoSourceMultusStatus) &&
+				!vmispec.ContainsInfoSource(ifaceStatus.InfoSource, vmispec.InfoSourceDomain)
 		},
 	)
 
