@@ -182,10 +182,14 @@ func Convert_v1_Disk_To_api_Disk(c *ConverterContext, diskDevice *v1.Disk, disk 
 			setReservation(disk)
 		}
 	} else if diskDevice.CDRom != nil {
+		var unit int
 		disk.Device = "cdrom"
 		disk.Target.Tray = string(diskDevice.CDRom.Tray)
 		disk.Target.Bus = diskDevice.CDRom.Bus
-		disk.Target.Device, _ = makeDeviceName(diskDevice.Name, diskDevice.CDRom.Bus, prefixMap)
+		disk.Target.Device, unit = makeDeviceName(diskDevice.Name, diskDevice.CDRom.Bus, prefixMap)
+		if diskDevice.CDRom.Bus == "scsi" {
+			assignDiskToSCSIController(disk, unit)
+		}
 		if diskDevice.CDRom.ReadOnly != nil {
 			disk.ReadOnly = toApiReadOnly(*diskDevice.CDRom.ReadOnly)
 		} else {
@@ -2023,6 +2027,14 @@ func Convert_v1_VirtualMachineInstance_To_api_Domain(vmi *v1.VirtualMachineInsta
 		}
 	}
 
+	initializeQEMUCmdAndQEMUArg(domain)
+	domain.Spec.QEMUCmd.QEMUArg = append(domain.Spec.QEMUCmd.QEMUArg,
+		api.Arg{Value: "-chardev"},
+		api.Arg{Value: "null,id=bootfailurelog"},
+		api.Arg{Value: "-device"},
+		api.Arg{Value: "isa-debugcon,iobase=0x403,chardev=bootfailurelog,watch-no-bootable=on"},
+	)
+
 	if tpm.HasDevice(&vmi.Spec) {
 		domain.Spec.Devices.TPMs = []api.TPM{
 			{
@@ -2165,10 +2177,18 @@ func newDeviceNamer(volumeStatuses []v1.VolumeStatus, disks []v1.Disk) map[strin
 	}
 
 	for _, disk := range disks {
-		if disk.Disk == nil {
+		var prefix string
+		switch {
+		case disk.Disk != nil:
+			prefix = getPrefixFromBus(disk.Disk.Bus)
+		case disk.LUN != nil:
+			prefix = getPrefixFromBus(disk.LUN.Bus)
+		case disk.CDRom != nil:
+			prefix = getPrefixFromBus(disk.CDRom.Bus)
+		default:
 			continue
 		}
-		prefix := getPrefixFromBus(disk.Disk.Bus)
+
 		if _, ok := prefixMap[prefix]; !ok {
 			prefixMap[prefix] = deviceNamer{
 				existingNameMap: make(map[string]string),
