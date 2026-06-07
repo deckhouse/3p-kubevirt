@@ -153,6 +153,7 @@ var _ = Describe("VM Network Controller", func() {
 	},
 		Entry("when the plugged interface uses bridge binding", libvmi.InterfaceDeviceWithBridgeBinding(secondaryNetName)),
 		Entry("when the plugged interface uses SR-IOV binding", libvmi.InterfaceDeviceWithSRIOVBinding(secondaryNetName)),
+		Entry("when the plugged interface uses bpfbridge binding", libvmi.InterfaceWithBindingPlugin(secondaryNetName, v1.PluginBinding{Name: "bpfbridge"})),
 		Entry("when the plugged interface has link state down", v1.Interface{
 			Name: secondaryNetName,
 			InterfaceBindingMethod: v1.InterfaceBindingMethod{

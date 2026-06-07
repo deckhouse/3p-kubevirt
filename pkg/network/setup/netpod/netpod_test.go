@@ -1110,7 +1110,7 @@ var _ = Describe("netpod", func() {
 			nmstate.Spec{
 				Interfaces: []nmstate.Interface{},
 				LinuxStack: nmstate.LinuxStack{IPv4: nmstate.LinuxStackIP4{
-					PingGroupRange:        []int{107, 107},
+					PingGroupRange:        []int{64535, 64535},
 					UnprivilegedPortStart: pointer.P(0),
 				}},
 			},
@@ -1880,6 +1880,67 @@ var _ = Describe("netpod", func() {
 					MTU:      1500,
 					Tap:      &nmstate.TapDevice{Queues: 0, UID: 0, GID: 0},
 					Metadata: &nmstate.IfaceMetadata{Pid: 0, NetworkName: defaultPodNetworkName},
+				},
+			))
+		})
+
+		It("creates native taps for non-default pod networks", func() {
+			const secondaryNetworkName = "veth_cn76a0e2ba"
+			nmstatestub := nmstateStub{status: nmstate.Status{
+				Interfaces: []nmstate.Interface{
+					{
+						Name:       "eth0",
+						Index:      0,
+						TypeName:   nmstate.TypeVETH,
+						State:      nmstate.IfaceStateUp,
+						MacAddress: "12:34:56:78:90:ab",
+						MTU:        1500,
+					},
+					{
+						Name:       secondaryNetworkName,
+						Index:      1,
+						TypeName:   nmstate.TypeVETH,
+						State:      nmstate.IfaceStateUp,
+						MacAddress: "22:34:56:78:90:ab",
+						MTU:        1400,
+					},
+				},
+			}}
+
+			vmiIfaces := []v1.Interface{
+				{Name: defaultPodNetworkName, Binding: &v1.PluginBinding{Name: "bpfbridge"}},
+				{Name: secondaryNetworkName, Binding: &v1.PluginBinding{Name: "bpfbridge"}},
+			}
+			netPod := netpod.NewNetPod(
+				[]v1.Network{
+					*v1.DefaultPodNetwork(),
+					{Name: secondaryNetworkName, NetworkSource: v1.NetworkSource{Pod: &v1.PodNetwork{}}},
+				},
+				vmiIfaces,
+				vmiUID, 0, 0, 0, state,
+				netpod.WithNMStateAdapter(&nmstatestub),
+				netpod.WithCacheCreator(&baseCacheCreator),
+				netpod.WithBindingPlugins(map[string]v1.InterfaceBindingPlugin{
+					"bpfbridge": {DomainAttachmentType: v1.Tap},
+				}),
+			)
+			Expect(netPod.Setup()).NotTo(Succeed())
+			Expect(nmstatestub.spec.Interfaces).To(ContainElements(
+				nmstate.Interface{
+					Name:     "tap0",
+					TypeName: nmstate.TypeTap,
+					State:    nmstate.IfaceStateUp,
+					MTU:      1500,
+					Tap:      &nmstate.TapDevice{Queues: 0, UID: 0, GID: 0},
+					Metadata: &nmstate.IfaceMetadata{Pid: 0, NetworkName: defaultPodNetworkName},
+				},
+				nmstate.Interface{
+					Name:     secondaryNetworkName,
+					TypeName: nmstate.TypeTap,
+					State:    nmstate.IfaceStateUp,
+					MTU:      1400,
+					Tap:      &nmstate.TapDevice{Queues: 0, UID: 0, GID: 0},
+					Metadata: &nmstate.IfaceMetadata{Pid: 0, NetworkName: secondaryNetworkName},
 				},
 			))
 		})

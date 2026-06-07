@@ -40,7 +40,7 @@ func (n NetPod) discover(currentStatus *nmstate.Status) error {
 	podIfaceNameByVMINetwork := createNetworkNameScheme(n.vmiSpecNets, n.vmiIfaceStatuses, currentStatus.Interfaces)
 
 	for _, vmiSpecIface := range n.vmiSpecIfaces {
-		if skipPodInterfaceIsNotDefault(vmiSpecIface.Name, n.vmiSpecNets) {
+		if skipPodInterfaceIsNotDefault(vmiSpecIface.Name, n.vmiSpecNets) && !isBPFBridgeBinding(vmiSpecIface) {
 			continue
 		}
 

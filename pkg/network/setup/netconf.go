@@ -233,7 +233,7 @@ func (c *NetConf) teardownBPFBridge(vmi *v1.VirtualMachineInstance, state *netpo
 		return nil
 	}
 
-	podIfaceNameByVMINetwork := namescheme.CreateOrdinalNetworkNameScheme(vmi.Spec.Networks)
+	podIfaceNameByVMINetwork := bpfBridgeTeardownNetworkNameScheme(vmi.Spec.Networks)
 
 	var errs []error
 	nsErr := state.NSExec.Do(func() error {
@@ -275,6 +275,16 @@ func (c *NetConf) teardownBPFBridge(vmi *v1.VirtualMachineInstance, state *netpo
 	}
 
 	return k8serrors.NewAggregate(errs)
+}
+
+func bpfBridgeTeardownNetworkNameScheme(networks []v1.Network) map[string]string {
+	podIfaceNamesByNetworkName := namescheme.CreateOrdinalNetworkNameScheme(networks)
+	for _, network := range networks {
+		if network.Pod != nil && network.Name != "default" {
+			podIfaceNamesByNetworkName[network.Name] = network.Name
+		}
+	}
+	return podIfaceNamesByNetworkName
 }
 
 func hasBPFBridgeBinding(vmi *v1.VirtualMachineInstance) bool {

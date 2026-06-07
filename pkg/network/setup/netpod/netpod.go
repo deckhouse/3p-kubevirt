@@ -25,6 +25,7 @@ import (
 	"net"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	k8serrors "k8s.io/apimachinery/pkg/util/errors"
 
@@ -274,7 +275,7 @@ func (n NetPod) composeDesiredSpec(currentStatus *nmstate.Status) (*nmstate.Spec
 	spec := nmstate.Spec{Interfaces: []nmstate.Interface{}}
 
 	for ifIndex, iface := range n.vmiSpecIfaces {
-		if skipPodInterfaceIsNotDefault(iface.Name, n.vmiSpecNets) {
+		if skipPodInterfaceIsNotDefault(iface.Name, n.vmiSpecNets) && !isBPFBridgeBinding(iface) {
 			continue
 		}
 
@@ -323,7 +324,7 @@ func (n NetPod) composeDesiredSpec(currentStatus *nmstate.Status) (*nmstate.Spec
 		case iface.SRIOV != nil:
 		case iface.Binding != nil:
 			bindingPlugin, exists := n.bindingPluginsByName[iface.Binding.Name]
-			if exists && iface.Binding.Name == "bpfbridge" {
+			if exists && isBPFBridgeBinding(iface) {
 				if _, exists := podIfaceStatusByName[podIfaceName]; !exists {
 					return nil, fmt.Errorf("pod link (%s) is missing", podIfaceName)
 				}
@@ -510,7 +511,9 @@ func (n NetPod) bpfBridgeSpec(podIfaceName string, vmiIfaceIndex int, ifaceStatu
 	podIface := ifaceStatusByName[podIfaceName]
 	vmiNetworkName := n.vmiSpecIfaces[vmiIfaceIndex].Name
 	vmiNetwork := vmispec.LookupNetworkByName(n.vmiSpecNets, vmiNetworkName)
-
+	if vmiNetwork == nil {
+		return nil, fmt.Errorf("network %s not found for bpfbridge interface", vmiNetworkName)
+	}
 	tapIface := nmstate.Interface{
 		Name:     link.GenerateTapDeviceName(podIfaceName, *vmiNetwork),
 		TypeName: nmstate.TypeTap,
@@ -588,7 +591,7 @@ func (n NetPod) managedTapSpec(podIfaceName string, vmiIfaceIndex int, ifaceStat
 func (n NetPod) setupBPFBridge(currentStatus *nmstate.Status) error {
 	podIfaceNameByVMINetwork := createNetworkNameScheme(n.vmiSpecNets, n.vmiIfaceStatuses, currentStatus.Interfaces)
 	for ifIndex, iface := range n.vmiSpecIfaces {
-		if iface.Binding == nil || iface.Binding.Name != "bpfbridge" {
+		if !isBPFBridgeBinding(iface) {
 			continue
 		}
 
@@ -725,6 +728,10 @@ func firstIPGlobalUnicast(ip nmstate.IP) *nmstate.IPAddress {
 	return nil
 }
 
+func isBPFBridgeBinding(iface v1.Interface) bool {
+	return iface.Binding != nil && iface.Binding.Name == "bpfbridge"
+}
+
 func createNetworkNameScheme(networks []v1.Network, ifaceStatuses []v1.VirtualMachineInstanceNetworkInterface, currentIfaces []nmstate.Interface) map[string]string {
 	var podIfaceNamesByNetworkName map[string]string
 
@@ -734,7 +741,81 @@ func createNetworkNameScheme(networks []v1.Network, ifaceStatuses []v1.VirtualMa
 		podIfaceNamesByNetworkName = namescheme.CreateHashedNetworkNameScheme(networks)
 	}
 
-	return namescheme.UpdatePrimaryPodIfaceNameFromVMIStatus(podIfaceNamesByNetworkName, networks, ifaceStatuses)
+	podIfaceNamesByNetworkName = namescheme.UpdatePrimaryPodIfaceNameFromVMIStatus(podIfaceNamesByNetworkName, networks, ifaceStatuses)
+	return updateNonDefaultPodInterfaceNamesFromCurrentStatus(podIfaceNamesByNetworkName, networks, ifaceStatuses, currentIfaces)
+}
+
+func updateNonDefaultPodInterfaceNamesFromCurrentStatus(
+	podIfaceNamesByNetworkName map[string]string,
+	networks []v1.Network,
+	ifaceStatuses []v1.VirtualMachineInstanceNetworkInterface,
+	currentIfaces []nmstate.Interface,
+) map[string]string {
+	currentIfaceNames := map[string]struct{}{}
+	for _, iface := range currentIfaces {
+		currentIfaceNames[iface.Name] = struct{}{}
+	}
+
+	primaryPodIfaceName := podIfaceNamesByNetworkName["default"]
+	if primaryPodIfaceName == "" {
+		primaryPodIfaceName = namescheme.PrimaryPodInterfaceName
+	}
+
+	var secondaryPodNetworks []v1.Network
+	for _, network := range networks {
+		if network.Pod != nil && network.Name != "default" {
+			secondaryPodNetworks = append(secondaryPodNetworks, network)
+		}
+	}
+	if len(secondaryPodNetworks) == 0 {
+		return podIfaceNamesByNetworkName
+	}
+
+	usedCandidateNames := map[string]struct{}{primaryPodIfaceName: {}}
+	for _, network := range secondaryPodNetworks {
+		if _, exists := currentIfaceNames[network.Name]; exists {
+			podIfaceNamesByNetworkName[network.Name] = network.Name
+			usedCandidateNames[network.Name] = struct{}{}
+			continue
+		}
+		if ifaceStatus := vmispec.LookupInterfaceStatusByName(ifaceStatuses, network.Name); ifaceStatus != nil && ifaceStatus.PodInterfaceName != "" {
+			if _, exists := currentIfaceNames[ifaceStatus.PodInterfaceName]; exists {
+				podIfaceNamesByNetworkName[network.Name] = ifaceStatus.PodInterfaceName
+				usedCandidateNames[ifaceStatus.PodInterfaceName] = struct{}{}
+			}
+		}
+	}
+
+	var candidateNames []string
+	for _, iface := range currentIfaces {
+		if _, used := usedCandidateNames[iface.Name]; used {
+			continue
+		}
+		if isKubeVirtOwnedInterface(iface) || iface.Name == "lo" {
+			continue
+		}
+		candidateNames = append(candidateNames, iface.Name)
+	}
+
+	candidateIndex := 0
+	for _, network := range secondaryPodNetworks {
+		if podIfaceName, exists := podIfaceNamesByNetworkName[network.Name]; exists {
+			if _, linkExists := currentIfaceNames[podIfaceName]; linkExists {
+				continue
+			}
+		}
+		if candidateIndex >= len(candidateNames) {
+			continue
+		}
+		podIfaceNamesByNetworkName[network.Name] = candidateNames[candidateIndex]
+		candidateIndex++
+	}
+
+	return podIfaceNamesByNetworkName
+}
+
+func isKubeVirtOwnedInterface(iface nmstate.Interface) bool {
+	return iface.TypeName == nmstate.TypeTap || iface.TypeName == nmstate.TypeBridge || iface.TypeName == nmstate.TypeDummy || strings.HasPrefix(iface.Name, "tap") || strings.HasPrefix(iface.Name, "k6t-")
 }
 
 func skipPodInterfaceIsNotDefault(name string, networks []v1.Network) bool {
