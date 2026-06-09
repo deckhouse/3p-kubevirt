@@ -31,6 +31,8 @@ import (
 )
 
 func SetupMetrics(virtShareDir, nodeName string, MaxRequestsInFlight int, vmiInformer cache.SharedIndexInformer, machines []libvirtxml.CapsGuestMachine) error {
+	// TODO: revert it
+	return nil
 	if err := workqueue.SetupMetrics(); err != nil {
 		return err
 	}
