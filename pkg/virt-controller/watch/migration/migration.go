@@ -131,6 +131,11 @@ type Controller struct {
 	handOffLock sync.Mutex
 	handOffMap  map[string]struct{}
 
+	// the set of migrations admitted to a sync slot.
+	// needed to avoid over-amission due to stale informer cache.
+	// the map keys are migration UIDs. Guarded by migrationStartLock.
+	pendingSyncSlots map[types.UID]pendingSyncSlot
+
 	nam *migrations.NetworkAccessibilityManager
 
 	unschedulablePendingTimeoutSeconds int64
@@ -176,6 +181,7 @@ func NewController(templateService services.TemplateService,
 		migrationStartLock:   &sync.Mutex{},
 		clusterConfig:        clusterConfig,
 		handOffMap:           make(map[string]struct{}),
+		pendingSyncSlots:     make(map[types.UID]pendingSyncSlot),
 
 		nam: migrations.NewNetworkAccessibilityManager(clientset),
 
@@ -2129,22 +2135,36 @@ func (c *Controller) outboundMigrationsOnNode(node string, runningMigrations []*
 	return sum
 }
 
-// holdForSyncSlot decides whether a migration in PreparingTarget must wait for a
-// free data-transfer (sync) slot on the source node. If so, it sets the
-// WaitingForSyncSlot condition on migrationCopy, requeues the migration with a
-// short delay, and returns true. Otherwise it returns false, allowing the
-// caller to transition to TargetReady.
+// pendingSyncSlot is a reserved sync slot: the reserving
+// migration's namespace/name key and the source node the slot belongs to.
+type pendingSyncSlot struct {
+	key  string
+	node string
+}
+
+// holdForSyncSlot decides whether a migration in PreparingTarget must wait for a free sync slot on the source node.
 func (c *Controller) holdForSyncSlot(migration, migrationCopy *virtv1.VirtualMachineInstanceMigration, vmi *virtv1.VirtualMachineInstance) bool {
 	if vmi == nil || vmi.Status.NodeName == "" {
 		return false
 	}
+
+	c.migrationStartLock.Lock()
+	defer c.migrationStartLock.Unlock()
+
+	if _, reserved := c.pendingSyncSlots[migration.UID]; reserved {
+		return false
+	}
+
+	node := vmi.Status.NodeName
 	syncCap := c.clusterConfig.GetEffectiveParallelSyncMigrationsPerNode()
-	syncing := c.syncingMigrationsOnNode(vmi.Status.NodeName, migration)
-	if uint32(syncing) < syncCap {
+	c.pruneSyncSlotReservations()
+	occupied := c.syncingMigrationsOnNode(node, migration) + c.reservedSyncSlotsOnNode(node)
+	if uint32(occupied) < syncCap {
+		c.pendingSyncSlots[migration.UID] = pendingSyncSlot{key: controller.MigrationKey(migration), node: node}
 		return false
 	}
 	msg := fmt.Sprintf("Target prepared; waiting for sync slot on source node %q (%d/%d in data-transfer)",
-		vmi.Status.NodeName, syncing, syncCap)
+		node, occupied, syncCap)
 	cm := controller.NewVirtualMachineInstanceMigrationConditionManager()
 	if !cm.HasCondition(migrationCopy, virtv1.VirtualMachineInstanceMigrationWaitingForSyncSlot) {
 		cm.UpdateCondition(migrationCopy, &virtv1.VirtualMachineInstanceMigrationCondition{
@@ -2183,6 +2203,38 @@ func (c *Controller) syncingMigrationsOnNode(node string, self *virtv1.VirtualMa
 		}
 		vmi := obj.(*virtv1.VirtualMachineInstance)
 		if vmi.Status.NodeName == node || (vmi.Status.MigrationState != nil && vmi.Status.MigrationState.SourceNode == node) {
+			sum++
+		}
+	}
+	return sum
+}
+
+// pruneSyncSlotReservations drops sync slot reservations whose admission is now
+// visible in the informer cache, or whose migration is gone, final, or
+// was recreated under the same key. Callers must hold migrationStartLock.
+func (c *Controller) pruneSyncSlotReservations() {
+	for uid, slot := range c.pendingSyncSlots {
+		obj, exists, _ := c.migrationIndexer.GetByKey(slot.key)
+		if !exists {
+			delete(c.pendingSyncSlots, uid)
+			continue
+		}
+		migration := obj.(*virtv1.VirtualMachineInstanceMigration)
+		if migration.UID != uid || migration.IsFinal() ||
+			migration.Status.Phase == virtv1.MigrationTargetReady ||
+			migration.Status.Phase == virtv1.MigrationRunning {
+			delete(c.pendingSyncSlots, uid)
+		}
+	}
+}
+
+// reservedSyncSlotsOnNode counts sync slot reservations on the given node that
+// are not yet visible in the informer cache. Callers must hold
+// migrationStartLock.
+func (c *Controller) reservedSyncSlotsOnNode(node string) int {
+	sum := 0
+	for _, slot := range c.pendingSyncSlots {
+		if slot.node == node {
 			sum++
 		}
 	}
