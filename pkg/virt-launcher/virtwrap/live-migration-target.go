@@ -30,6 +30,7 @@ import (
 	"strconv"
 	"time"
 
+	k8sv1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	v1 "kubevirt.io/api/core/v1"
@@ -144,6 +145,15 @@ func reconnectIface(dom cli.VirDomain, iface api.Interface) error {
 	return nil
 }
 
+func hasBootFailedCondition(vmi *v1.VirtualMachineInstance) bool {
+	for _, condition := range vmi.Status.Conditions {
+		if condition.Type == v1.VirtualMachineInstanceBootFailed && condition.Status == k8sv1.ConditionTrue {
+			return true
+		}
+	}
+	return false
+}
+
 func shouldBlockMigrationTargetPreparation(vmi *v1.VirtualMachineInstance) bool {
 	if vmi.Annotations == nil {
 		return false
@@ -207,6 +217,10 @@ func (l *LibvirtDomainManager) prepareMigrationTarget(
 	// preparation must fully re-run on retries (sockets, hooks, etc.).
 	if _, err := l.initializeMigrationMetadata(vmi, v1.MigrationPreCopy); err != nil {
 		return err
+	}
+	// Keep the boot failure reported by the source domain: the target did not boot the guest itself.
+	if hasBootFailedCondition(vmi) {
+		l.metadataCache.BootFailed.Set(true)
 	}
 
 	err = l.generateCloudInitEmptyISO(vmi, nil)

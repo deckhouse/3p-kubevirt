@@ -39,6 +39,7 @@ import (
 	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/disksource"
 	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/network"
 
+	k8sv1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -2759,6 +2760,25 @@ var _ = Describe("Manager", func() {
 				Expect(c.GPUHostDevices[0].Alias).ToNot(BeNil())
 				Expect(c.GPUHostDevices[0].Alias.GetName()).To(ContainSubstring(vGPUName))
 			})
+		})
+
+		It("should preserve boot failure condition on the target pod", func() {
+			vmi := newVMI(testNamespace, testVmName)
+			vmi.Status.MigrationState = &v1.VirtualMachineInstanceMigrationState{
+				MigrationUID: "111222333",
+				TargetPod:    "fakepod",
+			}
+			vmi.Status.Conditions = append(vmi.Status.Conditions, v1.VirtualMachineInstanceCondition{
+				Type:   v1.VirtualMachineInstanceBootFailed,
+				Status: k8sv1.ConditionTrue,
+			})
+
+			manager, _ := newLibvirtDomainManagerDefault()
+			Expect(manager.PrepareMigrationTarget(vmi, true, &cmdv1.VirtualMachineOptions{})).To(Succeed())
+
+			bootFailed, exists := metadataCache.BootFailed.Load()
+			Expect(exists).To(BeTrue())
+			Expect(bootFailed).To(BeTrue())
 		})
 
 		It("should detect inprogress migration job", func() {
