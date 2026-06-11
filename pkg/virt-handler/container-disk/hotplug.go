@@ -314,28 +314,36 @@ const (
 )
 
 func GetImageInfo(imagePath string, context isolation.IsolationResult, config *v1.DiskVerification) (*disk.DiskInfo, error) {
-	// #nosec g204 no risk to use MountNamespace()  argument as it returns a fixed string of "/proc/<pid>/ns/mnt"
-	cmd := ExecChroot(
-		"--user", util.NonRootUserString, "--mount", context.MountNamespace(), "exec", "--",
-		QEMUIMGPath, "info", imagePath, "--output", "json",
-	)
-	log.Log.V(3).Infof("fetching image info. running command: %s", cmd.String())
-	out, err := cmd.Output()
-	if err != nil {
-		if e, ok := err.(*exec.ExitError); ok {
-			if len(e.Stderr) > 0 {
-				return nil, fmt.Errorf("failed to invoke qemu-img: %v: '%v'", err, string(e.Stderr))
+	// An upgraded virt-handler may inspect a launcher from an older version whose image
+	// lacks the deckhouse user (its disks are owned by qemu), so fall back to qemu.
+	var lastErr error
+	for _, user := range []string{util.NonRootUserString, util.QemuUserString} {
+		// #nosec g204 no risk to use MountNamespace()  argument as it returns a fixed string of "/proc/<pid>/ns/mnt"
+		cmd := ExecChroot(
+			"--user", user, "--mount", context.MountNamespace(), "exec", "--",
+			QEMUIMGPath, "info", imagePath, "--output", "json",
+		)
+		log.Log.V(3).Infof("fetching image info. running command: %s", cmd.String())
+		out, err := cmd.Output()
+		if err != nil {
+			if e, ok := err.(*exec.ExitError); ok && len(e.Stderr) > 0 {
+				lastErr = fmt.Errorf("failed to invoke qemu-img: %v: '%v'", err, string(e.Stderr))
+				if strings.Contains(string(e.Stderr), "unknown user") {
+					continue
+				}
+			} else {
+				lastErr = fmt.Errorf("failed to invoke qemu-img: %v", err)
 			}
+			return nil, lastErr
 		}
-		return nil, fmt.Errorf("failed to invoke qemu-img: %v", err)
-	}
 
-	info := &disk.DiskInfo{}
-	err = json.Unmarshal(out, info)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse disk info: %v", err)
+		info := &disk.DiskInfo{}
+		if err := json.Unmarshal(out, info); err != nil {
+			return nil, fmt.Errorf("failed to parse disk info: %v", err)
+		}
+		return info, nil
 	}
-	return info, err
+	return nil, lastErr
 }
 
 func ExecChroot(args ...string) *exec.Cmd {
