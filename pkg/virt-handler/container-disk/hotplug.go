@@ -23,6 +23,7 @@ import (
 
 	containerdisk "kubevirt.io/kubevirt/pkg/container-disk"
 	diskutils "kubevirt.io/kubevirt/pkg/ephemeral-disk-utils"
+	cmdclient "kubevirt.io/kubevirt/pkg/virt-handler/cmd-client"
 	"kubevirt.io/kubevirt/pkg/virt-handler/isolation"
 
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -683,16 +684,20 @@ func (m *hotplugMounter) ComputeChecksums(vmi *v1.VirtualMachineInstance, source
 func (m *hotplugMounter) findVirtlauncherUID(vmi *v1.VirtualMachineInstance) (uid types.UID) {
 	cnt := 0
 	for podUID := range vmi.Status.ActivePods {
-		_, err := m.hotplugManager.GetHotplugTargetPodPathOnHost(podUID)
-		if err == nil {
-			uid = podUID
-			cnt++
+		// skip if no command socket (pod is not running)
+		if _, err := safepath.NewPathNoFollow(cmdclient.SocketFilePathOnHost(string(podUID))); err != nil {
+			continue
 		}
+		if _, err := m.hotplugManager.GetHotplugTargetPodPathOnHost(podUID); err != nil {
+			continue
+		}
+		uid = podUID
+		cnt++
 	}
 	if cnt == 1 {
 		return
 	}
-	// Either no pods, or multiple pods, skip.
+	// Either no pods, or multiple live pods, skip.
 	return types.UID("")
 }
 
