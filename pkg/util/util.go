@@ -32,6 +32,7 @@ const (
 	NonRootUID        = 64535
 	NonRootUserString = "deckhouse"
 	QemuUID           = 107
+	QemuUserString    = "qemu"
 	RootUser          = 0
 
 	// extensive log verbosity threshold after which libvirt debug logs will be enabled
