@@ -5439,37 +5439,6 @@ var _ = Describe("VirtualMachine", func() {
 						pointer.P(v1.UpdateVolumesStrategyReplacement)),
 				)
 
-				It("should cancel stale volume migration when volumes are already reverted to source", func() {
-					vmi := libvmi.New(libvmi.WithNamespace(ns), libvmi.WithPersistentVolumeClaim(diskName, "src0"))
-					vmi.Status.Conditions = append(vmi.Status.Conditions, v1.VirtualMachineInstanceCondition{
-						Type:   v1.VirtualMachineInstanceVolumesChange,
-						Status: k8sv1.ConditionTrue,
-					})
-					vmi.Status.MigratedVolumes = []v1.StorageMigratedVolumeInfo{
-						{
-							VolumeName:         diskName,
-							SourcePVCInfo:      &v1.PersistentVolumeClaimInfo{ClaimName: "src0"},
-							DestinationPVCInfo: &v1.PersistentVolumeClaimInfo{ClaimName: "dst0"},
-						},
-					}
-					vm := libvmi.NewVirtualMachine(libvmi.New(libvmi.WithNamespace(ns), libvmi.WithPersistentVolumeClaim(diskName, "src0")))
-
-					_, err := virtFakeClient.KubevirtV1().VirtualMachineInstances(ns).Create(context.TODO(), vmi, metav1.CreateOptions{})
-					Expect(err).ToNot(HaveOccurred())
-
-					Expect(controller.handleVolumeUpdateRequest(vm, vmi)).To(Succeed())
-
-					updatedVMI, err := virtFakeClient.KubevirtV1().VirtualMachineInstances(ns).Get(context.TODO(), vmi.Name, metav1.GetOptions{})
-					Expect(err).ToNot(HaveOccurred())
-					Expect(updatedVMI.Status.MigratedVolumes).To(BeEmpty())
-					cond := virtcontroller.NewVirtualMachineInstanceConditionManager().GetCondition(updatedVMI,
-						v1.VirtualMachineInstanceVolumesChange)
-					Expect(cond).ToNot(BeNil())
-					Expect(*cond).Should(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
-						"Status": Equal(k8sv1.ConditionFalse),
-					}))
-				})
-
 				It("should set the restart condition with the Migration updateVolumeStrategy if volumes cannot be migrated", func() {
 					testutils.UpdateFakeKubeVirtClusterConfig(kvStore, &v1.KubeVirt{
 						Spec: v1.KubeVirtSpec{

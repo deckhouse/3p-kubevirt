@@ -186,13 +186,7 @@ func ValidateVolumes(vmi *virtv1.VirtualMachineInstance, vm *virtv1.VirtualMachi
 
 // VolumeMigrationCancel cancels the volume migration
 func VolumeMigrationCancel(clientset kubecli.KubevirtClient, vmi *virtv1.VirtualMachineInstance, vm *virtv1.VirtualMachine) (bool, error) {
-	if !IsVolumeMigrating(vmi) {
-		return false, nil
-	}
-	if revertedToSourceVolumes(vmi, vm) {
-		return true, cancelVolumeMigration(clientset, vmi)
-	}
-	if !migrationVolumesChanged(vmi, vm) {
+	if !IsVolumeMigrating(vmi) || !migrationVolumesChanged(vmi, vm) {
 		return false, nil
 	}
 	// A volume migration can be canceled only if the original set of volumes is restored
@@ -205,31 +199,6 @@ func VolumeMigrationCancel(clientset kubecli.KubevirtClient, vmi *virtv1.Virtual
 	}
 
 	return true, fmt.Errorf(InvalidUpdateErrMsg)
-}
-
-func revertedToSourceVolumes(vmi *virtv1.VirtualMachineInstance, vm *virtv1.VirtualMachine) bool {
-	if vmi == nil || vm == nil || len(vmi.Status.MigratedVolumes) == 0 {
-		return false
-	}
-
-	vmiVols := storagetypes.GetVolumesByName(&vmi.Spec)
-	vmVols := storagetypes.GetVolumesByName(&vm.Spec.Template.Spec)
-	for _, migVol := range vmi.Status.MigratedVolumes {
-		if migVol.SourcePVCInfo == nil {
-			return false
-		}
-		sourceClaim := migVol.SourcePVCInfo.ClaimName
-		vmiVol, ok := vmiVols[migVol.VolumeName]
-		if !ok || storagetypes.PVCNameFromVirtVolume(vmiVol) != sourceClaim {
-			return false
-		}
-		vmVol, ok := vmVols[migVol.VolumeName]
-		if !ok || storagetypes.PVCNameFromVirtVolume(vmVol) != sourceClaim {
-			return false
-		}
-	}
-
-	return true
 }
 
 func migrationVolumesChanged(vmi *virtv1.VirtualMachineInstance, vm *virtv1.VirtualMachine) bool {
