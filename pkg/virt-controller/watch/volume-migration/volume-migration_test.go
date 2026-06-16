@@ -199,7 +199,7 @@ var _ = Describe("Volume Migration", func() {
 			virtClient.EXPECT().VirtualMachineInstance(ns).Return(fakeClientset.KubevirtV1().VirtualMachineInstances(ns)).AnyTimes()
 		})
 
-		DescribeTable("should evaluate the volume migration cancellation", func(vmiVols, vmVols []string, migVols []migVolumes, expectRes bool, expectErr error, expectCancellation bool) {
+		DescribeTable("should evaluate the volume migration cancellation", func(vmiVols, vmVols []string, migVols []migVolumes, expectRes bool, expectErr error, expectCancellation bool, expectedPatchOperations int) {
 			vmi := libvmi.New(append(addVMIOptionsForVolumes(vmiVols), libvmi.WithNamespace(ns))...)
 			vmi.Status.Conditions = append(vmi.Status.Conditions, v1.VirtualMachineInstanceCondition{
 				Type: v1.VirtualMachineInstanceVolumesChange, Status: k8sv1.ConditionTrue})
@@ -239,7 +239,7 @@ var _ = Describe("Volume Migration", func() {
 						}
 					}
 					return patchOperations
-				}, HaveLen(2)))
+				}, HaveLen(expectedPatchOperations)))
 			}
 			if expectErr != nil {
 				Expect(err).To(Equal(expectErr))
@@ -248,14 +248,16 @@ var _ = Describe("Volume Migration", func() {
 			}
 			Expect(res).To(Equal(expectRes))
 		},
-			Entry("without any updates", []string{"dst0"}, []string{"dst0"}, []migVolumes{{generateDiskNameFromIndex(0), "src0", "dst0"}}, false, nil, false),
+			Entry("without any updates", []string{"dst0"}, []string{"dst0"}, []migVolumes{{generateDiskNameFromIndex(0), "src0", "dst0"}}, false, nil, false, 0),
+			Entry("with the migrated volumes already reverted to the source volumes", []string{"src0"}, []string{"src0"},
+				[]migVolumes{{generateDiskNameFromIndex(0), "src0", "dst0"}}, true, nil, true, 1),
 			Entry("with the migrated volumes reversion to the source volumes", []string{"dst0"}, []string{"src0"},
-				[]migVolumes{{generateDiskNameFromIndex(0), "src0", "dst0"}}, true, nil, true),
+				[]migVolumes{{generateDiskNameFromIndex(0), "src0", "dst0"}}, true, nil, true, 2),
 			Entry("with invalid update", []string{"dst0"}, []string{"other"}, []migVolumes{{generateDiskNameFromIndex(0), "src0", "dst0"}}, true,
-				fmt.Errorf(volumemigration.InvalidUpdateErrMsg), false),
+				fmt.Errorf(volumemigration.InvalidUpdateErrMsg), false, 0),
 			Entry("with invalid partial update", []string{"dst0", "dst1", "dst2"}, []string{"src0", "dst1", "dst2"}, []migVolumes{
 				{generateDiskNameFromIndex(0), "src0", "dst0"}, {generateDiskNameFromIndex(1), "src1", "dst1"}, {generateDiskNameFromIndex(2), "src2", "dst2"}},
-				true, fmt.Errorf(volumemigration.InvalidUpdateErrMsg), false),
+				true, fmt.Errorf(volumemigration.InvalidUpdateErrMsg), false, 0),
 		)
 	})
 

@@ -934,18 +934,18 @@ func (c *Controller) handleVolumeUpdateRequest(vm *virtv1.VirtualMachine, vmi *v
 	if hotplugOp {
 		return nil
 	}
-	if equality.Semantic.DeepEqual(vmi.Spec.Volumes, vmCopy.Spec.Template.Spec.Volumes) {
-		return nil
-	}
-	vmConditions := controller.NewVirtualMachineConditionManager()
 	// Abort the volume migration if any of the previous migrated volumes
-	// has changed
+	// has changed or all volumes have already been reverted to the source.
 	if volMigAbort, err := volumemig.VolumeMigrationCancel(c.clientset, vmi, vm); volMigAbort {
 		if err == nil {
 			log.Log.Object(vm).Infof("Cancel volume migration")
 		}
 		return err
 	}
+	if equality.Semantic.DeepEqual(vmi.Spec.Volumes, vmCopy.Spec.Template.Spec.Volumes) {
+		return nil
+	}
+	vmConditions := controller.NewVirtualMachineConditionManager()
 
 	switch {
 	case vm.Spec.UpdateVolumesStrategy == nil ||
