@@ -699,12 +699,8 @@ func (c *MigrationSourceController) acquireSyncSlot(vmi *v1.VirtualMachineInstan
 }
 
 func (c *MigrationSourceController) getDomainMigrationMetadata(vmi *v1.VirtualMachineInstance) *api.MigrationMetadata {
-	obj, exists, err := c.domainStore.GetByKey(controller.VirtualMachineInstanceKey(vmi))
-	if err != nil || !exists {
-		return nil
-	}
-	domain, ok := obj.(*api.Domain)
-	if !ok || domain.Spec.Metadata.KubeVirt.UID != vmi.UID {
+	domain, exists, cachedUID, err := c.getDomainFromCache(controller.VirtualMachineInstanceKey(vmi))
+	if err != nil || !exists || cachedUID != vmi.UID {
 		return nil
 	}
 	return domain.Spec.Metadata.KubeVirt.Migration

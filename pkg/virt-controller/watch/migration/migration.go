@@ -1638,27 +1638,18 @@ func (c *Controller) sync(key string, migration *virtv1.VirtualMachineInstanceMi
 			return c.handleTargetPodHandoff(migration, vmi, pod)
 		}
 	case virtv1.MigrationPreparingTarget, virtv1.MigrationTargetReady, virtv1.MigrationFailed:
-		switch {
-		case migration.IsLocalOrDecentralizedTarget() && (!targetPodExists || controller.PodIsDown(pod)) &&
-			vmi.IsMigrationSynchronized(migration) &&
-			len(vmi.Status.MigrationState.TargetDirectMigrationNodePorts) == 0 &&
+		notStarted := vmi.IsMigrationSynchronized(migration) &&
 			vmi.Status.MigrationState.StartTimestamp == nil &&
 			!vmi.Status.MigrationState.Failed &&
-			!vmi.Status.MigrationState.Completed:
+			!vmi.Status.MigrationState.Completed
+		switch {
+		case notStarted && migration.IsLocalOrDecentralizedTarget() && (!targetPodExists || controller.PodIsDown(pod)) &&
+			len(vmi.Status.MigrationState.TargetDirectMigrationNodePorts) == 0:
 
 			if err = c.handleMarkMigrationFailedOnVMI(migration, vmi, "Target pod is down"); err != nil {
 				return err
 			}
-		case migration.DeletionTimestamp != nil &&
-			vmi.IsMigrationSynchronized(migration) &&
-			vmi.Status.MigrationState.StartTimestamp == nil &&
-			!vmi.Status.MigrationState.Failed &&
-			!vmi.Status.MigrationState.Completed:
-
-			// The migration is being aborted while the source virt-handler is still
-			// holding the data transfer (e.g. waiting for a per-node sync slot), so it
-			// never started. Mark it done here so it is cancelled cleanly instead of
-			// being started just to be aborted once a slot frees.
+		case notStarted && migration.DeletionTimestamp != nil:
 			if err = c.handleMarkMigrationFailedOnVMI(migration, vmi, "Migration canceled before the data transfer started"); err != nil {
 				return err
 			}
