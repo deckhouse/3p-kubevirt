@@ -131,11 +131,6 @@ type Controller struct {
 	handOffLock sync.Mutex
 	handOffMap  map[string]struct{}
 
-	// the set of migrations admitted to a sync slot.
-	// needed to avoid over-amission due to stale informer cache.
-	// the map keys are migration UIDs. Guarded by migrationStartLock.
-	pendingSyncSlots map[types.UID]pendingSyncSlot
-
 	nam *migrations.NetworkAccessibilityManager
 
 	unschedulablePendingTimeoutSeconds int64
@@ -181,7 +176,6 @@ func NewController(templateService services.TemplateService,
 		migrationStartLock:   &sync.Mutex{},
 		clusterConfig:        clusterConfig,
 		handOffMap:           make(map[string]struct{}),
-		pendingSyncSlots:     make(map[types.UID]pendingSyncSlot),
 
 		nam: migrations.NewNetworkAccessibilityManager(clientset),
 
@@ -750,15 +744,14 @@ func (c *Controller) processMigrationPhase(
 	case virtv1.MigrationPreparingTarget:
 		if (migration.IsLocalOrDecentralizedSource() && vmi.IsMigrationSourceSynchronized() && vmi.Status.MigrationState.TargetState.NodeAddress != nil) ||
 			(migration.IsLocalOrDecentralizedTarget() && vmi.Status.MigrationState.TargetNode != "" && vmi.Status.MigrationState.TargetNodeAddress != "") {
-			if c.holdForSyncSlot(migration, migrationCopy, vmi) {
-				return nil
-			}
-			conditionManager.RemoveCondition(migrationCopy, virtv1.VirtualMachineInstanceMigrationWaitingForSyncSlot)
 			migrationCopy.Status.Phase = virtv1.MigrationTargetReady
 		}
 	case virtv1.MigrationTargetReady:
 		if vmi.Status.MigrationState.StartTimestamp != nil {
+			conditionManager.RemoveCondition(migrationCopy, virtv1.VirtualMachineInstanceMigrationWaitingForSyncSlot)
 			migrationCopy.Status.Phase = virtv1.MigrationRunning
+		} else {
+			c.updateWaitingForSyncSlotCondition(migrationCopy, vmi)
 		}
 	case virtv1.MigrationRunning:
 		if migration.IsLocalOrDecentralizedTarget() {
@@ -1049,7 +1042,7 @@ func (c *Controller) handleMigrationBackoff(key string, vmi *virtv1.VirtualMachi
 	return nil
 }
 
-func (c *Controller) handleMarkMigrationFailedOnVMI(migration *virtv1.VirtualMachineInstanceMigration, vmi *virtv1.VirtualMachineInstance) error {
+func (c *Controller) handleMarkMigrationFailedOnVMI(migration *virtv1.VirtualMachineInstanceMigration, vmi *virtv1.VirtualMachineInstance, failureReason string) error {
 
 	// Mark Migration Done on VMI if virt handler never started it.
 	// Once virt-handler starts the migration, it's up to handler
@@ -1068,8 +1061,7 @@ func (c *Controller) handleMarkMigrationFailedOnVMI(migration *virtv1.VirtualMac
 		log.Log.Reason(err).Object(vmi).Errorf("Failed to patch VMI status to indicate migration %s/%s failed.", migration.Namespace, migration.Name)
 		return err
 	}
-	log.Log.Object(vmi).Infof("Marked Migration %s/%s failed on vmi due to target pod disappearing before migration kicked off.", migration.Namespace, migration.Name)
-	failureReason := "Target pod is down"
+	log.Log.Object(vmi).Infof("Marked Migration %s/%s done on vmi before virt-handler started it: %s.", migration.Namespace, migration.Name, failureReason)
 	c.recorder.Event(vmi, k8sv1.EventTypeWarning, controller.FailedMigrationReason, fmt.Sprintf("VirtualMachineInstance migration uid %s failed. reason: %s", string(migration.UID), failureReason))
 	if vmiCopy.Status.MigrationState.FailureReason == "" {
 		// Only set the failure reason if empty, as virt-handler may already have provided a better one
@@ -1646,15 +1638,28 @@ func (c *Controller) sync(key string, migration *virtv1.VirtualMachineInstanceMi
 			return c.handleTargetPodHandoff(migration, vmi, pod)
 		}
 	case virtv1.MigrationPreparingTarget, virtv1.MigrationTargetReady, virtv1.MigrationFailed:
-		if migration.IsLocalOrDecentralizedTarget() && (!targetPodExists || controller.PodIsDown(pod)) &&
+		switch {
+		case migration.IsLocalOrDecentralizedTarget() && (!targetPodExists || controller.PodIsDown(pod)) &&
 			vmi.IsMigrationSynchronized(migration) &&
 			len(vmi.Status.MigrationState.TargetDirectMigrationNodePorts) == 0 &&
 			vmi.Status.MigrationState.StartTimestamp == nil &&
 			!vmi.Status.MigrationState.Failed &&
-			!vmi.Status.MigrationState.Completed {
+			!vmi.Status.MigrationState.Completed:
 
-			err = c.handleMarkMigrationFailedOnVMI(migration, vmi)
-			if err != nil {
+			if err = c.handleMarkMigrationFailedOnVMI(migration, vmi, "Target pod is down"); err != nil {
+				return err
+			}
+		case migration.DeletionTimestamp != nil &&
+			vmi.IsMigrationSynchronized(migration) &&
+			vmi.Status.MigrationState.StartTimestamp == nil &&
+			!vmi.Status.MigrationState.Failed &&
+			!vmi.Status.MigrationState.Completed:
+
+			// The migration is being aborted while the source virt-handler is still
+			// holding the data transfer (e.g. waiting for a per-node sync slot), so it
+			// never started. Mark it done here so it is cancelled cleanly instead of
+			// being started just to be aborted once a slot frees.
+			if err = c.handleMarkMigrationFailedOnVMI(migration, vmi, "Migration canceled before the data transfer started"); err != nil {
 				return err
 			}
 		}
@@ -2135,110 +2140,19 @@ func (c *Controller) outboundMigrationsOnNode(node string, runningMigrations []*
 	return sum
 }
 
-// pendingSyncSlot is a reserved sync slot: the reserving
-// migration's namespace/name key and the source node the slot belongs to.
-type pendingSyncSlot struct {
-	key  string
-	node string
-}
-
-// holdForSyncSlot decides whether a migration in PreparingTarget must wait for a free sync slot on the source node.
-func (c *Controller) holdForSyncSlot(migration, migrationCopy *virtv1.VirtualMachineInstanceMigration, vmi *virtv1.VirtualMachineInstance) bool {
-	if vmi == nil || vmi.Status.NodeName == "" {
-		return false
-	}
-
-	c.migrationStartLock.Lock()
-	defer c.migrationStartLock.Unlock()
-
-	if _, reserved := c.pendingSyncSlots[migration.UID]; reserved {
-		return false
-	}
-
-	node := vmi.Status.NodeName
-	syncCap := c.clusterConfig.GetEffectiveParallelSyncMigrationsPerNode()
-	c.pruneSyncSlotReservations()
-	occupied := c.syncingMigrationsOnNode(node, migration) + c.reservedSyncSlotsOnNode(node)
-	if uint32(occupied) < syncCap {
-		c.pendingSyncSlots[migration.UID] = pendingSyncSlot{key: controller.MigrationKey(migration), node: node}
-		return false
-	}
-	msg := fmt.Sprintf("Target prepared; waiting for sync slot on source node %q (%d/%d in data-transfer)",
-		node, occupied, syncCap)
+func (c *Controller) updateWaitingForSyncSlotCondition(migrationCopy *virtv1.VirtualMachineInstanceMigration, vmi *virtv1.VirtualMachineInstance) {
 	cm := controller.NewVirtualMachineInstanceMigrationConditionManager()
-	if !cm.HasCondition(migrationCopy, virtv1.VirtualMachineInstanceMigrationWaitingForSyncSlot) {
+	vmiCM := controller.NewVirtualMachineInstanceConditionManager()
+	if vmi != nil && vmiCM.HasConditionWithStatus(vmi, virtv1.VirtualMachineInstanceWaitingForSyncSlot, k8sv1.ConditionTrue) {
 		cm.UpdateCondition(migrationCopy, &virtv1.VirtualMachineInstanceMigrationCondition{
 			Type:    virtv1.VirtualMachineInstanceMigrationWaitingForSyncSlot,
 			Status:  k8sv1.ConditionTrue,
 			Reason:  "PerNodeSyncPoolFull",
-			Message: msg,
+			Message: "Source virt-handler is holding the data transfer until a per-node sync slot frees",
 		})
+		return
 	}
-	log.Log.Object(migration).V(2).Info(msg)
-	c.Queue.AddWithOpts(priorityqueue.AddOpts{Priority: pointer.P(pendingPriority), After: 5 * time.Second}, controller.MigrationKey(migration))
-	return true
-}
-
-// syncingMigrationsOnNode counts migrations whose source VMI runs on the given
-// node and which are in the data-transfer (sync) phase: TargetReady and beyond
-// (including Running). The current migration (self) is excluded from the count
-// so that the gate does not deadlock on its own entry. Target pod's lifecycle
-// phases (Scheduling, Scheduled, PreparingTarget) are excluded — they are the
-// prep pool counted by outboundMigrationsOnNode.
-func (c *Controller) syncingMigrationsOnNode(node string, self *virtv1.VirtualMachineInstanceMigration) int {
-	sum := 0
-	for _, migration := range migrationsutil.ListUnfinishedMigrations(c.migrationIndexer) {
-		if migration.UID == self.UID {
-			continue
-		}
-		switch migration.Status.Phase {
-		case virtv1.MigrationTargetReady, virtv1.MigrationRunning:
-		default:
-			continue
-		}
-		key := controller.NamespacedKey(migration.Namespace, migration.Spec.VMIName)
-		obj, exists, _ := c.vmiStore.GetByKey(key)
-		if !exists {
-			continue
-		}
-		vmi := obj.(*virtv1.VirtualMachineInstance)
-		if vmi.Status.NodeName == node || (vmi.Status.MigrationState != nil && vmi.Status.MigrationState.SourceNode == node) {
-			sum++
-		}
-	}
-	return sum
-}
-
-// pruneSyncSlotReservations drops sync slot reservations whose admission is now
-// visible in the informer cache, or whose migration is gone, final, or
-// was recreated under the same key. Callers must hold migrationStartLock.
-func (c *Controller) pruneSyncSlotReservations() {
-	for uid, slot := range c.pendingSyncSlots {
-		obj, exists, _ := c.migrationIndexer.GetByKey(slot.key)
-		if !exists {
-			delete(c.pendingSyncSlots, uid)
-			continue
-		}
-		migration := obj.(*virtv1.VirtualMachineInstanceMigration)
-		if migration.UID != uid || migration.IsFinal() ||
-			migration.Status.Phase == virtv1.MigrationTargetReady ||
-			migration.Status.Phase == virtv1.MigrationRunning {
-			delete(c.pendingSyncSlots, uid)
-		}
-	}
-}
-
-// reservedSyncSlotsOnNode counts sync slot reservations on the given node that
-// are not yet visible in the informer cache. Callers must hold
-// migrationStartLock.
-func (c *Controller) reservedSyncSlotsOnNode(node string) int {
-	sum := 0
-	for _, slot := range c.pendingSyncSlots {
-		if slot.node == node {
-			sum++
-		}
-	}
-	return sum
+	cm.RemoveCondition(migrationCopy, virtv1.VirtualMachineInstanceMigrationWaitingForSyncSlot)
 }
 
 // findRunningMigrations calculates how many migrations are running or in flight to be triggered to running

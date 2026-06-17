@@ -819,6 +819,9 @@ const (
 	// Indicates that the VMI domain shut off before the guest OS could boot,
 	// typically caused by the absence of a bootable device.
 	VirtualMachineInstanceBootFailed VirtualMachineInstanceConditionType = "BootFailed"
+
+	// Indicates that the VMI waits for sync slot
+	VirtualMachineInstanceWaitingForSyncSlot VirtualMachineInstanceConditionType = "WaitingForSyncSlot"
 )
 
 // These are valid reasons for VMI conditions.
@@ -883,9 +886,7 @@ const (
 	VirtualMachineInstanceMigrationAbortRequested          VirtualMachineInstanceMigrationConditionType = "migrationAbortRequested"
 	VirtualMachineInstanceMigrationRejectedByResourceQuota VirtualMachineInstanceMigrationConditionType = "migrationRejectedByResourceQuota"
 	VirtualMachineInstanceMigrationFailed                  VirtualMachineInstanceMigrationConditionType = "migrationFailed"
-	// VirtualMachineInstanceMigrationWaitingForSyncSlot indicates that the target pod is prepared
-	// but the migration is waiting for a free data-transfer (sync) slot on the source node,
-	// gated by MigrationConfiguration.ParallelSyncMigrationsPerNode.
+	// Indicates that the migration waits for sync slot
 	VirtualMachineInstanceMigrationWaitingForSyncSlot VirtualMachineInstanceMigrationConditionType = "WaitingForSyncSlot"
 )
 

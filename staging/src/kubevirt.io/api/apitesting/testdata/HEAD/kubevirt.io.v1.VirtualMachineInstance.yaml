@@ -729,6 +729,7 @@ status:
       nodeDrainTaintKey: nodeDrainTaintKeyValue
       parallelMigrationsPerCluster: 4294967268
       parallelOutboundMigrationsPerNode: 4294967263
+      parallelSyncMigrationsPerNode: 4294967267
       progressTimeout: -15
       unsafeMigrationOverride: true
     migrationNetworkType: migrationNetworkTypeValue

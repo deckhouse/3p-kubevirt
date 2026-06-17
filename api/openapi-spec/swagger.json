@@ -16207,6 +16207,11 @@
       "type": "integer",
       "format": "int64"
      },
+     "parallelSyncMigrationsPerNode": {
+      "description": "ParallelSyncMigrationsPerNode is the maximum number of concurrent outgoing live migrations per source node allowed to be in the data-transfer (sync) phase. Migrations above this cap wait in PreparingTarget with a WaitingForSyncSlot condition until a slot frees. Effective value is clamped to ParallelOutboundMigrationsPerNode. Defaults to 1.",
+      "type": "integer",
+      "format": "int64"
+     },
      "progressTimeout": {
       "description": "ProgressTimeout is the maximum number of seconds a live migration is allowed to make no progress. Hitting this timeout means a migration transferred 0 data for that many seconds. The migration is then considered stuck and therefore cancelled. Defaults to 150",
       "type": "integer",

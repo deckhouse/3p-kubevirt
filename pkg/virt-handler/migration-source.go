@@ -25,6 +25,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"libvirt.org/go/libvirtxml"
@@ -32,6 +33,7 @@ import (
 	k8sv1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
@@ -76,6 +78,10 @@ type MigrationSourceController struct {
 	netStat                     netstat
 	passtRepairHandler          passtRepairSourceHandler
 	conntrackSync               *conntrack.SourceHandler
+
+	// syncSlotLock guards syncSlotCache, the set of migration source VMI UIDs for which this node has started a data transfer
+	syncSlotLock  sync.Mutex
+	syncSlotCache map[types.UID]struct{}
 }
 
 func NewMigrationSourceController(
@@ -123,6 +129,7 @@ func NewMigrationSourceController(
 		netStat:                     netStat,
 		passtRepairHandler:          passtRepairHandler,
 		conntrackSync:               conntrackSync,
+		syncSlotCache:               make(map[types.UID]struct{}),
 	}
 
 	_, err = vmiInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
@@ -554,12 +561,14 @@ func (c *MigrationSourceController) migrateVMI(vmi *v1.VirtualMachineInstance, d
 	}
 
 	if vmi.Status.MigrationState.AbortRequested {
+		c.setDataTransferHeld(vmi, false)
 		err = c.handleMigrationAbort(vmi, client)
 		return err
 	}
 
 	if isMigrationInProgress(vmi, domain) {
 		// we already started this migration, no need to rerun this
+		c.setDataTransferHeld(vmi, false)
 		log.Log.Object(vmi).V(4).Infof("migration %s has already been started", vmi.Status.MigrationState.MigrationUID)
 		return nil
 	}
@@ -579,6 +588,14 @@ func (c *MigrationSourceController) migrateVMI(vmi *v1.VirtualMachineInstance, d
 	} else if err != nil {
 		return fmt.Errorf("failed to handle migration proxy: %v", err)
 	}
+
+	if !c.acquireSyncSlot(vmi) {
+		c.setDataTransferHeld(vmi, true)
+		log.Log.Object(vmi).V(2).Infof("waiting for a data-transfer slot on source node %q before starting migration", c.host)
+		c.queue.AddAfter(controller.VirtualMachineInstanceKey(vmi), 2*time.Second)
+		return nil
+	}
+	c.setDataTransferHeld(vmi, false)
 
 	migrationConfiguration := vmi.Status.MigrationState.MigrationConfiguration
 	if migrationConfiguration == nil {
@@ -622,6 +639,75 @@ func (c *MigrationSourceController) migrateVMI(vmi *v1.VirtualMachineInstance, d
 	}
 	c.recorder.Event(vmi, k8sv1.EventTypeNormal, v1.Migrating.String(), VMIMigrating)
 	return nil
+}
+
+func (c *MigrationSourceController) setDataTransferHeld(vmi *v1.VirtualMachineInstance, held bool) {
+	cm := controller.NewVirtualMachineInstanceConditionManager()
+	if !held {
+		cm.RemoveCondition(vmi, v1.VirtualMachineInstanceWaitingForSyncSlot)
+		return
+	}
+	cm.UpdateCondition(vmi, &v1.VirtualMachineInstanceCondition{
+		Type:               v1.VirtualMachineInstanceWaitingForSyncSlot,
+		Status:             k8sv1.ConditionTrue,
+		Reason:             "PerNodeSyncPoolFull",
+		Message:            fmt.Sprintf("Waiting for a sync slot on source node %q (parallelSyncMigrationsPerNode=%d)", c.host, c.clusterConfig.GetEffectiveParallelSyncMigrationsPerNode()),
+		LastTransitionTime: metav1.Now(),
+	})
+}
+
+func (c *MigrationSourceController) acquireSyncSlot(vmi *v1.VirtualMachineInstance) bool {
+	c.syncSlotLock.Lock()
+	defer c.syncSlotLock.Unlock()
+
+	if _, reserved := c.syncSlotCache[vmi.UID]; reserved {
+		return true
+	}
+
+	byUID := make(map[types.UID]*v1.VirtualMachineInstance)
+	migrating := 0
+	for _, obj := range c.vmiStore.List() {
+		other := obj.(*v1.VirtualMachineInstance)
+		byUID[other.UID] = other
+		ms := other.Status.MigrationState
+		if ms == nil || ms.SourceNode != c.host || other.UID == vmi.UID {
+			continue
+		}
+		if mm := c.getDomainMigrationMetadata(other); mm != nil &&
+			mm.StartTimestamp != nil && mm.EndTimestamp == nil && !mm.Failed {
+			migrating++
+		}
+	}
+
+	for uid := range c.syncSlotCache {
+		other, present := byUID[uid]
+		if !present {
+			delete(c.syncSlotCache, uid)
+			continue
+		}
+		if mm := c.getDomainMigrationMetadata(other); mm != nil &&
+			(mm.StartTimestamp != nil || mm.EndTimestamp != nil || mm.Failed) {
+			delete(c.syncSlotCache, uid)
+		}
+	}
+
+	if migrating+len(c.syncSlotCache) >= int(c.clusterConfig.GetEffectiveParallelSyncMigrationsPerNode()) {
+		return false
+	}
+	c.syncSlotCache[vmi.UID] = struct{}{}
+	return true
+}
+
+func (c *MigrationSourceController) getDomainMigrationMetadata(vmi *v1.VirtualMachineInstance) *api.MigrationMetadata {
+	obj, exists, err := c.domainStore.GetByKey(controller.VirtualMachineInstanceKey(vmi))
+	if err != nil || !exists {
+		return nil
+	}
+	domain, ok := obj.(*api.Domain)
+	if !ok || domain.Spec.Metadata.KubeVirt.UID != vmi.UID {
+		return nil
+	}
+	return domain.Spec.Metadata.KubeVirt.Migration
 }
 
 func derefOrDefault[T any](v *T) T {

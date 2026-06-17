@@ -121,6 +121,7 @@
       "migrations": {
         "nodeDrainTaintKey": "nodeDrainTaintKeyValue",
         "parallelOutboundMigrationsPerNode": 4294967263,
+        "parallelSyncMigrationsPerNode": 4294967267,
         "parallelMigrationsPerCluster": 4294967268,
         "allowAutoConverge": true,
         "bandwidthPerMigration": "0",
