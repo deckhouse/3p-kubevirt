@@ -120,10 +120,6 @@ func (c *ClusterConfig) GetMigrationConfiguration() *v1.MigrationConfiguration {
 	return migrationConfig
 }
 
-// GetEffectiveParallelSyncMigrationsPerNode returns the per-source-node cap
-// on migrations allowed to be in the data-transfer (sync) phase. The value is
-// clamped to ParallelOutboundMigrationsPerNode: prep cap is an upper bound on
-// sync cap. Defaults to ParallelSyncMigrationsPerNodeDefault when unset.
 func (c *ClusterConfig) GetEffectiveParallelSyncMigrationsPerNode() uint32 {
 	mc := c.GetMigrationConfiguration()
 
