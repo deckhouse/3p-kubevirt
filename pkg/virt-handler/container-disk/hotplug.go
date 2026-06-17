@@ -23,6 +23,7 @@ import (
 
 	containerdisk "kubevirt.io/kubevirt/pkg/container-disk"
 	diskutils "kubevirt.io/kubevirt/pkg/ephemeral-disk-utils"
+	cmdclient "kubevirt.io/kubevirt/pkg/virt-handler/cmd-client"
 	"kubevirt.io/kubevirt/pkg/virt-handler/isolation"
 
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -314,28 +315,36 @@ const (
 )
 
 func GetImageInfo(imagePath string, context isolation.IsolationResult, config *v1.DiskVerification) (*disk.DiskInfo, error) {
-	// #nosec g204 no risk to use MountNamespace()  argument as it returns a fixed string of "/proc/<pid>/ns/mnt"
-	cmd := ExecChroot(
-		"--user", util.NonRootUserString, "--mount", context.MountNamespace(), "exec", "--",
-		QEMUIMGPath, "info", imagePath, "--output", "json",
-	)
-	log.Log.V(3).Infof("fetching image info. running command: %s", cmd.String())
-	out, err := cmd.Output()
-	if err != nil {
-		if e, ok := err.(*exec.ExitError); ok {
-			if len(e.Stderr) > 0 {
-				return nil, fmt.Errorf("failed to invoke qemu-img: %v: '%v'", err, string(e.Stderr))
+	// An upgraded virt-handler may inspect a launcher from an older version whose image
+	// lacks the deckhouse user (its disks are owned by qemu), so fall back to qemu.
+	var lastErr error
+	for _, user := range []string{util.NonRootUserString, util.QemuUserString} {
+		// #nosec g204 no risk to use MountNamespace()  argument as it returns a fixed string of "/proc/<pid>/ns/mnt"
+		cmd := ExecChroot(
+			"--user", user, "--mount", context.MountNamespace(), "exec", "--",
+			QEMUIMGPath, "info", imagePath, "--output", "json",
+		)
+		log.Log.V(3).Infof("fetching image info. running command: %s", cmd.String())
+		out, err := cmd.Output()
+		if err != nil {
+			if e, ok := err.(*exec.ExitError); ok && len(e.Stderr) > 0 {
+				lastErr = fmt.Errorf("failed to invoke qemu-img: %v: '%v'", err, string(e.Stderr))
+				if strings.Contains(string(e.Stderr), "unknown user") {
+					continue
+				}
+			} else {
+				lastErr = fmt.Errorf("failed to invoke qemu-img: %v", err)
 			}
+			return nil, lastErr
 		}
-		return nil, fmt.Errorf("failed to invoke qemu-img: %v", err)
-	}
 
-	info := &disk.DiskInfo{}
-	err = json.Unmarshal(out, info)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse disk info: %v", err)
+		info := &disk.DiskInfo{}
+		if err := json.Unmarshal(out, info); err != nil {
+			return nil, fmt.Errorf("failed to parse disk info: %v", err)
+		}
+		return info, nil
 	}
-	return info, err
+	return nil, lastErr
 }
 
 func ExecChroot(args ...string) *exec.Cmd {
@@ -389,19 +398,39 @@ func (m *hotplugMounter) getMountedVolumesInWorld(vmi *v1.VirtualMachineInstance
 		}
 		return nil, err
 	}
+	// Build a set of hotplug container-disk volume names from both Spec and Status.
+	// The hotplug-disks directory is shared with PVC filesystem hotplug volumes,
+	// which also produce <volumeName>.img files in the same directory.
+	// Spec covers volumes being attached; Status covers volumes being detached
+	// (removed from Spec but still having a live bind-mount).
+	knownHotplugContainerDisks := make(map[string]struct{})
+	for _, vol := range vmi.Spec.Volumes {
+		if vol.ContainerDisk != nil && vol.ContainerDisk.Hotpluggable {
+			knownHotplugContainerDisks[vol.Name] = struct{}{}
+		}
+	}
+	for _, vs := range vmi.Status.VolumeStatus {
+		if vs.HotplugVolume != nil && vs.ContainerDiskVolume != nil {
+			knownHotplugContainerDisks[vs.Name] = struct{}{}
+		}
+	}
+
 	var volumes []string
 	for _, entry := range entries {
-		info, err := entry.Info()
-		if err != nil {
-			return nil, err
-		}
-		if info.IsDir() {
+		if entry.IsDir() {
 			continue
 		}
-		if strings.HasSuffix(entry.Name(), ".img") {
-			name := strings.TrimSuffix(entry.Name(), ".img")
-			volumes = append(volumes, name)
+		if !strings.HasSuffix(entry.Name(), ".img") {
+			continue
 		}
+		name := strings.TrimSuffix(entry.Name(), ".img")
+		// Only consider .img files that belong to this VMI's hotplug container-disk
+		// volumes. PVC filesystem hotplug also creates <volumeName>.img in the same
+		// directory — skip those to avoid stealing them.
+		if _, ok := knownHotplugContainerDisks[name]; !ok {
+			continue
+		}
+		volumes = append(volumes, name)
 	}
 	var mountedVolumes []vmiMountTargetEntry
 	for _, v := range volumes {
@@ -675,16 +704,20 @@ func (m *hotplugMounter) ComputeChecksums(vmi *v1.VirtualMachineInstance, source
 func (m *hotplugMounter) findVirtlauncherUID(vmi *v1.VirtualMachineInstance) (uid types.UID) {
 	cnt := 0
 	for podUID := range vmi.Status.ActivePods {
-		_, err := m.hotplugManager.GetHotplugTargetPodPathOnHost(podUID)
-		if err == nil {
-			uid = podUID
-			cnt++
+		// skip if no command socket (pod is not running)
+		if _, err := safepath.NewPathNoFollow(cmdclient.SocketFilePathOnHost(string(podUID))); err != nil {
+			continue
 		}
+		if _, err := m.hotplugManager.GetHotplugTargetPodPathOnHost(podUID); err != nil {
+			continue
+		}
+		uid = podUID
+		cnt++
 	}
 	if cnt == 1 {
 		return
 	}
-	// Either no pods, or multiple pods, skip.
+	// Either no pods, or multiple live pods, skip.
 	return types.UID("")
 }
 
