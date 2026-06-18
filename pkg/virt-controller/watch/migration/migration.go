@@ -322,6 +322,13 @@ func (c *Controller) patchVMI(origVMI, newVMI *virtv1.VirtualMachineInstance) er
 		)
 	}
 
+	if !equality.Semantic.DeepEqual(origVMI.Status.Conditions, newVMI.Status.Conditions) {
+		patchSet.AddOption(
+			patch.WithTest("/status/conditions", origVMI.Status.Conditions),
+			patch.WithReplace("/status/conditions", newVMI.Status.Conditions),
+		)
+	}
+
 	if !patchSet.IsEmpty() {
 		patchBytes, err := patchSet.GeneratePayload()
 		if err != nil {
@@ -1055,6 +1062,12 @@ func (c *Controller) handleMarkMigrationFailedOnVMI(migration *virtv1.VirtualMac
 	vmiCopy.Status.MigrationState.EndTimestamp = &now
 	vmiCopy.Status.MigrationState.Failed = true
 	vmiCopy.Status.MigrationState.Completed = true
+	if vmiCopy.Status.MigrationState.FailureReason == "" {
+		// Only set the failure reason if empty, as virt-handler may already have provided a better one
+		vmiCopy.Status.MigrationState.FailureReason = failureReason
+	}
+
+	controller.NewVirtualMachineInstanceConditionManager().RemoveCondition(vmiCopy, virtv1.VirtualMachineInstanceWaitingForSyncSlot)
 
 	err := c.patchVMI(vmi, vmiCopy)
 	if err != nil {
@@ -1063,10 +1076,6 @@ func (c *Controller) handleMarkMigrationFailedOnVMI(migration *virtv1.VirtualMac
 	}
 	log.Log.Object(vmi).Infof("Marked Migration %s/%s done on vmi before virt-handler started it: %s.", migration.Namespace, migration.Name, failureReason)
 	c.recorder.Event(vmi, k8sv1.EventTypeWarning, controller.FailedMigrationReason, fmt.Sprintf("VirtualMachineInstance migration uid %s failed. reason: %s", string(migration.UID), failureReason))
-	if vmiCopy.Status.MigrationState.FailureReason == "" {
-		// Only set the failure reason if empty, as virt-handler may already have provided a better one
-		vmiCopy.Status.MigrationState.FailureReason = failureReason
-	}
 
 	return nil
 }

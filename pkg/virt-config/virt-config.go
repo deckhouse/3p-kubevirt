@@ -138,6 +138,9 @@ func (c *ClusterConfig) GetEffectiveParallelSyncMigrationsPerNode() uint32 {
 	if sync > outbound {
 		sync = outbound
 	}
+	if sync == 0 {
+		sync = ParallelSyncMigrationsPerNodeDefault
+	}
 	return sync
 }
 
