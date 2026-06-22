@@ -20,6 +20,8 @@
 package virtconfig
 
 import (
+	v1 "kubevirt.io/api/core/v1"
+
 	"kubevirt.io/kubevirt/pkg/virt-config/featuregate"
 )
 
@@ -255,4 +257,16 @@ func (config *ClusterConfig) MigrationStallDetectionEnabled() bool {
 
 func (config *ClusterConfig) HotplugHostDevicesWithDRAEnabled() bool {
 	return config.isFeatureGateEnabled(featuregate.HotplugHostDevicesWithDRAGate)
+}
+
+func (config *ClusterConfig) InPlaceResizeEnabled() bool {
+	return config.isFeatureGateEnabled(featuregate.InPlaceResize)
+}
+
+func (config *ClusterConfig) InPlaceResizeEnabledOnVMI(vmi *v1.VirtualMachineInstance) bool {
+	return config.InPlaceResizeEnabled() && !inplaceResizeDisabledOnVMI(vmi)
+}
+
+func inplaceResizeDisabledOnVMI(vmi *v1.VirtualMachineInstance) bool {
+	return vmi == nil || vmi.GetAnnotations()[v1.VirtualMachineInstanceDisableInPlaceResizeAnn] == "true"
 }

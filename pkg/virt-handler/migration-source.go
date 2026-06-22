@@ -47,6 +47,7 @@ import (
 	"kubevirt.io/kubevirt/pkg/pointer"
 	migrationsutil "kubevirt.io/kubevirt/pkg/util/migrations"
 	virtconfig "kubevirt.io/kubevirt/pkg/virt-config"
+	checksum_controller "kubevirt.io/kubevirt/pkg/virt-handler/checksum-controller"
 	cmdclient "kubevirt.io/kubevirt/pkg/virt-handler/cmd-client"
 	"kubevirt.io/kubevirt/pkg/virt-handler/conntrack"
 	"kubevirt.io/kubevirt/pkg/virt-handler/isolation"
@@ -87,6 +88,7 @@ func NewMigrationSourceController(
 	pluginStore cache.Store,
 	pluginExecutor plugins.NodeHookExecutor,
 	conntrackSync *conntrack.SourceHandler,
+	checksumCtrl *checksum_controller.Controller,
 ) (*MigrationSourceController, error) {
 
 	queue := workqueue.NewTypedRateLimitingQueueWithConfig[string](
@@ -114,6 +116,7 @@ func NewMigrationSourceController(
 		hypervisor.NewHypervisorNodeInformation(hypervisorName),
 		hypervisor.GetVirtRuntime(podIsolationDetector, hypervisorName),
 		pluginStore,
+		checksumCtrl,
 	)
 	if err != nil {
 		return nil, err

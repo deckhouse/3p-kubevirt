@@ -887,6 +887,9 @@ const (
 	// Indicates that the VMI domain shut off before the guest OS could boot,
 	// typically caused by the absence of a bootable device.
 	VirtualMachineInstanceBootFailed VirtualMachineInstanceConditionType = "BootFailed"
+
+	// Indicates that the pod is being resized
+	VirtualMachineInstancePodResourceResizeInProgress VirtualMachineInstanceConditionType = "PodResourceResizeInProgress"
 )
 
 // These are valid reasons for VMI conditions.
@@ -934,6 +937,19 @@ const (
 
 	// Indicates that an eviction has been requested for the VMI
 	VirtualMachineInstanceReasonEvictionRequested = "EvictionRequested"
+	// Indicates that the VMI is being resized
+	VirtualMachineInstanceReasonPodResizePending = "PodResizePending"
+	// Indicates that the VMI has been resized
+	VirtualMachineInstanceReasonPodResizeInProgress = "PodResizeInProgress"
+	// Indicates that the VMI resize has completed
+	VirtualMachineInstanceReasonPodResizeCompleted = "PodResizeCompleted"
+)
+
+const (
+	// VirtualMachineInstanceInPlaceResizeInProgressAnn is the annotation that is used to indicate that the VMI is in-place resizing
+	VirtualMachineInstanceInPlaceResizeInProgressAnn = "kubevirt.io/in-place-resize-in-progress"
+	// VirtualMachineInstanceDisableInPlaceResizeAnn is the annotation that is used to indicate that the VMI should not be in-place resized
+	VirtualMachineInstanceDisableInPlaceResizeAnn = "kubevirt.io/disable-in-place-resize"
 )
 
 const (

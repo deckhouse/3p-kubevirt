@@ -591,6 +591,8 @@ func (c *Controller) VMICPUsPatch(vm *virtv1.VirtualMachine, vmi *virtv1.Virtual
 		patch.WithReplace("/spec/domain/cpu/sockets", vm.Spec.Template.Spec.Domain.CPU.Sockets),
 	)
 
+	c.addInplaceResizeMarker(vmi, patchSet)
+
 	vcpusDelta := hardware.GetNumberOfVCPUs(vm.Spec.Template.Spec.Domain.CPU) - hardware.GetNumberOfVCPUs(vmi.Spec.Domain.CPU)
 	resourcesDelta := resource.NewMilliQuantity(vcpusDelta*int64(1000/c.clusterConfig.GetCPUAllocationRatio()), resource.DecimalSI)
 
@@ -668,6 +670,11 @@ func (c *Controller) handleCPUChangeRequest(vm *virtv1.VirtualMachine, vmi *virt
 	vmiConditions := controller.NewVirtualMachineInstanceConditionManager()
 	if vmiConditions.HasConditionWithStatus(vmi, virtv1.VirtualMachineInstanceVCPUChange, k8score.ConditionTrue) {
 		return fmt.Errorf("another CPU hotplug is in progress")
+	}
+
+	if !vmi.IsMigratable() && !c.clusterConfig.InPlaceResizeEnabledOnVMI(vmi) {
+		setRestartRequired(vm, "cpu updated in template spec. CPU-hotplug is only available for migratable VMs or when in-place resize is enabled")
+		return nil
 	}
 
 	if migrations.IsMigrating(vmi) {
@@ -3706,8 +3713,8 @@ func (c *Controller) handleMemoryHotplugRequest(vm *virtv1.VirtualMachine, vmi *
 		return nil
 	}
 
-	if !vmi.IsMigratable() {
-		setRestartRequired(vm, "memory updated in template spec. Memory-hotplug is only available for migratable VMs")
+	if !vmi.IsMigratable() && !c.clusterConfig.InPlaceResizeEnabledOnVMI(vmi) {
+		setRestartRequired(vm, "memory updated in template spec. Memory-hotplug is only available for migratable VMs or when in-place resize is enabled")
 		return nil
 	}
 
@@ -3784,6 +3791,8 @@ func (c *Controller) handleMemoryHotplugRequest(vm *virtv1.VirtualMachine, vmi *
 
 		logMsg = fmt.Sprintf("%s, setting limits to %s", logMsg, newMemoryLimit.String())
 	}
+
+	c.addInplaceResizeMarker(vmi, patchSet)
 
 	patchBytes, err := patchSet.GeneratePayload()
 	if err != nil {
@@ -3871,5 +3880,13 @@ func (c *Controller) handleNamespaceUpdate(oldObj, newObj interface{}) {
 	}
 	for _, vmKey := range vmKeys {
 		c.Queue.Add(vmKey)
+	}
+}
+
+func (c *Controller) addInplaceResizeMarker(vmi *virtv1.VirtualMachineInstance, patchSet *patch.PatchSet) {
+	if c.clusterConfig.InPlaceResizeEnabledOnVMI(vmi) {
+		if _, exists := vmi.Annotations[virtv1.VirtualMachineInstanceInPlaceResizeInProgressAnn]; !exists {
+			patchSet.AddOption(patch.WithAdd(fmt.Sprintf("/metadata/annotations/%s", patch.EscapeJSONPointer(virtv1.VirtualMachineInstanceInPlaceResizeInProgressAnn)), "true"))
+		}
 	}
 }

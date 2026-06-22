@@ -209,6 +209,7 @@ var _ = Describe("VirtualMachineInstance migration target", func() {
 			nil,
 			nil,
 			nil, // conntrack sync
+			nil,
 		)
 
 		vmiTestUUID = uuid.NewUUID()

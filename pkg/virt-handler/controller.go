@@ -24,13 +24,18 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"sync"
 	"time"
 
+	k8sv1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/workqueue"
+	"libvirt.org/go/libvirtxml"
 
 	v1 "kubevirt.io/api/core/v1"
 	pluginv1alpha1 "kubevirt.io/api/plugin/v1alpha1"
@@ -39,12 +44,16 @@ import (
 
 	"kubevirt.io/kubevirt/pkg/controller"
 	diskutils "kubevirt.io/kubevirt/pkg/ephemeral-disk-utils"
+	cmdv1 "kubevirt.io/kubevirt/pkg/handler-launcher-com/cmd/v1"
 	hostdisk "kubevirt.io/kubevirt/pkg/host-disk"
 	"kubevirt.io/kubevirt/pkg/hypervisor"
 	"kubevirt.io/kubevirt/pkg/libvmi"
 	"kubevirt.io/kubevirt/pkg/safepath"
 	"kubevirt.io/kubevirt/pkg/util"
+	"kubevirt.io/kubevirt/pkg/util/hardware"
 	virtconfig "kubevirt.io/kubevirt/pkg/virt-config"
+	checksum_controller "kubevirt.io/kubevirt/pkg/virt-handler/checksum-controller"
+	cmdclient "kubevirt.io/kubevirt/pkg/virt-handler/cmd-client"
 	"kubevirt.io/kubevirt/pkg/virt-handler/isolation"
 	launcherclients "kubevirt.io/kubevirt/pkg/virt-handler/launcher-clients"
 	migrationproxy "kubevirt.io/kubevirt/pkg/virt-handler/migration-proxy"
@@ -118,6 +127,7 @@ type BaseController struct {
 	hypervisorRuntime           hypervisor.VirtRuntime
 	pluginStore                 cache.Store
 	pluginCache                 pluginCache
+	checksumCtrl                *checksum_controller.Controller
 }
 
 func NewBaseController(
@@ -137,6 +147,7 @@ func NewBaseController(
 	hypervisorNodeInfo hypervisor.HypervisorNodeInformation,
 	hypervisorRuntime hypervisor.VirtRuntime,
 	pluginStore cache.Store,
+	checksumCtrl *checksum_controller.Controller,
 ) (*BaseController, error) {
 
 	c := &BaseController{
@@ -157,6 +168,7 @@ func NewBaseController(
 		hypervisorNodeInfo:          hypervisorNodeInfo,
 		hypervisorRuntime:           hypervisorRuntime,
 		pluginStore:                 pluginStore,
+		checksumCtrl:                checksumCtrl,
 	}
 
 	return c, nil
@@ -427,4 +439,139 @@ func (c *BaseController) checkLauncherClient(vmi *v1.VirtualMachineInstance) (bo
 	}
 
 	return false, nil
+}
+
+func (c *BaseController) hotplugCPU(vmi *v1.VirtualMachineInstance, client cmdclient.LauncherClient, capabilities *libvirtxml.Caps) error {
+	vmiConditions := controller.NewVirtualMachineInstanceConditionManager()
+
+	removeVMIVCPUChangeConditionAndLabel := func() {
+		delete(vmi.Labels, v1.VirtualMachinePodCPULimitsLabel)
+		vmiConditions.RemoveCondition(vmi, v1.VirtualMachineInstanceVCPUChange)
+	}
+	defer removeVMIVCPUChangeConditionAndLabel()
+
+	if !vmiConditions.HasCondition(vmi, v1.VirtualMachineInstanceVCPUChange) {
+		return nil
+	}
+
+	if vmi.IsCPUDedicated() {
+		cpuLimitStr, ok := vmi.Labels[v1.VirtualMachinePodCPULimitsLabel]
+		if !ok || len(cpuLimitStr) == 0 {
+			return fmt.Errorf("cannot read CPU limit from VMI annotation")
+		}
+
+		cpuLimit, err := strconv.Atoi(cpuLimitStr)
+		if err != nil {
+			return fmt.Errorf("cannot parse CPU limit from VMI annotation: %v", err)
+		}
+
+		vcpus := hardware.GetNumberOfVCPUs(vmi.Spec.Domain.CPU)
+		if vcpus > int64(cpuLimit) {
+			return fmt.Errorf("number of requested VCPUS (%d) exceeds the limit (%d)", vcpus, cpuLimit)
+		}
+	}
+
+	options := virtualMachineOptions(
+		vmi,
+		nil,
+		0,
+		nil,
+		capabilities,
+		c.clusterConfig)
+
+	if err := c.SyncVirtualMachineCPUs(client, vmi, options); err != nil {
+		return err
+	}
+
+	if vmi.Status.CurrentCPUTopology == nil {
+		vmi.Status.CurrentCPUTopology = &v1.CPUTopology{}
+	}
+
+	vmi.Status.CurrentCPUTopology.Sockets = vmi.Spec.Domain.CPU.Sockets
+	vmi.Status.CurrentCPUTopology.Cores = vmi.Spec.Domain.CPU.Cores
+	vmi.Status.CurrentCPUTopology.Threads = vmi.Spec.Domain.CPU.Threads
+
+	return nil
+}
+
+func (c *BaseController) SyncVirtualMachineCPUs(client cmdclient.LauncherClient, vmi *v1.VirtualMachineInstance, options *cmdv1.VirtualMachineOptions) error {
+	control, err := checksum_controller.NewVMIControl(vmi, client)
+	if err != nil {
+		return err
+	}
+	if err = client.SyncVirtualMachineCPUs(vmi, options); err != nil {
+		return err
+	}
+	c.checksumCtrl.Set(control)
+	return nil
+}
+
+func (c *BaseController) hotplugMemory(vmi *v1.VirtualMachineInstance, client cmdclient.LauncherClient, netBindingPluginMemoryCalculator netBindingPluginMemoryCalculator, capabilities *libvirtxml.Caps) error {
+	vmiConditions := controller.NewVirtualMachineInstanceConditionManager()
+
+	removeVMIMemoryChangeLabel := func() {
+		delete(vmi.Labels, v1.VirtualMachinePodMemoryRequestsLabel)
+		delete(vmi.Labels, v1.MemoryHotplugOverheadRatioLabel)
+	}
+	defer removeVMIMemoryChangeLabel()
+
+	if !vmiConditions.HasCondition(vmi, v1.VirtualMachineInstanceMemoryChange) {
+		return nil
+	}
+
+	podMemReqStr := vmi.Labels[v1.VirtualMachinePodMemoryRequestsLabel]
+	podMemReq, err := resource.ParseQuantity(podMemReqStr)
+	if err != nil {
+		vmiConditions.RemoveCondition(vmi, v1.VirtualMachineInstanceMemoryChange)
+		return fmt.Errorf("cannot parse Memory requests from VMI label: %v", err)
+	}
+
+	var requiredMemory resource.Quantity
+	if vmi.Status.MigrationState != nil && vmi.Status.MigrationState.TargetMemoryOverhead != nil {
+		requiredMemory = *vmi.Status.MigrationState.TargetMemoryOverhead
+	} else {
+		// TODO: Remove this fallback once VmiMemoryOverheadReport feature gate is GA
+		// and we are sure that all VMIs include the MemoryOverhead status field
+		overheadRatio := vmi.Labels[v1.MemoryHotplugOverheadRatioLabel]
+		requiredMemory = hypervisor.NewLauncherHypervisorResources(c.clusterConfig.GetHypervisor().Name).GetMemoryOverhead(vmi, runtime.GOARCH, &overheadRatio)
+		requiredMemory.Add(
+			netBindingPluginMemoryCalculator.Calculate(vmi, c.clusterConfig.GetNetworkBindings()),
+		)
+	}
+
+	requiredMemory.Add(*vmi.Spec.Domain.Resources.Requests.Memory())
+
+	if podMemReq.Cmp(requiredMemory) < 0 {
+		vmiConditions.RemoveCondition(vmi, v1.VirtualMachineInstanceMemoryChange)
+		return fmt.Errorf("amount of requested guest memory (%s) exceeds the launcher memory request (%s)", vmi.Spec.Domain.Memory.Guest.String(), podMemReqStr)
+	}
+
+	options := virtualMachineOptions(vmi, nil, 0, nil, capabilities, c.clusterConfig)
+
+	if err := c.SyncVirtualMachineMemory(client, vmi, options); err != nil {
+		// mark hotplug as failed
+		vmiConditions.UpdateCondition(vmi, &v1.VirtualMachineInstanceCondition{
+			Type:    v1.VirtualMachineInstanceMemoryChange,
+			Status:  k8sv1.ConditionFalse,
+			Reason:  memoryHotplugFailedReason,
+			Message: "memory hotplug failed, the VM configuration is not supported",
+		})
+		return err
+	}
+
+	vmiConditions.RemoveCondition(vmi, v1.VirtualMachineInstanceMemoryChange)
+	vmi.Status.Memory.GuestRequested = vmi.Spec.Domain.Memory.Guest
+	return nil
+}
+
+func (c *BaseController) SyncVirtualMachineMemory(client cmdclient.LauncherClient, vmi *v1.VirtualMachineInstance, options *cmdv1.VirtualMachineOptions) error {
+	control, err := checksum_controller.NewVMIControl(vmi, client)
+	if err != nil {
+		return err
+	}
+	if err = client.SyncVirtualMachineMemory(vmi, options); err != nil {
+		return err
+	}
+	c.checksumCtrl.Set(control)
+	return nil
 }

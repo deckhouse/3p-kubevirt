@@ -218,6 +218,8 @@ var _ = Describe("VirtualMachineInstance", func() {
 			cbtHandler,
 			nil,
 			&noopNodeHookExecutor{},
+			nil,
+			&stubNetBindingPluginMemoryCalculator{},
 		)
 
 		controller.hotplugVolumeMounter = mockHotplugVolumeMounter

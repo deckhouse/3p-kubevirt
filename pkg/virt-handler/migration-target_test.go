@@ -243,6 +243,7 @@ var _ = Describe("VirtualMachineInstance migration target", func() {
 			nil,
 			nil,
 			nil, // conntrack sync
+			nil,
 		)
 
 		controller.hotplugVolumeMounter = mockHotplugVolumeMounter
@@ -387,7 +388,7 @@ var _ = Describe("VirtualMachineInstance migration target", func() {
 
 		client.EXPECT().SyncVirtualMachineMemory(vmi, gomock.Any())
 
-		Expect(controller.hotplugMemory(vmi, client)).To(Succeed())
+		Expect(controller.hotplugMemory(vmi, client, controller.netBindingPluginMemoryCalculator, controller.capabilities)).To(Succeed())
 
 		Expect(vmi).To(matcher.HaveConditionMissingOrFalse(v1.VirtualMachineInstanceMemoryChange))
 		Expect(v1.VirtualMachinePodMemoryRequestsLabel).ToNot(BeKeyOf(vmi.Labels))
@@ -422,7 +423,7 @@ var _ = Describe("VirtualMachineInstance migration target", func() {
 		}
 		conditionManager.UpdateCondition(vmi, condition)
 
-		Expect(controller.hotplugMemory(vmi, client)).ToNot(Succeed())
+		Expect(controller.hotplugMemory(vmi, client, controller.netBindingPluginMemoryCalculator, controller.capabilities)).ToNot(Succeed())
 
 		Expect(vmi).To(matcher.HaveConditionMissingOrFalse(v1.VirtualMachineInstanceMemoryChange))
 		Expect(v1.VirtualMachinePodMemoryRequestsLabel).ToNot(BeKeyOf(vmi.Labels))
@@ -461,7 +462,7 @@ var _ = Describe("VirtualMachineInstance migration target", func() {
 
 		client.EXPECT().SyncVirtualMachineMemory(vmi, gomock.Any()).Return(fmt.Errorf("hotplug failure"))
 
-		Expect(controller.hotplugMemory(vmi, client)).ToNot(Succeed())
+		Expect(controller.hotplugMemory(vmi, client, controller.netBindingPluginMemoryCalculator, controller.capabilities)).ToNot(Succeed())
 
 		Expect(vmi).To(matcher.HaveConditionFalseWithReason(v1.VirtualMachineInstanceMemoryChange, "Memory Hotplug Failed"))
 		Expect(v1.VirtualMachinePodMemoryRequestsLabel).ToNot(BeKeyOf(vmi.Labels))

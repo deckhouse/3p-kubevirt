@@ -83,6 +83,7 @@ import (
 	virtconfig "kubevirt.io/kubevirt/pkg/virt-config"
 	virthandler "kubevirt.io/kubevirt/pkg/virt-handler"
 	virtcache "kubevirt.io/kubevirt/pkg/virt-handler/cache"
+	checksum_controller "kubevirt.io/kubevirt/pkg/virt-handler/checksum-controller"
 	cmdclient "kubevirt.io/kubevirt/pkg/virt-handler/cmd-client"
 	"kubevirt.io/kubevirt/pkg/virt-handler/conntrack"
 	dmetricsmanager "kubevirt.io/kubevirt/pkg/virt-handler/dmetrics-manager"
@@ -439,6 +440,9 @@ func (app *virtHandlerApp) Run() {
 		log.Log.Info("Conntrack sync: Cilium client not available, CT sync disabled")
 	}
 
+	checksumCtrl := checksum_controller.NewController(vmiSourceInformer, app.virtCli)
+	go checksumCtrl.Run(stop)
+
 	migrationSourceController, err := virthandler.NewMigrationSourceController(
 		recorder,
 		app.virtCli,
@@ -455,6 +459,7 @@ func (app *virtHandlerApp) Run() {
 		pluginInformer.GetStore(),
 		nodeHookManager,
 		ctSourceHandler,
+		checksumCtrl,
 	)
 	if err != nil {
 		panic(err)
@@ -482,6 +487,7 @@ func (app *virtHandlerApp) Run() {
 		pluginInformer.GetStore(),
 		nodeHookManager,
 		ctTargetHandler,
+		checksumCtrl,
 	)
 	if err != nil {
 		panic(err)
@@ -512,6 +518,8 @@ func (app *virtHandlerApp) Run() {
 		cbtHandler,
 		pluginInformer.GetStore(),
 		nodeHookManager,
+		checksumCtrl,
+		netresources.MemoryCalculator{},
 	)
 	if err != nil {
 		panic(err)
