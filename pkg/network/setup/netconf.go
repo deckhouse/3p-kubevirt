@@ -24,6 +24,7 @@ import (
 	"strconv"
 	"sync"
 
+	k8sv1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/util/errors"
 
 	"kubevirt.io/client-go/log"
@@ -49,6 +50,24 @@ type cacheCreator interface {
 	New(filePath string) *cache.Cache
 }
 
+// TapProvisionByDVPAnnotation is a node annotation that signals virt-handler
+// to provision bpfbridge TAP devices natively (via nmstate), as it did before
+// the external-provisioning support. When the annotation is ABSENT, virt-handler
+// skips native TAP creation for secondary bpfbridge interfaces, expecting an
+// external service (SDN) to provision them.
+const TapProvisionByDVPAnnotation = "network.deckhouse.io/tap-provision-by-dvp-supported"
+
+// IsNativeTapProvisioning reports whether virt-handler should provision bpfbridge
+// TAP devices itself (the node carries TapProvisionByDVPAnnotation). When false,
+// secondary TAP creation is delegated to an external service.
+func IsNativeTapProvisioning(node *k8sv1.Node) bool {
+	if node == nil {
+		return false
+	}
+	_, exists := node.Annotations[TapProvisionByDVPAnnotation]
+	return exists
+}
+
 type clusterConfigurer interface {
 	GetNetworkBindings() map[string]v1.InterfaceBindingPlugin
 }
@@ -61,6 +80,10 @@ type NetConf struct {
 	configStateMutex *sync.RWMutex
 
 	clusterConfigurer clusterConfigurer
+	// nativeTapProvisioning, when set, makes bpfbridge provision TAP devices
+	// natively via nmstate (the pre-external-provisioning behaviour). When false,
+	// secondary bpfbridge TAP creation is skipped, deferring it to an external service (SDN).
+	nativeTapProvisioning bool
 }
 
 type nsFactory func(int) NSExecutor
@@ -70,20 +93,28 @@ type NSExecutor interface {
 }
 
 func NewNetConf(clusterConfigurer clusterConfigurer) *NetConf {
+	return NewNetConfExtended(clusterConfigurer, false)
+}
+
+// NewNetConfExtended creates a NetConf. When nativeTapProvisioning is true,
+// bpfbridge provisions TAP devices natively via nmstate; when false, secondary
+// bpfbridge TAP creation is delegated to an external service (SDN).
+func NewNetConfExtended(clusterConfigurer clusterConfigurer, nativeTapProvisioning bool) *NetConf {
 	var cacheFactory cache.CacheCreator
 	return NewNetConfWithCustomFactoryAndConfigState(func(pid int) NSExecutor {
 		return netns.New(pid)
-	}, cacheFactory, map[string]*netpod.State{}, clusterConfigurer)
+	}, cacheFactory, map[string]*netpod.State{}, clusterConfigurer, nativeTapProvisioning)
 }
 
-func NewNetConfWithCustomFactoryAndConfigState(nsFactory nsFactory, cacheCreator cacheCreator, state map[string]*netpod.State, clusterConfigurer clusterConfigurer) *NetConf {
+func NewNetConfWithCustomFactoryAndConfigState(nsFactory nsFactory, cacheCreator cacheCreator, state map[string]*netpod.State, clusterConfigurer clusterConfigurer, nativeTapProvisioning bool) *NetConf {
 	return &NetConf{
-		state:             state,
-		statePid:          map[string]int{},
-		configStateMutex:  &sync.RWMutex{},
-		cacheCreator:      cacheCreator,
-		nsFactory:         nsFactory,
-		clusterConfigurer: clusterConfigurer,
+		state:                 state,
+		statePid:              map[string]int{},
+		configStateMutex:      &sync.RWMutex{},
+		cacheCreator:          cacheCreator,
+		nsFactory:             nsFactory,
+		clusterConfigurer:     clusterConfigurer,
+		nativeTapProvisioning: nativeTapProvisioning,
 	}
 }
 
@@ -132,7 +163,6 @@ func (c *NetConf) Setup(vmi *v1.VirtualMachineInstance, networks []v1.Network, l
 		ownerID = util.NonRootUID
 	}
 	queuesCapacity := int(converter.NetworkQueuesCapacity(vmi))
-	disableTapVethBridge := hasBPFBridgeBinding(vmi)
 	netPod := netpod.NewNetPod(
 		networks,
 		vmispec.FilterInterfacesByNetworks(vmi.Spec.Domain.Devices.Interfaces, networks),
@@ -144,7 +174,7 @@ func (c *NetConf) Setup(vmi *v1.VirtualMachineInstance, networks []v1.Network, l
 		netpod.WithMasqueradeAdapter(newMasqueradeAdapter(vmi)),
 		netpod.WithCacheCreator(c.cacheCreator),
 		netpod.WithBindingPlugins(c.clusterConfigurer.GetNetworkBindings()),
-		netpod.WithDisableTapVethBridge(disableTapVethBridge),
+		netpod.WithNativeTapProvisioning(c.nativeTapProvisioning),
 		netpod.WithLogger(log.Log.Object(vmi)),
 		netpod.WithVMIIfaceStatuses(vmi.Status.Interfaces),
 	)

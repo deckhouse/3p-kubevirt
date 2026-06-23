@@ -33,6 +33,7 @@ import (
 
 	v1 "kubevirt.io/api/core/v1"
 
+	"kubevirt.io/kubevirt/pkg/network/vmispec"
 	"kubevirt.io/kubevirt/pkg/virt-config/featuregate"
 )
 
@@ -462,15 +463,13 @@ func (c *ClusterConfig) IsVMRolloutStrategyLiveUpdate() bool {
 
 func (c *ClusterConfig) GetNetworkBindings() map[string]v1.InterfaceBindingPlugin {
 	networkConfig := c.GetConfig().NetworkConfiguration
-	bindings := make(map[string]v1.InterfaceBindingPlugin)
 
+	var userProvided map[string]v1.InterfaceBindingPlugin
 	if networkConfig != nil && networkConfig.Binding != nil {
-		for k, v := range networkConfig.Binding {
-			bindings[k] = v
-		}
+		userProvided = networkConfig.Binding
 	}
 
-	return bindings
+	return vmispec.MergeBindingPlugins(userProvided)
 }
 
 func (config *ClusterConfig) VGADisplayForEFIGuestsEnabled() bool {

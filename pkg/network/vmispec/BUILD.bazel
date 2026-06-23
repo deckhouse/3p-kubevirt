@@ -4,6 +4,7 @@ go_library(
     name = "go_default_library",
     srcs = [
         "defaults.go",
+        "bindingplugin.go",
         "infosource.go",
         "interface.go",
         "network.go",
@@ -16,6 +17,7 @@ go_library(
 go_test(
     name = "go_default_test",
     srcs = [
+        "bindingplugin_test.go",
         "defaults_test.go",
         "infosource_test.go",
         "interface_test.go",

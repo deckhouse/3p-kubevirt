@@ -355,7 +355,7 @@ func (app *virtHandlerApp) Run() {
 
 	launcherClientsManager := launcher_clients.NewLauncherClientsManager(app.VirtShareDir, podIsolationDetector)
 
-	netConf := netsetup.NewNetConf(app.clusterConfig)
+	netConf := newNetConf(app)
 	netStat := netsetup.NewNetStat()
 	passtRepairHandler := passt.NewRepairManager(app.clusterConfig)
 
@@ -783,6 +783,22 @@ func getMachines(capabilities libvirtxml.Caps) []libvirtxml.CapsGuestMachine {
 		machines = append(machines, guest.Arch.Machines...)
 	}
 	return machines
+}
+
+// newNetConf builds the NetConf, checking the node annotation once to decide
+// whether bpfbridge TAP provisioning is native (kubevirt) or delegated to an
+// external service (SDN). Native provisioning is active when the node carries
+// the TapProvisionByDVPAnnotation.
+func newNetConf(app *virtHandlerApp) *netsetup.NetConf {
+	nativeTapProvisioning := false
+	node, err := app.virtCli.CoreV1().Nodes().Get(context.Background(), app.HostOverride, metav1.GetOptions{})
+	if err != nil {
+		log.Log.Reason(err).Warningf("failed to get node %q; external bpfbridge TAP provisioning will be used", app.HostOverride)
+	} else {
+		nativeTapProvisioning = netsetup.IsNativeTapProvisioning(node)
+		log.Log.Infof("bpfbridge tap provisioning: native=%t (node annotation %q)", nativeTapProvisioning, netsetup.TapProvisionByDVPAnnotation)
+	}
+	return netsetup.NewNetConfExtended(app.clusterConfig, nativeTapProvisioning)
 }
 
 func main() {

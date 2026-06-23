@@ -25,14 +25,8 @@ import (
 	v1 "kubevirt.io/api/core/v1"
 
 	"kubevirt.io/kubevirt/pkg/hooks"
+	"kubevirt.io/kubevirt/pkg/network/vmispec"
 )
-
-// defaultBindingPlugins keeps a local fallback for binding metadata used by native bpfbridge handling.
-var defaultBindingPlugins = map[string]v1.InterfaceBindingPlugin{
-	"bpfbridge": {
-		DomainAttachmentType: "tap",
-	},
-}
 
 func NetBindingPluginSidecarList(vmi *v1.VirtualMachineInstance, config *v1.KubeVirtConfiguration) (hooks.HookSidecarList, error) {
 	var pluginSidecars hooks.HookSidecarList
@@ -47,19 +41,11 @@ func NetBindingPluginSidecarList(vmi *v1.VirtualMachineInstance, config *v1.Kube
 }
 
 func netBindingPluginSidecar(vmi *v1.VirtualMachineInstance, config *v1.KubeVirtConfiguration) (hooks.HookSidecarList, error) {
-	bindingByName := map[string]v1.InterfaceBindingPlugin{}
-
-	// Start with defaults
-	for name, binding := range defaultBindingPlugins {
-		bindingByName[name] = binding
-	}
-
-	// Override with config bindings if provided
+	var userProvided map[string]v1.InterfaceBindingPlugin
 	if config.NetworkConfiguration != nil && config.NetworkConfiguration.Binding != nil {
-		for name, binding := range config.NetworkConfiguration.Binding {
-			bindingByName[name] = binding
-		}
+		userProvided = config.NetworkConfiguration.Binding
 	}
+	bindingByName := vmispec.MergeBindingPlugins(userProvided)
 
 	// Find bindings that are actually used by VMI interfaces
 	var usedBindings = make(map[string]v1.InterfaceBindingPlugin)

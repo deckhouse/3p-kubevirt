@@ -57,7 +57,7 @@ var _ = Describe("netconf", func() {
 		stateCache = newConfigStateCacheStub()
 		ns = nsExecutorStub{}
 		stateMap = map[string]*netpod.State{}
-		netConf = netsetup.NewNetConfWithCustomFactoryAndConfigState(nsNoopFactory, &tempCacheCreator{}, stateMap, cConfigStub{})
+		netConf = netsetup.NewNetConfWithCustomFactoryAndConfigState(nsNoopFactory, &tempCacheCreator{}, stateMap, cConfigStub{}, false)
 		vmi = &v1.VirtualMachineInstance{ObjectMeta: metav1.ObjectMeta{UID: "123", Name: "vmi1"}}
 	})
 
@@ -82,7 +82,7 @@ var _ = Describe("netconf", func() {
 	})
 
 	DescribeTable("setup ignores specific network bindings", func(binding v1.InterfaceBindingMethod) {
-		netConf = netsetup.NewNetConfWithCustomFactoryAndConfigState(nsFailureFactory, &tempCacheCreator{}, stateMap, cConfigStub{})
+		netConf = netsetup.NewNetConfWithCustomFactoryAndConfigState(nsFailureFactory, &tempCacheCreator{}, stateMap, cConfigStub{}, false)
 
 		stateMap[string(vmi.UID)] = netpod.NewState(stateCache, ns)
 
@@ -108,7 +108,7 @@ var _ = Describe("netconf", func() {
 	)
 
 	It("fails the setup run", func() {
-		netConf := netsetup.NewNetConfWithCustomFactoryAndConfigState(nsFailureFactory, &tempCacheCreator{}, stateMap, cConfigStub{})
+		netConf := netsetup.NewNetConfWithCustomFactoryAndConfigState(nsFailureFactory, &tempCacheCreator{}, stateMap, cConfigStub{}, false)
 		vmi.Spec.Domain.Devices.Interfaces = []v1.Interface{{
 			Name:                   testNetworkName,
 			InterfaceBindingMethod: v1.InterfaceBindingMethod{Masquerade: &v1.InterfaceMasquerade{}},
@@ -121,7 +121,7 @@ var _ = Describe("netconf", func() {
 	})
 
 	It("fails the teardown run", func() {
-		netConf := netsetup.NewNetConfWithCustomFactoryAndConfigState(nil, failingCacheCreator{}, stateMap, cConfigStub{})
+		netConf := netsetup.NewNetConfWithCustomFactoryAndConfigState(nil, failingCacheCreator{}, stateMap, cConfigStub{}, false)
 		Expect(netConf.Teardown(vmi)).NotTo(Succeed())
 	})
 })
