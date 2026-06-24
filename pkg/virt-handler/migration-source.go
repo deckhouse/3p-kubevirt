@@ -56,6 +56,7 @@ import (
 	migrationproxy "kubevirt.io/kubevirt/pkg/virt-handler/migration-proxy"
 	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/api"
 	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/stats"
+	checksum_controller "kubevirt.io/kubevirt/pkg/virt-handler/checksum-controller"
 )
 
 var errWaitingForTargetPorts = errors.New("waiting for target to publish migration ports")
@@ -102,6 +103,7 @@ func NewMigrationSourceController(
 	netStat netstat,
 	passtRepairHandler passtRepairSourceHandler,
 	conntrackSync *conntrack.SourceHandler,
+	checksumCtrl *checksum_controller.Controller,
 ) (*MigrationSourceController, error) {
 
 	baseCtrl, err := NewBaseController(
@@ -110,6 +112,7 @@ func NewMigrationSourceController(
 		domainInformer,
 		clusterConfig,
 		podIsolationDetector,
+		checksumCtrl,
 	)
 	if err != nil {
 		return nil, err
