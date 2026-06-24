@@ -313,6 +313,7 @@ func (c *VirtualMachineController) Run(threadiness int, stopCh chan struct{}) {
 	heartBeatDone := c.heartBeat.Run(c.heartBeatInterval, stopCh)
 
 	go c.ioErrorRetryManager.Run(stopCh)
+	go wait.Until(c.cleanupOrphanedHotplugVolumeCheckpoints, 10*time.Second, stopCh)
 
 	// Start the actual work
 	for i := 0; i < threadiness; i++ {
@@ -323,6 +324,30 @@ func (c *VirtualMachineController) Run(threadiness int, stopCh chan struct{}) {
 	<-stopCh
 	c.multipathSocketMonitor.Close()
 	log.Log.Info("Stopping virt-handler vms controller.")
+}
+
+type checkpointHotplugVolumeMounter interface {
+	UnmountAllFromCheckpoints(activeVMIs map[types.UID]struct{}, cgroupManager cgroup.Manager) error
+}
+
+func (c *VirtualMachineController) cleanupOrphanedHotplugVolumeCheckpoints() {
+	mounter, ok := c.hotplugVolumeMounter.(checkpointHotplugVolumeMounter)
+	if !ok {
+		return
+	}
+
+	activeVMIs := map[types.UID]struct{}{}
+	for _, obj := range c.vmiGlobalStore.List() {
+		vmi, ok := obj.(*v1.VirtualMachineInstance)
+		if !ok || vmi.UID == "" {
+			continue
+		}
+		activeVMIs[vmi.UID] = struct{}{}
+	}
+
+	if err := mounter.UnmountAllFromCheckpoints(activeVMIs, nil); err != nil {
+		log.Log.Reason(err).Warning("failed to clean up orphaned hotplug volume checkpoints")
+	}
 }
 
 func (c *VirtualMachineController) runWorker() {

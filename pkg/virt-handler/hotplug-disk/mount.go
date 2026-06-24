@@ -8,9 +8,9 @@ import (
 	"sync"
 	"syscall"
 
-	"kubevirt.io/kubevirt/pkg/checkpoint"
 	hostdisk "kubevirt.io/kubevirt/pkg/host-disk"
 	"kubevirt.io/kubevirt/pkg/unsafepath"
+	virtcache "kubevirt.io/kubevirt/pkg/virt-handler/cache"
 
 	"golang.org/x/sys/unix"
 
@@ -107,7 +107,7 @@ var (
 		return virt_chroot.UmountChroot(diskPath).CombinedOutput()
 	}
 	unsafeUnmountCommand = func(diskPath string) ([]byte, error) {
-		return virt_chroot.UnsafeUmountChroot(diskPath).CombinedOutput()
+		return nil, unix.Unmount(diskPath, unix.MNT_DETACH)
 	}
 
 	isMounted = func(path *safepath.Path) (bool, error) {
@@ -132,7 +132,7 @@ var (
 )
 
 type volumeMounter struct {
-	checkpointManager  checkpoint.CheckpointManager
+	checkpointManager  virtcache.IterableCheckpointManager
 	mountRecords       map[types.UID]*vmiMountTargetRecord
 	mountRecordsLock   sync.Mutex
 	skipSafetyCheck    bool
@@ -178,7 +178,7 @@ func NewVolumeMounterWithCreator(mountStateDir string, kubeletPodsDir string, ho
 func newVolumeMounter(mountStateDir string, kubeletPodsDir string, host string) *volumeMounter {
 	return &volumeMounter{
 		mountRecords:       make(map[types.UID]*vmiMountTargetRecord),
-		checkpointManager:  checkpoint.NewSimpleCheckpointManager(mountStateDir),
+		checkpointManager:  virtcache.NewIterableCheckpointManager(mountStateDir),
 		hotplugDiskManager: hotplugdisk.NewHotplugDiskManager(kubeletPodsDir),
 		ownershipManager:   diskutils.DefaultOwnershipManager,
 		kubeletPodsDir:     kubeletPodsDir,
@@ -934,6 +934,28 @@ func (m *volumeMounter) UnmountAll(vmi *v1.VirtualMachineInstance, cgroupManager
 		if err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func (m *volumeMounter) UnmountAllFromCheckpoints(activeVMIs map[types.UID]struct{}, cgroupManager cgroup.Manager) error {
+	var unmountErrors []error
+
+	for _, uid := range m.checkpointManager.ListKeys() {
+		if _, ok := activeVMIs[types.UID(uid)]; ok {
+			continue
+		}
+
+		vmi := v1.NewVMIReferenceFromNameWithNS("", "")
+		vmi.UID = types.UID(uid)
+
+		if err := m.UnmountAll(vmi, cgroupManager); err != nil {
+			unmountErrors = append(unmountErrors, fmt.Errorf("failed to clean up hotplug checkpoint %s: %w", uid, err))
+		}
+	}
+
+	if len(unmountErrors) > 0 {
+		return fmt.Errorf("failed to clean up hotplug checkpoints: %w", errors.Join(unmountErrors...))
 	}
 	return nil
 }
