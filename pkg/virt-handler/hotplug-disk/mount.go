@@ -106,6 +106,9 @@ var (
 	unmountCommand = func(diskPath *safepath.Path) ([]byte, error) {
 		return virt_chroot.UmountChroot(diskPath).CombinedOutput()
 	}
+	unsafeUnmountCommand = func(diskPath string) ([]byte, error) {
+		return virt_chroot.UnsafeUmountChroot(diskPath).CombinedOutput()
+	}
 
 	isMounted = func(path *safepath.Path) (bool, error) {
 		return isolation.IsMounted(path)
@@ -868,6 +871,7 @@ func (m *volumeMounter) UnmountAll(vmi *v1.VirtualMachineInstance, cgroupManager
 
 		// Collect all device rules for removal first
 		var deviceRules []*devices.Rule
+		var unmountErrors []error
 
 		for _, entry := range record.MountTargetEntries {
 			diskPath, err := safepath.NewFileNoFollow(entry.TargetFile)
@@ -876,24 +880,30 @@ func (m *volumeMounter) UnmountAll(vmi *v1.VirtualMachineInstance, cgroupManager
 					logger.Infof("Device %v is not mounted anymore, continuing.", entry.TargetFile)
 					continue
 				}
-				logger.Warningf("Unable to unmount volume at path %s: %v", entry.TargetFile, err)
+				out, unmountErr := unsafeUnmountCommand(entry.TargetFile)
+				if unmountErr != nil {
+					err = fmt.Errorf("failed to open mount target and fallback unmount failed: open error: %w, unmount output: %s, unmount error: %v", err, string(out), unmountErr)
+					logger.Warningf("Unable to unmount volume at path %s: %v", entry.TargetFile, err)
+					unmountErrors = append(unmountErrors, err)
+				}
 				continue
 			}
 			diskPath.Close()
 			if isBlock, err := isBlockDevice(diskPath.Path()); err != nil {
 				logger.Warningf("Unable to unmount volume at path %s: %v", diskPath, err)
+				unmountErrors = append(unmountErrors, err)
 			} else if isBlock {
 				deviceRule, err := m.unmountBlockHotplugVolumes(diskPath.Path(), cgroupManager)
 				if err != nil {
 					logger.Warningf("Unable to remove block device at path %s: %v", diskPath, err)
-					// Don't return error, try next.
+					unmountErrors = append(unmountErrors, err)
 				} else if deviceRule != nil {
 					deviceRules = append(deviceRules, deviceRule)
 				}
 			} else {
 				if err := m.unmountFileSystemHotplugVolumes(diskPath.Path()); err != nil {
 					logger.Warningf("Unable to unmount volume at path %s: %v", diskPath, err)
-					// Don't return error, try next.
+					unmountErrors = append(unmountErrors, err)
 				}
 			}
 		}
@@ -914,6 +924,10 @@ func (m *volumeMounter) UnmountAll(vmi *v1.VirtualMachineInstance, cgroupManager
 					logger.Infof("cgroup %s device rules for removal are set successfully. rules count: %d", cgroupManager.GetCgroupVersion(), len(deviceRules))
 				}
 			}
+		}
+
+		if len(unmountErrors) > 0 {
+			return fmt.Errorf("failed to unmount all hotplug volumes: %w", errors.Join(unmountErrors...))
 		}
 
 		err = m.deleteMountTargetRecord(vmi)
