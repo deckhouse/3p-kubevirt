@@ -26,6 +26,7 @@ import (
 	"kubevirt.io/kubevirt/pkg/monitoring/metrics/common/client"
 	kubeapirewriter "kubevirt.io/kubevirt/pkg/monitoring/metrics/common/kube-api-rewriter"
 	"kubevirt.io/kubevirt/pkg/monitoring/metrics/common/workqueue"
+	"kubevirt.io/kubevirt/pkg/monitoring/metrics/virt-handler/conntrackstats"
 	"kubevirt.io/kubevirt/pkg/monitoring/metrics/virt-handler/domainstats"
 	"kubevirt.io/kubevirt/pkg/monitoring/metrics/virt-handler/migrationdomainstats"
 )
@@ -43,7 +44,7 @@ func SetupMetrics(virtShareDir, nodeName string, MaxRequestsInFlight int, vmiInf
 		return err
 	}
 
-	if err := operatormetrics.RegisterMetrics(versionMetrics, machineTypeMetrics); err != nil {
+	if err := operatormetrics.RegisterMetrics(versionMetrics, machineTypeMetrics, conntrackstats.ConntrackMetrics); err != nil {
 		return err
 	}
 	SetVersionInfo()

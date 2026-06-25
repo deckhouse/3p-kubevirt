@@ -36,6 +36,7 @@ go_library(
         "//pkg/virt-controller/watch/dra:go_default_library",
         "//pkg/virt-controller/watch/drain/disruptionbudget:go_default_library",
         "//pkg/virt-controller/watch/drain/evacuation:go_default_library",
+        "//pkg/virt-controller/watch/inplaceresize:go_default_library",
         "//pkg/virt-controller/watch/migration:go_default_library",
         "//pkg/virt-controller/watch/node:go_default_library",
         "//pkg/virt-controller/watch/pool:go_default_library",

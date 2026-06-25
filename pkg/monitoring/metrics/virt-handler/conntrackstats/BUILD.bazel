@@ -1,0 +1,11 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "go_default_library",
+    srcs = ["metrics.go"],
+    importpath = "kubevirt.io/kubevirt/pkg/monitoring/metrics/virt-handler/conntrackstats",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//vendor/github.com/rhobs/operator-observability-toolkit/pkg/operatormetrics:go_default_library",
+    ],
+)

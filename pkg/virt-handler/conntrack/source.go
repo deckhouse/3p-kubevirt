@@ -30,6 +30,8 @@ import (
 
 	v1 "kubevirt.io/api/core/v1"
 	"kubevirt.io/client-go/log"
+
+	"kubevirt.io/kubevirt/pkg/monitoring/metrics/virt-handler/conntrackstats"
 )
 
 const (
@@ -92,11 +94,13 @@ func (h *SourceHandler) ExportAndSend(vmi *v1.VirtualMachineInstance, socketPath
 
 	if len(allData) == 0 {
 		log.Log.V(3).Infof("Conntrack sync: no CT entries to send for VMI %s", vmiUID)
+		conntrackstats.RecordExportSkipped()
 		return nil
 	}
 
 	conn, err := net.Dial("unix", socketPath)
 	if err != nil {
+		conntrackstats.RecordExportError()
 		return fmt.Errorf("failed to connect to proxy socket: %w", err)
 	}
 	defer conn.Close()
@@ -108,10 +112,12 @@ func (h *SourceHandler) ExportAndSend(vmi *v1.VirtualMachineInstance, socketPath
 
 	encoded := msg.Encode()
 	if _, err := conn.Write(encoded); err != nil {
+		conntrackstats.RecordExportError()
 		return fmt.Errorf("failed to send CT data: %w", err)
 	}
 
-	log.Log.V(3).Infof("Conntrack sync: sent %d bytes for VMI %s", len(encoded), vmiUID)
+	conntrackstats.RecordExportSuccess(len(allData))
+	log.Log.V(2).Infof("Conntrack sync: sent %d bytes for VMI %s", len(encoded), vmiUID)
 	return nil
 }
 
