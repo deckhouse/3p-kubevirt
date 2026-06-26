@@ -206,6 +206,7 @@ func (h *TargetHandler) onHookSignal(vmiUID types.UID) {
 	select {
 	case <-done:
 		conntrackstats.RecordHookWaitCompleted()
+		log.Log.V(3).Infof("Conntrack sync: hook wait completed for VMI %s", vmiUID)
 	case <-time.After(SyncTimeout):
 		h.mu.Lock()
 		if state.cancel != nil {
