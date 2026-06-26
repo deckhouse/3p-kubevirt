@@ -172,7 +172,7 @@ func (h *TargetHandler) onCTReceived(vmiUID types.UID, msg *SyncMessage) {
 		log.Log.Warningf("Conntrack sync: import failed for VMI %s: %v", vmiUID, err)
 		conntrackstats.RecordImportError()
 	} else {
-		log.Log.V(2).Infof("Conntrack sync: import completed for VMI %s", vmiUID)
+		log.Log.V(3).Infof("Conntrack sync: import completed for VMI %s", vmiUID)
 		conntrackstats.RecordImportSuccess()
 	}
 
