@@ -129,7 +129,7 @@ const ENV_VAR_POD_NAME = "POD_NAME"
 // extensive log verbosity threshold after which libvirt debug logs will be enabled
 const EXT_LOG_VERBOSITY_THRESHOLD = 5
 
-const ephemeralStorageOverheadSize = "50M"
+const ephemeralStorageOverheadSize = "200M"
 
 const (
 	VirtLauncherMonitorOverhead = "25Mi"  // The `ps` RSS for virt-launcher-monitor
