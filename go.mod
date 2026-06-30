@@ -223,6 +223,7 @@ replace (
 	golang.org/x/crypto => golang.org/x/crypto v0.52.0 // +2026 high CVEs
 	golang.org/x/net => golang.org/x/net v0.55.0
 	golang.org/x/oauth2 => golang.org/x/oauth2 v0.34.0
+	golang.org/x/sys => golang.org/x/sys v0.45.0
 )
 
 tool (
