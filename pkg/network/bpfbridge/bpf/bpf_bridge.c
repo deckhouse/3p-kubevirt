@@ -31,8 +31,15 @@ int tc_l2_proxy(struct __sk_buff *ctx)
 
 	int in_ifindex = ctx->ifindex;
 
+	// VM -> network: use an egress redirect (flags=0), NOT bpf_redirect_peer.
+	// Egress redirect makes the frame actually leave eth0 (veth_xmit -> lxc rx),
+	// which is exactly what a normal pod / Linux bridge does, so Cilium's
+	// from-container path treats it as genuine container egress and rewrites the
+	// L2 dst MAC on same-node delivery. bpf_redirect_peer skips eth0 egress and
+	// jumps straight into lxc ingress, which makes Cilium omit that dmac rewrite
+	// and the destination pod drops the frame as PACKET_OTHERHOST (SKB_DROP_REASON_OTHERHOST).
 	if (in_ifindex == TAP_IFINDEX)
-		return bpf_redirect_peer(POD_IFINDEX, 0);
+		return bpf_redirect(POD_IFINDEX, 0);
 
 	if (in_ifindex == POD_IFINDEX)
 		return bpf_redirect(TAP_IFINDEX, 0);
