@@ -125,7 +125,7 @@ func (h *SourceHandler) ExportAndSend(vmi *v1.VirtualMachineInstance, socketPath
 	}
 
 	conntrackstats.RecordExportSuccess(len(allData))
-	log.Log.V(3).Infof("Conntrack sync: sent %d bytes for VMI %s", len(encoded), vmiUID)
+	log.Log.V(3).Infof("Conntrack sync: sent %d bytes for VMI %s", len(allData), vmiUID)
 	return nil
 }
 

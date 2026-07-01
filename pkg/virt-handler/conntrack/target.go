@@ -166,7 +166,7 @@ func (h *TargetHandler) onCTReceived(vmiUID types.UID, msg *SyncMessage) {
 	}
 
 	if ctx.Err() != nil {
-		log.Log.Warningf("Conntrack sync: import aborted (hook timeout) for VMI %s", vmiUID)
+		log.Log.Warningf("Conntrack sync: import aborted (hook timeout %v) for VMI %s", SyncTimeout, vmiUID)
 		conntrackstats.RecordImportAborted()
 	} else if err != nil {
 		log.Log.Warningf("Conntrack sync: import failed for VMI %s: %v", vmiUID, err)
