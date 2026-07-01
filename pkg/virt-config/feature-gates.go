@@ -20,8 +20,9 @@
 package virtconfig
 
 import (
-	"kubevirt.io/kubevirt/pkg/virt-config/featuregate"
 	v1 "kubevirt.io/api/core/v1"
+
+	"kubevirt.io/kubevirt/pkg/virt-config/featuregate"
 )
 
 /*
