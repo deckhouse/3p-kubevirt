@@ -40,7 +40,7 @@ var (
 	conntrackSyncExportedBytesTotal = operatormetrics.NewCounter(
 		operatormetrics.MetricOpts{
 			Name: "kubevirt_vmi_conntrack_sync_exported_bytes_total",
-			Help: "Total bytes of conntrack data exported during live migrations.",
+			Help: "Total bytes sent during conntrack sync for live migrations.",
 		},
 	)
 

@@ -124,8 +124,8 @@ func (h *SourceHandler) ExportAndSend(vmi *v1.VirtualMachineInstance, socketPath
 		return fmt.Errorf("failed to send CT data: %w", err)
 	}
 
-	conntrackstats.RecordExportSuccess(len(allData))
-	log.Log.V(3).Infof("Conntrack sync: sent %d bytes for VMI %s", len(allData), vmiUID)
+	conntrackstats.RecordExportSuccess(len(encoded))
+	log.Log.V(3).Infof("Conntrack sync: sent %d bytes for VMI %s", len(encoded), vmiUID)
 	return nil
 }
 
