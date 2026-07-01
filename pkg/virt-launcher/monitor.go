@@ -54,6 +54,11 @@ const (
 	refreshLogInterval      = time.Minute
 )
 
+const (
+	refreshLogInitialPeriod = 10 * time.Minute
+	refreshLogInterval      = time.Minute
+)
+
 type OnShutdownCallback func(pid int)
 type OnGracefulShutdownCallback func()
 
@@ -172,6 +177,11 @@ func (mon *monitor) refresh() {
 		log.Log.V(4).Infof("Refreshing. domainName %s pid %d", mon.domainName, mon.pid)
 		mon.lastRefreshLog = now
 	}
+	now := time.Now()
+	if mon.shouldLogRefresh(now) {
+		log.Log.V(4).Infof("Refreshing. domainName %s pid %d", mon.domainName, mon.pid)
+		mon.lastRefreshLog = now
+	}
 
 	expired := mon.isGracePeriodExpired()
 
@@ -257,9 +267,6 @@ func (mon *monitor) shouldLogRefresh(now time.Time) bool {
 
 func verboseRefreshLogsEnabled() bool {
 	virtLauncherLogVerbosity, err := strconv.Atoi(os.Getenv(services.ENV_VAR_VIRT_LAUNCHER_LOG_VERBOSITY))
-	// The refresh message is logged at V(4), but disabling throttling is tied
-	// to the existing "extended" verbosity threshold shared with libvirt/qemu
-	// debug logging.
 	return err == nil && virtLauncherLogVerbosity > services.EXT_LOG_VERBOSITY_THRESHOLD
 }
 
