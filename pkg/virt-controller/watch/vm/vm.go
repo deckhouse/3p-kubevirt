@@ -929,6 +929,7 @@ func (c *Controller) handleVolumeUpdateRequest(vm *virtv1.VirtualMachine, vmi *v
 	}
 	hotplugOp := false
 	volsVM := storagetypes.GetVolumesByName(&vmCopy.Spec.Template.Spec)
+	vmiVolumes := make([]virtv1.Volume, 0, len(vmi.Spec.Volumes))
 	for _, volume := range vmi.Spec.Volumes {
 		hotpluggableVol := (volume.VolumeSource.PersistentVolumeClaim != nil &&
 			volume.VolumeSource.PersistentVolumeClaim.Hotpluggable) ||
@@ -937,11 +938,24 @@ func (c *Controller) handleVolumeUpdateRequest(vm *virtv1.VirtualMachine, vmi *v
 		if !ok && hotpluggableVol {
 			hotplugOp = true
 		}
+		// Provisioning volumes removed from the VM template are detached on the
+		// next start; ignore them when comparing with the VMI.
+		if !ok && isProvisioningVolume(&volume) {
+			continue
+		}
+		vmiVolumes = append(vmiVolumes, volume)
+	}
+	if len(vmiVolumes) == 0 {
+		vmiVolumes = nil
+	}
+	vmVolumes := vmCopy.Spec.Template.Spec.Volumes
+	if len(vmVolumes) == 0 {
+		vmVolumes = nil
 	}
 	if hotplugOp {
 		return nil
 	}
-	if equality.Semantic.DeepEqual(vmi.Spec.Volumes, vmCopy.Spec.Template.Spec.Volumes) {
+	if equality.Semantic.DeepEqual(vmiVolumes, vmVolumes) {
 		return nil
 	}
 	vmConditions := controller.NewVirtualMachineConditionManager()
@@ -3075,14 +3089,21 @@ func validLiveUpdateVolumes(oldVMSpec *virtv1.VirtualMachineSpec, vm *virtv1.Vir
 			delete(oldVols, v.Name)
 		}
 	}
-	// Evaluate if any volumes were removed and they were hotplugged volumes
+	// Evaluate if any volumes were removed and they were hotplugged or provisioning volumes
 	for _, v := range oldVols {
-		if !storagetypes.IsHotplugVolume(v) {
+		if !storagetypes.IsHotplugVolume(v) && !isProvisioningVolume(v) {
 			return false
 		}
 	}
 
 	return true
+}
+
+// isProvisioningVolume returns true for cloud-init and sysprep volumes.
+// Their data is consumed at boot only, so removing them from the VM template
+// takes effect on the next start and does not require an explicit restart.
+func isProvisioningVolume(v *virtv1.Volume) bool {
+	return v.CloudInitNoCloud != nil || v.CloudInitConfigDrive != nil || v.Sysprep != nil
 }
 
 func validLiveUpdateDisks(oldVMSpec *virtv1.VirtualMachineSpec, vm *virtv1.VirtualMachine) bool {
@@ -3107,10 +3128,10 @@ func validLiveUpdateDisks(oldVMSpec *virtv1.VirtualMachineSpec, vm *virtv1.Virtu
 			delete(oldDisks, newDisk.Name)
 		}
 	}
-	// Evaluate if any disks were removed and they were hotplugged volumes
+	// Evaluate if any disks were removed and they were hotplugged or provisioning volumes
 	for _, d := range oldDisks {
 		v, ok := oldVols[d.Name]
-		if ok && !storagetypes.IsHotplugVolume(v) {
+		if ok && !storagetypes.IsHotplugVolume(v) && !isProvisioningVolume(v) {
 			return false
 		}
 	}
