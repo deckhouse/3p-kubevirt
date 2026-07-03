@@ -2265,7 +2265,7 @@ var _ = Describe("Manager", func() {
 			manager, _ := newLibvirtDomainManagerDefault()
 			Expect(manager.PrepareMigrationTarget(vmi, true, &cmdv1.VirtualMachineOptions{})).To(Succeed())
 
-			bootFailed, exists := manager.metadataCache.BootFailed.Load()
+			bootFailed, exists := metadataCache.BootFailed.Load()
 			Expect(exists).To(BeTrue())
 			Expect(bootFailed).To(BeTrue())
 		})
@@ -2991,6 +2991,44 @@ var _ = Describe("getDetachedDisks", func() {
 			},
 			[]api.Disk{}),
 	)
+
+	Context("with a cloud-init disk", func() {
+		makeDisks := func(withCloudInit bool) []api.Disk {
+			res := []api.Disk{
+				{
+					Target: api.DiskTarget{
+						Device: "sda",
+					},
+					Source: api.DiskSource{
+						Name: "test",
+						File: "file",
+					},
+				},
+			}
+			if withCloudInit {
+				res = append(res, api.Disk{
+					Alias: api.NewUserDefinedAlias("cloudinit"),
+					Target: api.DiskTarget{
+						Device: "sdb",
+					},
+					Source: api.DiskSource{
+						Name: "cloudinit",
+						File: cloudinit.GetIsoFilePath(cloudinit.DataSourceNoCloud, "testvmi", "default"),
+					},
+				})
+			}
+			return res
+		}
+
+		It("contains the cloud-init disk if it is removed from new", func() {
+			oldDisks := makeDisks(true)
+			Expect(getDetachedDisks(oldDisks, makeDisks(false))).To(Equal([]api.Disk{oldDisks[1]}))
+		})
+
+		It("is empty if the cloud-init disk is present in old and new", func() {
+			Expect(getDetachedDisks(makeDisks(true), makeDisks(true))).To(BeEmpty())
+		})
+	})
 })
 
 var _ = Describe("getUpdatedDisks", func() {

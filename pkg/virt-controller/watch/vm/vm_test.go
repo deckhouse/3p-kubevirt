@@ -5864,6 +5864,8 @@ var _ = Describe("VirtualMachine", func() {
 				vmi = controller.setupVMIFromVM(vm)
 				watchtesting.MarkAsReady(vmi)
 				controller.vmiIndexer.Add(vmi)
+				vmi, err := virtFakeClient.KubevirtV1().VirtualMachineInstances(vm.Namespace).Create(context.TODO(), vmi, metav1.CreateOptions{})
+				Expect(err).NotTo(HaveOccurred())
 
 				By("Creating a Controller Revision with the cloud-init volume")
 				controller.crIndexer.Add(createVMRevision(vm))
@@ -5871,7 +5873,7 @@ var _ = Describe("VirtualMachine", func() {
 				By("Removing the cloud-init volume and disk from the template")
 				vm.Spec.Template.Spec.Domain.Devices.Disks = vm.Spec.Template.Spec.Domain.Devices.Disks[:len(vm.Spec.Template.Spec.Domain.Devices.Disks)-1]
 				vm.Spec.Template.Spec.Volumes = vm.Spec.Template.Spec.Volumes[:len(vm.Spec.Template.Spec.Volumes)-1]
-				vm, err := virtFakeClient.KubevirtV1().VirtualMachines(vm.Namespace).Create(context.TODO(), vm, metav1.CreateOptions{})
+				vm, err = virtFakeClient.KubevirtV1().VirtualMachines(vm.Namespace).Create(context.TODO(), vm, metav1.CreateOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				addVirtualMachine(vm)
 
@@ -5880,6 +5882,16 @@ var _ = Describe("VirtualMachine", func() {
 				vm, err = virtFakeClient.KubevirtV1().VirtualMachines(vm.Namespace).Get(context.TODO(), vm.Name, metav1.GetOptions{})
 				Expect(err).NotTo(HaveOccurred())
 				Expect(vm.Status.Conditions).ToNot(restartRequiredMatcher(k8sv1.ConditionTrue), "restart should not be required")
+
+				By("Expecting the cloud-init volume and disk to be hot-detached from the VMI")
+				updatedVMI, err := virtFakeClient.KubevirtV1().VirtualMachineInstances(vm.Namespace).Get(context.TODO(), vmi.Name, metav1.GetOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				for _, volume := range updatedVMI.Spec.Volumes {
+					Expect(volume.Name).ToNot(Equal("cloudinit"), "cloud-init volume should be removed from the VMI")
+				}
+				for _, disk := range updatedVMI.Spec.Domain.Devices.Disks {
+					Expect(disk.Name).ToNot(Equal("cloudinit"), "cloud-init disk should be removed from the VMI")
+				}
 			})
 
 			It("should appear when VM sockets count is reduced", func() {

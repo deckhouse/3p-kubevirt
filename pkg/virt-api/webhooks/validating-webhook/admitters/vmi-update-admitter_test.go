@@ -460,6 +460,23 @@ var _ = Describe("Validating VMIUpdate Admitter", func() {
 		return res
 	}
 
+	makeCloudInitVolumes := func(indexes ...int) []v1.Volume {
+		res := make([]v1.Volume, 0)
+		for _, index := range indexes {
+			res = append(res, v1.Volume{
+				Name: fmt.Sprintf("volume-name-%d", index),
+				VolumeSource: v1.VolumeSource{
+					CloudInitNoCloud: &v1.CloudInitNoCloudSource{
+						UserDataSecretRef: &k8sv1.LocalObjectReference{
+							Name: fmt.Sprintf("secret-name-%d", index),
+						},
+					},
+				},
+			})
+		}
+		return res
+	}
+
 	makeVolumesWithMemoryDumpVol := func(total int, indexes ...int) []v1.Volume {
 		res := make([]v1.Volume, 0)
 		for i := 0; i < total; i++ {
@@ -721,6 +738,30 @@ var _ = Describe("Validating VMIUpdate Admitter", func() {
 			makeFilesystems(),
 			makeStatus(1, 0),
 			makeExpected("Number of permanent volumes has changed", "")),
+		Entry("Should accept if we remove a cloud-init volume together with its disk",
+			makeVolumes(),
+			makeCloudInitVolumes(0),
+			makeDisks(),
+			makeDisks(0),
+			makeFilesystems(),
+			makeStatus(1, 0),
+			nil),
+		Entry("Should accept if we remove a cloud-init volume and disk but keep other permanent volumes",
+			makeVolumes(0),
+			append(makeVolumes(0), makeCloudInitVolumes(1)...),
+			makeDisks(0),
+			makeDisks(0, 1),
+			makeFilesystems(),
+			makeStatus(2, 0),
+			nil),
+		Entry("Should reject if we remove a cloud-init volume but keep its disk",
+			makeVolumes(),
+			makeCloudInitVolumes(0),
+			makeDisks(0),
+			makeDisks(0),
+			makeFilesystems(),
+			makeStatus(1, 0),
+			makeExpected("mismatch between volumes declared (0) and required (1)", "")),
 		Entry("Should reject if we add a disk without a matching volume",
 			makeVolumes(0, 1),
 			makeVolumes(0),
