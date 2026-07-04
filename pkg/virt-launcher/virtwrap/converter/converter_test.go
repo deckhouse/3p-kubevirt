@@ -3934,6 +3934,54 @@ var _ = Describe("SetDriverCacheMode", func() {
 	)
 })
 
+var _ = Describe("SetOptimalIOMode", func() {
+	var origIsOnNFS func(string) bool
+
+	BeforeEach(func() {
+		origIsOnNFS = isOnNFS
+	})
+	AfterEach(func() {
+		isOnNFS = origIsOnNFS
+	})
+
+	// A fully-allocated (non-sparse) raw file so IsPreAllocated() reports true and,
+	// together with cache=none, io="native" is selected by SetOptimalIOMode.
+	newPreallocatedFile := func() string {
+		f, err := os.CreateTemp("", "optimal-io-*.img")
+		Expect(err).ToNot(HaveOccurred())
+		DeferCleanup(func() { _ = os.Remove(f.Name()) })
+		data := make([]byte, 1<<20)
+		for i := range data {
+			data[i] = 0xff
+		}
+		_, err = f.Write(data)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(f.Close()).To(Succeed())
+		return f.Name()
+	}
+
+	newCacheNoneFileDisk := func() *api.Disk {
+		return &api.Disk{
+			Driver: &api.DiskDriver{Cache: string(v1.CacheNone)},
+			Source: api.DiskSource{File: newPreallocatedFile()},
+		}
+	}
+
+	It("uses native AIO for a pre-allocated file on non-NFS storage", func() {
+		isOnNFS = func(string) bool { return false }
+		disk := newCacheNoneFileDisk()
+		Expect(SetOptimalIOMode(disk)).To(Succeed())
+		Expect(disk.Driver.IO).To(Equal(string(v1.IONative)))
+	})
+
+	It("falls back to threaded AIO for a pre-allocated file on NFS", func() {
+		isOnNFS = func(string) bool { return true }
+		disk := newCacheNoneFileDisk()
+		Expect(SetOptimalIOMode(disk)).To(Succeed())
+		Expect(disk.Driver.IO).To(Equal(string(v1.IOThreads)))
+	})
+})
+
 func diskToDiskXML(arch string, disk *v1.Disk) string {
 	devicePerBus := make(map[string]deviceNamer)
 	libvirtDisk := &api.Disk{}

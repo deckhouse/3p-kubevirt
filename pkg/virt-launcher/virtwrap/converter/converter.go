@@ -446,6 +446,20 @@ func IsPreAllocated(path string) bool {
 	return diskInf.VirtualSize <= diskInf.ActualSize
 }
 
+// nfsSuperMagic is the statfs f_type for NFS mounts (linux/magic.h NFS_SUPER_MAGIC).
+const nfsSuperMagic = 0x6969
+
+// isOnNFS reports whether path resides on an NFS mount. Native AIO (io="native")
+// is unreliable on NFS - io_destroy may block uninterruptibly - so callers avoid
+// native AIO for NFS-backed disks. On statfs failure it conservatively returns false.
+var isOnNFS = func(path string) bool {
+	var statfs syscall.Statfs_t
+	if err := syscall.Statfs(path, &statfs); err != nil {
+		return false
+	}
+	return int64(statfs.Type) == nfsSuperMagic
+}
+
 // Set optimal io mode automatically
 func SetOptimalIOMode(disk *api.Disk) error {
 	var path string
@@ -468,6 +482,13 @@ func SetOptimalIOMode(disk *api.Disk) error {
 		// set native for block device or pre-allocateed image file
 		if (disk.Source.Dev != "") || IsPreAllocated(disk.Source.File) {
 			disk.Driver.IO = v1.IONative
+		}
+		// Native AIO (libaio) is unreliable on NFS: io_destroy can block the QEMU
+		// thread uninterruptibly (D-state), which stalls live migration - the target
+		// domain never gets defined and virt-launcher times out. Fall back to
+		// threaded AIO for NFS-backed image files.
+		if disk.Driver.IO == v1.IONative && disk.Source.File != "" && isOnNFS(disk.Source.File) {
+			disk.Driver.IO = v1.IOThreads
 		}
 	}
 	// For now we don't explicitly set io=threads even for sparse files as it's
