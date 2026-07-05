@@ -242,8 +242,10 @@ func (c *Controller) sync(ctx context.Context, vmi *v1.VirtualMachineInstance, p
 	cpuChanged := c.vmiConditions.HasConditionWithStatus(vmi, v1.VirtualMachineInstanceVCPUChange, k8sv1.ConditionTrue)
 	memoryChanged := c.vmiConditions.HasConditionWithStatus(vmi, v1.VirtualMachineInstanceMemoryChange, k8sv1.ConditionTrue)
 
+	// Skip resize until the virt-launcher pod exists; the pod is created with the
+	// desired resources and re-reconciled once available. Avoids a nil-pod deref.
 	needResize := cpuChanged || memoryChanged
-	if needResize {
+	if needResize && pod != nil {
 		pod, err = c.handleResize(ctx, vmi, pod)
 		if err != nil {
 			return fmt.Errorf("failed to handle resize: %v", err)
