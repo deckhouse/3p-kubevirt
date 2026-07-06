@@ -96,6 +96,17 @@ var _ = Describe("Virt remote commands", func() {
 			Expect(sock).To(Equal(filepath.Join(shareDir, "sockets", StandardLauncherSocketFileName)))
 		})
 
+		It("missing socket error matches os.ErrNotExist", func() {
+			sock, err := FindSocket(vmi)
+			Expect(err).ToNot(HaveOccurred())
+			os.RemoveAll(sock)
+
+			_, err = FindSocket(vmi)
+			Expect(err).To(HaveOccurred())
+			// Cleanup paths classify a gone launcher by this sentinel.
+			Expect(errors.Is(err, os.ErrNotExist)).To(BeTrue())
+		})
+
 		It("Detect unresponsive socket", func() {
 			sock, err := FindSocket(vmi)
 			Expect(err).ToNot(HaveOccurred())
