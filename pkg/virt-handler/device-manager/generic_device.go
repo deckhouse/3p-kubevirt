@@ -242,6 +242,10 @@ func (dpi *GenericDevicePlugin) Allocate(ctx context.Context, r *pluginapi.Alloc
 	response := pluginapi.AllocateResponse{}
 	containerResponse := new(pluginapi.ContainerAllocateResponse)
 
+	if os.Getenv("DEVICE_PLUGIN_FAIL") == "true" {
+		return nil, errors.New("device plugin failed")
+	}
+
 	dev := new(pluginapi.DeviceSpec)
 	dev.HostPath = dpi.devicePath
 	dev.ContainerPath = dpi.devicePath
