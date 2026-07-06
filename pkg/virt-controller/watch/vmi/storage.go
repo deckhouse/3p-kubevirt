@@ -337,6 +337,15 @@ func (c *Controller) getVolumePhaseMessageReason(volume *virtv1.Volume, namespac
 
 // getFilesystemOverhead retrieves the filesystem overhead for a PVC.
 func (c *Controller) getFilesystemOverhead(pvc *k8sv1.PersistentVolumeClaim) (virtv1.Percent, error) {
+	// Block volumes have no filesystem, so no overhead applies regardless of
+	// whether CDI is installed. Without this check the CDI-less fallback below
+	// reports 5.5% for block volumes too, which shrinks possibleGuestSize below
+	// the current disk size and makes virt-launcher silently skip online disk
+	// expansion after a small VirtualDisk resize.
+	if storagetypes.IsPVCBlock(pvc.Spec.VolumeMode) {
+		return "0", nil
+	}
+
 	cdiInstances := len(c.cdiStore.List())
 	if cdiInstances != 1 {
 		if cdiInstances > 1 {
