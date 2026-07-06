@@ -40,6 +40,7 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -70,6 +71,13 @@ var (
 const StandardLauncherSocketFileName = "launcher-sock"
 const StandardInitLauncherSocketFileName = "launcher-init-sock"
 const StandardLauncherUnresponsiveFileName = "launcher-unresponsive"
+
+// DomainWaitKeepaliveKey is a gRPC metadata key set by PingKeepalive and
+// recognized by the cmd server to distinguish an intentional "extend the
+// domain-wait deadline" keepalive from ordinary requests. Only calls carrying
+// this key extend the target virt-launcher's domain-wait; any other request
+// (health pings, GetDomain, etc.) must not.
+const DomainWaitKeepaliveKey = "virt-launcher-domain-wait-keepalive"
 
 type MigrationOptions struct {
 	Bandwidth                resource.Quantity
@@ -108,6 +116,7 @@ type LauncherClient interface {
 	GetFilesystems() (v1.VirtualMachineInstanceFileSystemList, error)
 	Exec(string, string, []string, int32) (int, string, error)
 	Ping() error
+	PingKeepalive() error
 	GuestPing(string, int32) error
 	Close()
 	VirtualMachineMemoryDump(vmi *v1.VirtualMachineInstance, dumpPath string) error
@@ -660,6 +669,20 @@ func (c *VirtLauncherClient) Ping() error {
 	request := &cmdv1.EmptyRequest{}
 	ctx, cancel := context.WithTimeout(context.Background(), shortTimeout)
 	defer cancel()
+	response, err := c.v1client.Ping(ctx, request)
+
+	err = handleError(err, "Ping", response)
+	return err
+}
+
+// PingKeepalive is a Ping tagged with DomainWaitKeepaliveKey so the cmd server
+// treats it as an intentional request to extend the target virt-launcher's
+// domain-wait deadline (see waitForDomainUUID). It carries no other semantics.
+func (c *VirtLauncherClient) PingKeepalive() error {
+	request := &cmdv1.EmptyRequest{}
+	ctx, cancel := context.WithTimeout(context.Background(), shortTimeout)
+	defer cancel()
+	ctx = metadata.AppendToOutgoingContext(ctx, DomainWaitKeepaliveKey, "1")
 	response, err := c.v1client.Ping(ctx, request)
 
 	err = handleError(err, "Ping", response)

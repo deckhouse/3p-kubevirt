@@ -64,6 +64,13 @@ import (
 
 const defaultStartTimeout = 3 * time.Minute
 
+// maxDomainWaitTimeout caps how long waitForDomainUUID may be kept alive by
+// cmd-server activity resets. The per-attempt deadline (--qemu-timeout) can be
+// reset while the target is deliberately deferred (e.g. waiting for an inbound
+// migration slot), but never past this ceiling, so a genuinely stuck target
+// still fails instead of blocking forever.
+const maxDomainWaitTimeout = 30 * time.Minute
+
 func init() {
 	// must registry the event impl before doing anything else.
 	libvirt.EventRegisterDefaultImpl()
@@ -80,8 +87,9 @@ func markReady() {
 func startCmdServer(socketPath string,
 	domainManager virtwrap.DomainManager,
 	stopChan chan struct{},
-	options *cmdserver.ServerOptions) chan struct{} {
-	done, err := cmdserver.RunServer(socketPath, domainManager, stopChan, options)
+	options *cmdserver.ServerOptions,
+	activity chan<- struct{}) chan struct{} {
+	done, err := cmdserver.RunServer(socketPath, domainManager, stopChan, options, activity)
 	if err != nil {
 		log.Log.Reason(err).Error("Failed to start virt-launcher cmd server")
 		panic(err)
@@ -241,10 +249,11 @@ func detectDomainWithUUID(domainManager virtwrap.DomainManager) *api.Domain {
 	return nil
 }
 
-func waitForDomainUUID(timeout time.Duration, events chan watch.Event, stop chan struct{}, domainManager virtwrap.DomainManager) *api.Domain {
+func waitForDomainUUID(timeout time.Duration, events chan watch.Event, stop chan struct{}, domainManager virtwrap.DomainManager, deadlineReset <-chan struct{}) *api.Domain {
 
-	ticker := time.NewTicker(timeout)
-	defer ticker.Stop()
+	hardDeadline := time.Now().Add(maxDomainWaitTimeout)
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
 	checkEarlyExit := time.NewTicker(time.Second * 2)
 	defer checkEarlyExit.Stop()
 	domainCheckTicker := time.NewTicker(time.Second * 10)
@@ -252,8 +261,20 @@ func waitForDomainUUID(timeout time.Duration, events chan watch.Event, stop chan
 
 	for {
 		select {
-		case <-ticker.C:
+		case <-timer.C:
 			panic(fmt.Errorf("timed out waiting for domain to be defined"))
+		case <-deadlineReset:
+			// Extend the domain-wait deadline while the target is being actively
+			// managed (virt-handler keepalive), but never beyond hardDeadline.
+			if time.Now().Before(hardDeadline) {
+				if !timer.Stop() {
+					select {
+					case <-timer.C:
+					default:
+					}
+				}
+				timer.Reset(timeout)
+			}
 		case <-domainCheckTicker.C:
 			log.Log.V(3).Infof("Periodically checking for domain with UUID")
 			domain := detectDomainWithUUID(domainManager)
@@ -438,7 +459,10 @@ func main() {
 	// to start/stop virtual machines
 	options := cmdserver.NewServerOptions(*allowEmulation)
 	cmdclient.SetBaseDir(*virtShareDir)
-	cmdServerDone := startCmdServer(cmdclient.UninitializedSocketOnGuest(), domainManager, stopChan, options)
+	// deadlineReset carries cmd-server activity signals used to keep the target
+	// domain-wait alive while target preparation is deferred (see waitForDomainUUID).
+	deadlineReset := make(chan struct{}, 1)
+	cmdServerDone := startCmdServer(cmdclient.UninitializedSocketOnGuest(), domainManager, stopChan, options, deadlineReset)
 
 	gracefulShutdownCallback := func() {
 		domainManager.MarkGracefulShutdownVMI()
@@ -480,7 +504,7 @@ func main() {
 	// managing virtual machines.
 	markReady()
 
-	domain := waitForDomainUUID(*qemuTimeout, events, signalStopChan, domainManager)
+	domain := waitForDomainUUID(*qemuTimeout, events, signalStopChan, domainManager, deadlineReset)
 	if domain != nil {
 		var pidDir string
 		if *runWithNonRoot {
