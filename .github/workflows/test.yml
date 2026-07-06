@@ -14,7 +14,7 @@
 
 name: Test
 env:
-  GO_VERSION: "1.23.0"
+  GO_VERSION: "1.25.10"
   GINKGO_VERSION: "v2.22.1"
   KUBEVIRT_VERSION: "1.6.2"
 on:
@@ -27,9 +27,11 @@ on:
     types: [opened, reopened, synchronize, labeled, unlabeled]
     branches:
       - '*virtualization*'
+      - 'dvp/*'
   push:
     branches:
       - '*virtualization*'
+      - 'dvp/*'
 defaults:
   run:
     shell: bash

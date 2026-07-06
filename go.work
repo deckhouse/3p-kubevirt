@@ -57,3 +57,12 @@ replace k8s.io/kube-openapi => k8s.io/kube-openapi v0.0.0-20250710124328-f3f2b99
 replace github.com/deckhouse/kube-api-rewriter => github.com/deckhouse/kube-api-rewriter v0.2.1
 
 replace github.com/deckhouse/virtualization/src/kubevirt-rules => github.com/deckhouse/virtualization/src/kubevirt-rules v1.7.0
+
+// CVE Replaces
+replace golang.org/x/crypto => golang.org/x/crypto v0.52.0
+
+replace golang.org/x/net => golang.org/x/net v0.55.0
+
+replace golang.org/x/oauth2 => golang.org/x/oauth2 v0.34.0
+
+replace golang.org/x/sys => golang.org/x/sys v0.45.0
