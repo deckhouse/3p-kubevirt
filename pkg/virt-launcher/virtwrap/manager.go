@@ -1511,6 +1511,7 @@ func (l *LibvirtDomainManager) syncDisks(
 	}
 
 	// Resize and notify the VM about changed disks
+	var expandErrs []error
 	for _, disk := range domain.Spec.Devices.Disks {
 		if shouldExpandOnline(dom, disk) {
 			possibleGuestSize, ok := possibleGuestSize(disk)
@@ -1521,11 +1522,16 @@ func (l *LibvirtDomainManager) syncDisks(
 			err := dom.BlockResize(getSourceFile(disk), uint64(possibleGuestSize), libvirt.DOMAIN_BLOCK_RESIZE_BYTES)
 			if err != nil {
 				logger.Reason(err).Errorf("libvirt failed to expand disk image %v", disk)
+				// Fail the sync so virt-handler requeues and retries the
+				// expansion: the backing device may not have grown yet (e.g.
+				// the CSI resize is still propagating to the node), and no
+				// further VMI event is guaranteed to retrigger it.
+				expandErrs = append(expandErrs, fmt.Errorf("expanding disk %s: %w", disk.Alias.GetName(), err))
 			}
 		}
 	}
 
-	return nil
+	return errors.Join(expandErrs...)
 }
 
 func (l *LibvirtDomainManager) syncNetwork(
