@@ -6,6 +6,7 @@ go_library(
         "cache.go",
         "dhcpconfig.go",
         "domaininterface.go",
+        "launcherpid.go",
         "podinterface.go",
     ],
     importpath = "kubevirt.io/kubevirt/pkg/network/cache",

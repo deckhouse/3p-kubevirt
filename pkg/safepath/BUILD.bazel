@@ -4,6 +4,7 @@ go_library(
     name = "go_default_library",
     srcs = [
         "safepath.go",
+        "safepath_darwin.go",
         "safepath_linux.go",
     ],
     importpath = "kubevirt.io/kubevirt/pkg/safepath",
