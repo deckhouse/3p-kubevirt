@@ -16,23 +16,6 @@ type LauncherClientInfo struct {
 	DomainPipeStopChan  chan struct{}
 	NotInitializedSince time.Time
 	Ready               bool
-
-	closeOnce sync.Once
-}
-
-// Close shuts down the launcher client connection and stops the domain notify
-// pipe. It is safe to call concurrently and more than once: several controllers
-// (the VMI controller and the migration target controller) may clean up the
-// same VMI at the same time, and DomainPipeStopChan must not be closed twice.
-func (l *LauncherClientInfo) Close() {
-	l.closeOnce.Do(func() {
-		if l.Client != nil {
-			l.Client.Close()
-		}
-		if l.DomainPipeStopChan != nil {
-			close(l.DomainPipeStopChan)
-		}
-	})
 }
 
 type LauncherClientInfoByVMI struct {

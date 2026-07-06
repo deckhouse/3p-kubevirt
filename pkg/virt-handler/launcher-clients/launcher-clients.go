@@ -143,8 +143,9 @@ func (l *launcherClientsManager) CloseLauncherClient(vmi *v1.VirtualMachineInsta
 	}
 
 	clientInfo, exists := l.launcherClients.Load(vmi.UID)
-	if exists {
-		clientInfo.Close()
+	if exists && clientInfo.Client != nil {
+		clientInfo.Client.Close()
+		close(clientInfo.DomainPipeStopChan)
 	}
 	virtcache.GhostRecordGlobalStore.Delete(vmi.Namespace, vmi.Name)
 	l.launcherClients.Delete(vmi.UID)
@@ -161,7 +162,12 @@ func (l *launcherClientsManager) IsLauncherClientUnresponsive(vmi *v1.VirtualMac
 
 	clientInfo, exists := l.launcherClients.Load(vmi.UID)
 	if exists && clientInfo.Ready && cmdclient.IsSocketUnresponsive(clientInfo.SocketFile) {
-		clientInfo.Close()
+		if clientInfo.Client != nil {
+			clientInfo.Client.Close()
+		}
+		if clientInfo.DomainPipeStopChan != nil {
+			close(clientInfo.DomainPipeStopChan)
+		}
 		l.launcherClients.Delete(vmi.UID)
 		exists = false
 	}
