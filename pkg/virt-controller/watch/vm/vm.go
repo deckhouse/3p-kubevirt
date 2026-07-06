@@ -938,9 +938,9 @@ func (c *Controller) handleVolumeUpdateRequest(vm *virtv1.VirtualMachine, vmi *v
 		if !ok && hotpluggableVol {
 			hotplugOp = true
 		}
-		// Provisioning volumes removed from the VM template are detached on the
-		// next start; ignore them when comparing with the VMI.
-		if !ok && isProvisioningVolume(&volume) {
+		// Cloud-init volumes removed from the VM template are detached from the
+		// running VMI; ignore them when comparing with the VMI.
+		if !ok && isCloudInitVolume(&volume) {
 			continue
 		}
 		vmiVolumes = append(vmiVolumes, volume)
@@ -3089,21 +3089,14 @@ func validLiveUpdateVolumes(oldVMSpec *virtv1.VirtualMachineSpec, vm *virtv1.Vir
 			delete(oldVols, v.Name)
 		}
 	}
-	// Evaluate if any volumes were removed and they were hotplugged or provisioning volumes
+	// Evaluate if any volumes were removed and they were hotplugged or cloud-init volumes
 	for _, v := range oldVols {
-		if !storagetypes.IsHotplugVolume(v) && !isProvisioningVolume(v) {
+		if !storagetypes.IsHotplugVolume(v) && !isCloudInitVolume(v) {
 			return false
 		}
 	}
 
 	return true
-}
-
-// isProvisioningVolume returns true for cloud-init and sysprep volumes.
-// Their data is consumed at boot only, so removing them from the VM template
-// takes effect on the next start and does not require an explicit restart.
-func isProvisioningVolume(v *virtv1.Volume) bool {
-	return isCloudInitVolume(v) || v.Sysprep != nil
 }
 
 func isCloudInitVolume(v *virtv1.Volume) bool {
@@ -3180,10 +3173,10 @@ func validLiveUpdateDisks(oldVMSpec *virtv1.VirtualMachineSpec, vm *virtv1.Virtu
 			delete(oldDisks, newDisk.Name)
 		}
 	}
-	// Evaluate if any disks were removed and they were hotplugged or provisioning volumes
+	// Evaluate if any disks were removed and they were hotplugged or cloud-init volumes
 	for _, d := range oldDisks {
 		v, ok := oldVols[d.Name]
-		if ok && !storagetypes.IsHotplugVolume(v) && !isProvisioningVolume(v) {
+		if ok && !storagetypes.IsHotplugVolume(v) && !isCloudInitVolume(v) {
 			return false
 		}
 	}

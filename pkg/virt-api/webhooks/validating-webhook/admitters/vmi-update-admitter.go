@@ -31,6 +31,7 @@ import (
 
 	v1 "kubevirt.io/api/core/v1"
 
+	"kubevirt.io/kubevirt/pkg/util/migrations"
 	webhookutils "kubevirt.io/kubevirt/pkg/util/webhooks"
 	virtconfig "kubevirt.io/kubevirt/pkg/virt-config"
 	"kubevirt.io/kubevirt/pkg/virt-operator/resource/generate/components"
@@ -175,7 +176,7 @@ func admitStorageUpdate(newVolumes, oldVolumes []v1.Volume, newDisks, oldDisks [
 	newDiskMap := getDiskMap(newDisks)
 	oldDiskMap := getDiskMap(oldDisks)
 
-	permanentAr := verifyPermanentVolumes(newPermanentVolumeMap, oldPermanentVolumeMap, newDiskMap, oldDiskMap, migratedVolumeMap)
+	permanentAr := verifyPermanentVolumes(newPermanentVolumeMap, oldPermanentVolumeMap, newDiskMap, oldDiskMap, migratedVolumeMap, migrations.IsMigrating(newVMI))
 	if permanentAr != nil {
 		return permanentAr
 	}
@@ -267,9 +268,9 @@ func isMigratedVolume(newVol, oldVol *v1.Volume, migratedVolumeMap map[string]bo
 	return ok
 }
 
-func verifyPermanentVolumes(newPermanentVolumeMap, oldPermanentVolumeMap map[string]v1.Volume, newDisks, oldDisks map[string]v1.Disk, migratedVolumeMap map[string]bool) *admissionv1.AdmissionResponse {
+func verifyPermanentVolumes(newPermanentVolumeMap, oldPermanentVolumeMap map[string]v1.Volume, newDisks, oldDisks map[string]v1.Disk, migratedVolumeMap map[string]bool, isMigrating bool) *admissionv1.AdmissionResponse {
 	if len(newPermanentVolumeMap) != len(oldPermanentVolumeMap) {
-		onlyCloudInitRemoved := len(newPermanentVolumeMap) < len(oldPermanentVolumeMap)
+		onlyCloudInitRemoved := !isMigrating && len(newPermanentVolumeMap) < len(oldPermanentVolumeMap)
 		if onlyCloudInitRemoved {
 			for k, vol := range oldPermanentVolumeMap {
 				if _, ok := newPermanentVolumeMap[k]; ok {

@@ -1441,6 +1441,10 @@ func (l *LibvirtDomainManager) syncDisks(
 		}
 		err = dom.DetachDeviceFlags(strings.ToLower(string(detachBytes)), affectDeviceLiveAndConfigLibvirtFlags)
 		if err != nil {
+			if isCloudInitDisk(detachDisk) {
+				logger.Reason(err).Warningf("failed to live-detach cloud-init disk %s; will be removed on next restart", detachDisk.Alias.GetName())
+				continue
+			}
 			logger.Reason(err).Error("detaching device")
 			return err
 		}
