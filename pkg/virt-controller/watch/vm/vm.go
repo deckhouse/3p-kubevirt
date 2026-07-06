@@ -945,17 +945,10 @@ func (c *Controller) handleVolumeUpdateRequest(vm *virtv1.VirtualMachine, vmi *v
 		}
 		vmiVolumes = append(vmiVolumes, volume)
 	}
-	if len(vmiVolumes) == 0 {
-		vmiVolumes = nil
-	}
-	vmVolumes := vmCopy.Spec.Template.Spec.Volumes
-	if len(vmVolumes) == 0 {
-		vmVolumes = nil
-	}
 	if hotplugOp {
 		return nil
 	}
-	if equality.Semantic.DeepEqual(vmiVolumes, vmVolumes) {
+	if equality.Semantic.DeepEqual(vmiVolumes, vmCopy.Spec.Template.Spec.Volumes) {
 		return nil
 	}
 	vmConditions := controller.NewVirtualMachineConditionManager()
