@@ -374,8 +374,11 @@ func (c *Controller) execute(key string) error {
 			logger.V(3).Infof("Deleting migration for deleted vmi %s/%s", migration.Namespace, migration.Spec.VMIName)
 			return c.clientset.VirtualMachineInstanceMigration(migration.Namespace).Delete(context.Background(), migration.Name, v1.DeleteOptions{})
 		}
-		// nothing to process for a migration that has no VMI
-		return nil
+		// The migration is being deleted and its VMI is already gone. Run the status
+		// update so the migration is failed and the finalizer is removed; returning
+		// without it leaves the object in Terminating forever, which wedges namespace
+		// deletion and the owning resources.
+		return c.updateStatus(migration, nil, nil, nil)
 	}
 
 	vmi = vmiObj.(*virtv1.VirtualMachineInstance)
