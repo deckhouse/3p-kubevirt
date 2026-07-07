@@ -342,7 +342,7 @@ func (c *Controller) getFilesystemOverhead(pvc *k8sv1.PersistentVolumeClaim) (vi
 	// reports 5.5% for block volumes too, which shrinks possibleGuestSize below
 	// the current disk size and makes virt-launcher silently skip online disk
 	// expansion after a small VirtualDisk resize.
-	if storagetypes.IsPVCBlock(pvc.Spec.VolumeMode) {
+	if pvc != nil && storagetypes.IsPVCBlock(pvc.Spec.VolumeMode) {
 		return "0", nil
 	}
 
