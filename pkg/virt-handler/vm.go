@@ -313,6 +313,13 @@ func (c *VirtualMachineController) Run(threadiness int, stopCh chan struct{}) {
 	heartBeatDone := c.heartBeat.Run(c.heartBeatInterval, stopCh)
 
 	go c.ioErrorRetryManager.Run(stopCh)
+	// Hotplug volume mounts are tracked in on-disk checkpoints. If a VMI is
+	// deleted while its unmount fails (or virt-handler misses the deletion,
+	// e.g. it was down or the pod was force-deleted), no VMI object remains
+	// to trigger a retry through the work queue, so the mounts and the
+	// checkpoint would leak forever, keeping the PVC attached to the node.
+	// This loop periodically unmounts and removes checkpoints that no longer
+	// have a matching VMI.
 	go wait.Until(c.cleanupOrphanedHotplugVolumeCheckpoints, 10*time.Second, stopCh)
 
 	// Start the actual work
@@ -327,7 +334,7 @@ func (c *VirtualMachineController) Run(threadiness int, stopCh chan struct{}) {
 }
 
 type checkpointHotplugVolumeMounter interface {
-	UnmountAllFromCheckpoints(activeVMIs map[types.UID]struct{}, cgroupManager cgroup.Manager) error
+	CleanupOrphanedCheckpoints(activeVMIs map[types.UID]struct{}) error
 }
 
 func (c *VirtualMachineController) cleanupOrphanedHotplugVolumeCheckpoints() {
@@ -345,7 +352,7 @@ func (c *VirtualMachineController) cleanupOrphanedHotplugVolumeCheckpoints() {
 		activeVMIs[vmi.UID] = struct{}{}
 	}
 
-	if err := mounter.UnmountAllFromCheckpoints(activeVMIs, nil); err != nil {
+	if err := mounter.CleanupOrphanedCheckpoints(activeVMIs); err != nil {
 		log.Log.Reason(err).Warning("failed to clean up orphaned hotplug volume checkpoints")
 	}
 }

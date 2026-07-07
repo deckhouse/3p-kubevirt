@@ -938,7 +938,9 @@ func (m *volumeMounter) UnmountAll(vmi *v1.VirtualMachineInstance, cgroupManager
 	return nil
 }
 
-func (m *volumeMounter) UnmountAllFromCheckpoints(activeVMIs map[types.UID]struct{}, cgroupManager cgroup.Manager) error {
+// CleanupOrphanedCheckpoints unmounts hotplug volumes and deletes the mount
+// checkpoint for every checkpointed VMI that is not in activeVMIs.
+func (m *volumeMounter) CleanupOrphanedCheckpoints(activeVMIs map[types.UID]struct{}) error {
 	var unmountErrors []error
 
 	for _, uid := range m.checkpointManager.ListKeys() {
@@ -949,7 +951,7 @@ func (m *volumeMounter) UnmountAllFromCheckpoints(activeVMIs map[types.UID]struc
 		vmi := v1.NewVMIReferenceFromNameWithNS("", "")
 		vmi.UID = types.UID(uid)
 
-		if err := m.UnmountAll(vmi, cgroupManager); err != nil {
+		if err := m.UnmountAll(vmi, nil); err != nil {
 			unmountErrors = append(unmountErrors, fmt.Errorf("failed to clean up hotplug checkpoint %s: %w", uid, err))
 		}
 	}
