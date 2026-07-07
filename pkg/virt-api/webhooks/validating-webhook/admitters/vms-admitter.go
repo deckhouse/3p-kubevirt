@@ -504,10 +504,10 @@ func validateHotplugDiskConfiguration(disk *v1.Disk, name, messagePrefix, field 
 			}}
 		}
 	case disk.DiskDevice.CDRom != nil:
-		if bus != v1.DiskBusSCSI {
+		if bus != v1.DiskBusSCSI && bus != v1.DiskBusSATA && bus != v1.DiskBusUSB {
 			return []metav1.StatusCause{{
 				Type:    metav1.CauseTypeFieldValueInvalid,
-				Message: fmt.Sprintf("%s for LUN [%s] requires bus to be 'scsi'. [%s] is not permitted.", messagePrefix, name, bus),
+				Message: fmt.Sprintf("%s for CD-ROM [%s] requires bus to be 'scsi', 'sata' or 'usb'. [%s] is not permitted.", messagePrefix, name, bus),
 				Field:   field,
 			}}
 		}

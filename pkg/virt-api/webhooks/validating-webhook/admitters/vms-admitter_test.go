@@ -1623,6 +1623,26 @@ var _ = Describe("Validating VM Admitter", func() {
 	})
 })
 
+var _ = DescribeTable("validateHotplugDiskConfiguration should validate CD-ROM bus", func(bus v1.DiskBus, valid bool) {
+	disk := &v1.Disk{
+		Name: "testcdrom",
+		DiskDevice: v1.DiskDevice{
+			CDRom: &v1.CDRomTarget{Bus: bus},
+		},
+	}
+	causes := validateHotplugDiskConfiguration(disk, disk.Name, "AddVolume request", "field")
+	if valid {
+		Expect(causes).To(BeEmpty())
+	} else {
+		Expect(causes).ToNot(BeEmpty())
+	}
+},
+	Entry("scsi is allowed", v1.DiskBusSCSI, true),
+	Entry("usb is allowed", v1.DiskBusUSB, true),
+	Entry("sata is allowed", v1.DiskBusSATA, true),
+	Entry("virtio is rejected", v1.DiskBusVirtio, false),
+)
+
 func admitVm(admitter *VMsAdmitter, vm *v1.VirtualMachine) *admissionv1.AdmissionResponse {
 	vmBytes, _ := json.Marshal(vm)
 
