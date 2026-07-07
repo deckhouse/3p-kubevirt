@@ -34,9 +34,9 @@ import (
 	mount "github.com/moby/sys/mountinfo"
 	"golang.org/x/sys/unix"
 
-	"kubevirt.io/kubevirt/pkg/checkpoint"
 	"kubevirt.io/kubevirt/pkg/safepath"
 	"kubevirt.io/kubevirt/pkg/unsafepath"
+	virtcache "kubevirt.io/kubevirt/pkg/virt-handler/cache"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -188,7 +188,7 @@ var _ = Describe("HotplugVolume", func() {
 
 			m = &volumeMounter{
 				mountRecords:       make(map[types.UID]*vmiMountTargetRecord),
-				checkpointManager:  checkpoint.NewSimpleCheckpointManager(tempDir),
+				checkpointManager:  virtcache.NewIterableCheckpointManager(tempDir),
 				hotplugDiskManager: hotplugdisk.NewHotplugDiskWithOptions(tempDir),
 			}
 			record = &vmiMountTargetRecord{
@@ -294,7 +294,7 @@ var _ = Describe("HotplugVolume", func() {
 
 			m = &volumeMounter{
 				mountRecords:       make(map[types.UID]*vmiMountTargetRecord),
-				checkpointManager:  checkpoint.NewSimpleCheckpointManager(tempDir),
+				checkpointManager:  virtcache.NewIterableCheckpointManager(tempDir),
 				skipSafetyCheck:    true,
 				hotplugDiskManager: hotplugdisk.NewHotplugDiskWithOptions(tempDir),
 				ownershipManager:   ownershipManager,
@@ -558,7 +558,7 @@ var _ = Describe("HotplugVolume", func() {
 
 			m = &volumeMounter{
 				mountRecords:       make(map[types.UID]*vmiMountTargetRecord),
-				checkpointManager:  checkpoint.NewSimpleCheckpointManager(tempDir),
+				checkpointManager:  virtcache.NewIterableCheckpointManager(tempDir),
 				hotplugDiskManager: hotplugdisk.NewHotplugDiskWithOptions(tempDir),
 				ownershipManager:   ownershipManager,
 			}
@@ -756,7 +756,7 @@ var _ = Describe("HotplugVolume", func() {
 
 			m = &volumeMounter{
 				mountRecords:       make(map[types.UID]*vmiMountTargetRecord),
-				checkpointManager:  checkpoint.NewSimpleCheckpointManager(tempDir),
+				checkpointManager:  virtcache.NewIterableCheckpointManager(tempDir),
 				skipSafetyCheck:    true,
 				hotplugDiskManager: hotplugdisk.NewHotplugDiskWithOptions(tempDir),
 				ownershipManager:   ownershipManager,
