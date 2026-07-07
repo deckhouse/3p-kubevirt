@@ -57,15 +57,16 @@ type cacheCreator interface {
 // external service (SDN) to provision them.
 const TapProvisionByDVPAnnotation = "network.deckhouse.io/tap-provision-by-dvp-supported"
 
-// IsNativeTapProvisioning reports whether virt-handler should provision bpfbridge
-// TAP devices itself (the node carries TapProvisionByDVPAnnotation). When false,
-// secondary TAP creation is delegated to an external service.
-func IsNativeTapProvisioning(node *k8sv1.Node) bool {
+// IsExternalTapProvisioning reports whether secondary bpfbridge TAP creation should
+// be delegated to an external service (SDN). This is the case when the node does NOT
+// carry TapProvisionByDVPAnnotation. When the annotation is present, virt-handler
+// provisions the TAP devices itself (native provisioning).
+func IsExternalTapProvisioning(node *k8sv1.Node) bool {
 	if node == nil {
 		return false
 	}
 	_, exists := node.Annotations[TapProvisionByDVPAnnotation]
-	return exists
+	return !exists
 }
 
 type clusterConfigurer interface {
@@ -80,10 +81,10 @@ type NetConf struct {
 	configStateMutex *sync.RWMutex
 
 	clusterConfigurer clusterConfigurer
-	// nativeTapProvisioning, when set, makes bpfbridge provision TAP devices
-	// natively via nmstate (the pre-external-provisioning behaviour). When false,
-	// secondary bpfbridge TAP creation is skipped, deferring it to an external service (SDN).
-	nativeTapProvisioning bool
+	// externalTapProvisioning, when set, defers secondary bpfbridge TAP creation to an
+	// external service (SDN). When false (default), bpfbridge provisions TAP devices
+	// natively via nmstate (the pre-external-provisioning behaviour).
+	externalTapProvisioning bool
 }
 
 type nsFactory func(int) NSExecutor
@@ -96,25 +97,25 @@ func NewNetConf(clusterConfigurer clusterConfigurer) *NetConf {
 	return NewNetConfExtended(clusterConfigurer, false)
 }
 
-// NewNetConfExtended creates a NetConf. When nativeTapProvisioning is true,
-// bpfbridge provisions TAP devices natively via nmstate; when false, secondary
-// bpfbridge TAP creation is delegated to an external service (SDN).
-func NewNetConfExtended(clusterConfigurer clusterConfigurer, nativeTapProvisioning bool) *NetConf {
+// NewNetConfExtended creates a NetConf. When externalTapProvisioning is true,
+// secondary bpfbridge TAP creation is delegated to an external service (SDN); when
+// false, bpfbridge provisions TAP devices natively via nmstate.
+func NewNetConfExtended(clusterConfigurer clusterConfigurer, externalTapProvisioning bool) *NetConf {
 	var cacheFactory cache.CacheCreator
 	return NewNetConfWithCustomFactoryAndConfigState(func(pid int) NSExecutor {
 		return netns.New(pid)
-	}, cacheFactory, map[string]*netpod.State{}, clusterConfigurer, nativeTapProvisioning)
+	}, cacheFactory, map[string]*netpod.State{}, clusterConfigurer, externalTapProvisioning)
 }
 
-func NewNetConfWithCustomFactoryAndConfigState(nsFactory nsFactory, cacheCreator cacheCreator, state map[string]*netpod.State, clusterConfigurer clusterConfigurer, nativeTapProvisioning bool) *NetConf {
+func NewNetConfWithCustomFactoryAndConfigState(nsFactory nsFactory, cacheCreator cacheCreator, state map[string]*netpod.State, clusterConfigurer clusterConfigurer, externalTapProvisioning bool) *NetConf {
 	return &NetConf{
-		state:                 state,
-		statePid:              map[string]int{},
-		configStateMutex:      &sync.RWMutex{},
-		cacheCreator:          cacheCreator,
-		nsFactory:             nsFactory,
-		clusterConfigurer:     clusterConfigurer,
-		nativeTapProvisioning: nativeTapProvisioning,
+		state:                   state,
+		statePid:                map[string]int{},
+		configStateMutex:        &sync.RWMutex{},
+		cacheCreator:            cacheCreator,
+		nsFactory:               nsFactory,
+		clusterConfigurer:       clusterConfigurer,
+		externalTapProvisioning: externalTapProvisioning,
 	}
 }
 
@@ -174,7 +175,7 @@ func (c *NetConf) Setup(vmi *v1.VirtualMachineInstance, networks []v1.Network, l
 		netpod.WithMasqueradeAdapter(newMasqueradeAdapter(vmi)),
 		netpod.WithCacheCreator(c.cacheCreator),
 		netpod.WithBindingPlugins(c.clusterConfigurer.GetNetworkBindings()),
-		netpod.WithNativeTapProvisioning(c.nativeTapProvisioning),
+		netpod.WithExternalTapProvisioning(c.externalTapProvisioning),
 		netpod.WithLogger(log.Log.Object(vmi)),
 		netpod.WithVMIIfaceStatuses(vmi.Status.Interfaces),
 	)
@@ -255,7 +256,7 @@ func (c *NetConf) Teardown(vmi *v1.VirtualMachineInstance) error {
 // to enter the netns is returned separately so the caller can distinguish it from
 // per-device cleanup failures.
 func (c *NetConf) teardownBPFBridge(vmi *v1.VirtualMachineInstance, state *netpod.State) error {
-	if !hasBPFBridgeBinding(vmi) {
+	if !vmispec.HasBPFBridgeBinding(vmi.Spec.Domain.Devices.Interfaces) {
 		return nil
 	}
 	if state == nil || state.NSExec == nil {
@@ -263,20 +264,22 @@ func (c *NetConf) teardownBPFBridge(vmi *v1.VirtualMachineInstance, state *netpo
 		return nil
 	}
 
-	podIfaceNameByVMINetwork := bpfBridgeTeardownNetworkNameScheme(vmi.Spec.Networks)
+	// Reuse the pod interface names resolved (and persisted) during Setup so we detach
+	// from the exact devices the attach ran against.
+	podIfaceNameByVMINetwork := state.BPFBridgePodIfaceByNetwork
 
 	var errs []error
 	nsErr := state.NSExec.Do(func() error {
 		for _, iface := range vmi.Spec.Domain.Devices.Interfaces {
-			if iface.Binding == nil || iface.Binding.Name != "bpfbridge" {
+			if !vmispec.IsBPFBridgeBinding(iface) {
 				continue
 			}
 
+			// A missing mapping means Setup never attached BPF resources for this
+			// interface (e.g. hotplugged after Setup), so there is nothing to detach.
 			podIfaceName, exists := podIfaceNameByVMINetwork[iface.Name]
 			if !exists {
-				err := fmt.Errorf("pod interface name not found for network %q", iface.Name)
-				log.Log.Object(vmi).Reason(err).Warning("bpfbridge teardown skipped")
-				errs = append(errs, err)
+				log.Log.Object(vmi).Warningf("bpfbridge teardown skipped for network %q: no resolved pod interface name from setup", iface.Name)
 				continue
 			}
 
@@ -305,25 +308,6 @@ func (c *NetConf) teardownBPFBridge(vmi *v1.VirtualMachineInstance, state *netpo
 	}
 
 	return k8serrors.NewAggregate(errs)
-}
-
-func bpfBridgeTeardownNetworkNameScheme(networks []v1.Network) map[string]string {
-	podIfaceNamesByNetworkName := namescheme.CreateOrdinalNetworkNameScheme(networks)
-	for _, network := range networks {
-		if network.Pod != nil && network.Name != "default" {
-			podIfaceNamesByNetworkName[network.Name] = network.Name
-		}
-	}
-	return podIfaceNamesByNetworkName
-}
-
-func hasBPFBridgeBinding(vmi *v1.VirtualMachineInstance) bool {
-	for _, iface := range vmi.Spec.Domain.Devices.Interfaces {
-		if iface.Binding != nil && iface.Binding.Name == "bpfbridge" {
-			return true
-		}
-	}
-	return false
 }
 
 func newMasqueradeAdapter(vmi *v1.VirtualMachineInstance) masquerade.MasqPod {

@@ -50,12 +50,12 @@ func SetDefaultNetworkInterface(config netClusterConfigurer, spec *v1.VirtualMac
 		spec.Domain.Devices.Interfaces = []v1.Interface{*v1.DefaultMasqueradeNetworkInterface()}
 	case v1.DeprecatedSlirpInterface:
 		return fmt.Errorf("slirp interface is deprecated as of v1.3")
-	case "bpfbridge":
+	case BindingBPFBridge:
 		spec.Domain.Devices.Interfaces = []v1.Interface{
 			{
 				Name: "default",
 				Binding: &v1.PluginBinding{
-					Name: "bpfbridge",
+					Name: BindingBPFBridge,
 				},
 			},
 		}

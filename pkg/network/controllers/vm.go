@@ -182,11 +182,7 @@ func applyDynamicIfaceRequestOnVMI(
 func isHotpluggableInterface(iface v1.Interface) bool {
 	return iface.InterfaceBindingMethod.Bridge != nil ||
 		iface.InterfaceBindingMethod.SRIOV != nil ||
-		isBPFBridgeBinding(iface)
-}
-
-func isBPFBridgeBinding(iface v1.Interface) bool {
-	return iface.Binding != nil && iface.Binding.Name == "bpfbridge"
+		vmispec.IsBPFBridgeBinding(iface)
 }
 
 func clearDetachedIfacesFromVMI(

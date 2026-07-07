@@ -1873,7 +1873,7 @@ var _ = Describe("netpod", func() {
 					"bpfbridge": {DomainAttachmentType: v1.Tap},
 				}),
 				netpod.WithBpfBridgeAdapter(bpfStub),
-				netpod.WithNativeTapProvisioning(true),
+				netpod.WithExternalTapProvisioning(false),
 			)
 			Expect(netPod.Setup()).To(Succeed())
 			Expect(nmstatestub.spec.Interfaces).To(ContainElement(
@@ -1930,7 +1930,7 @@ var _ = Describe("netpod", func() {
 					"bpfbridge": {DomainAttachmentType: v1.Tap},
 				}),
 				netpod.WithBpfBridgeAdapter(&bpfBridgeStub{}),
-				netpod.WithNativeTapProvisioning(true),
+				netpod.WithExternalTapProvisioning(false),
 			)
 			Expect(netPod.Setup()).To(Succeed())
 			Expect(nmstatestub.spec.Interfaces).To(ContainElements(
@@ -1996,7 +1996,7 @@ var _ = Describe("netpod", func() {
 					"bpfbridge": {DomainAttachmentType: v1.Tap},
 				}),
 				netpod.WithBpfBridgeAdapter(bpfStub),
-				netpod.WithNativeTapProvisioning(false),
+				netpod.WithExternalTapProvisioning(true),
 			)
 			Expect(netPod.Setup()).To(Succeed())
 
@@ -2085,7 +2085,7 @@ var _ = Describe("netpod", func() {
 					"bpfbridge": {DomainAttachmentType: v1.Tap},
 				}),
 				netpod.WithBpfBridgeAdapter(bpfStub),
-				netpod.WithNativeTapProvisioning(false),
+				netpod.WithExternalTapProvisioning(true),
 			)
 			Expect(netPod.Setup()).To(Succeed())
 
@@ -2147,7 +2147,7 @@ var _ = Describe("netpod", func() {
 					"bpfbridge": {DomainAttachmentType: v1.Tap},
 				}),
 				netpod.WithBpfBridgeAdapter(bpfStub),
-				netpod.WithNativeTapProvisioning(false),
+				netpod.WithExternalTapProvisioning(true),
 			)
 			Expect(netPod.Setup()).To(Succeed())
 

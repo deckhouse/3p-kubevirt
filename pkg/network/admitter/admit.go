@@ -26,6 +26,8 @@ import (
 	k8sfield "k8s.io/apimachinery/pkg/util/validation/field"
 
 	v1 "kubevirt.io/api/core/v1"
+
+	"kubevirt.io/kubevirt/pkg/network/vmispec"
 )
 
 func validateInterfaceStateValue(field *k8sfield.Path, spec *v1.VirtualMachineInstanceSpec) []metav1.StatusCause {
@@ -55,7 +57,7 @@ func validateInterfaceStateValue(field *k8sfield.Path, spec *v1.VirtualMachineIn
 		// binding and for the bpfbridge network-binding plugin (used by SDN
 		// additional networks). Without allowing bpfbridge here the validator
 		// rejects hotunplug of an additional ClusterNetwork interface.
-		isBPFBridge := iface.Binding != nil && iface.Binding.Name == "bpfbridge"
+		isBPFBridge := vmispec.IsBPFBridgeBinding(iface)
 		if iface.State == v1.InterfaceStateAbsent && iface.Bridge == nil && !isBPFBridge {
 			causes = append(causes, metav1.StatusCause{
 				Type:    metav1.CauseTypeFieldValueInvalid,

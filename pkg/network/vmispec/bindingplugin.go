@@ -21,6 +21,24 @@ package vmispec
 
 import v1 "kubevirt.io/api/core/v1"
 
+// BindingBPFBridge is the name of the bpfbridge network binding plugin.
+const BindingBPFBridge = "bpfbridge"
+
+// IsBPFBridgeBinding reports whether the interface is bound to the bpfbridge plugin.
+func IsBPFBridgeBinding(iface v1.Interface) bool {
+	return iface.Binding != nil && iface.Binding.Name == BindingBPFBridge
+}
+
+// HasBPFBridgeBinding reports whether any of the interfaces is bound to the bpfbridge plugin.
+func HasBPFBridgeBinding(ifaces []v1.Interface) bool {
+	for _, iface := range ifaces {
+		if IsBPFBridgeBinding(iface) {
+			return true
+		}
+	}
+	return false
+}
+
 // DefaultBindingPlugins is the single source of truth for binding plugins that
 // KubeVirt ships natively (i.e. without a user-provided sidecarImage). Entries
 // here are merged under any user-provided networkConfiguration.binding entries
@@ -36,7 +54,7 @@ import v1 "kubevirt.io/api/core/v1"
 // A user-provided CR entry for the same name always takes precedence.
 func DefaultBindingPlugins() map[string]v1.InterfaceBindingPlugin {
 	return map[string]v1.InterfaceBindingPlugin{
-		"bpfbridge": {
+		BindingBPFBridge: {
 			// bpfbridge attaches the pod-facing and TAP interfaces with a TC BPF
 			// program; from the domain (libvirt) perspective it is a plain tap
 			// attachment.
