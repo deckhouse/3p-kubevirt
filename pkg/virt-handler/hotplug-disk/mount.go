@@ -106,10 +106,6 @@ var (
 	unmountCommand = func(diskPath *safepath.Path) ([]byte, error) {
 		return virt_chroot.UmountChroot(diskPath).CombinedOutput()
 	}
-	unsafeUnmountCommand = func(diskPath string) ([]byte, error) {
-		return nil, unix.Unmount(diskPath, unix.MNT_DETACH)
-	}
-
 	isMounted = func(path *safepath.Path) (bool, error) {
 		return isolation.IsMounted(path)
 	}
@@ -880,12 +876,9 @@ func (m *volumeMounter) UnmountAll(vmi *v1.VirtualMachineInstance, cgroupManager
 					logger.Infof("Device %v is not mounted anymore, continuing.", entry.TargetFile)
 					continue
 				}
-				out, unmountErr := unsafeUnmountCommand(entry.TargetFile)
-				if unmountErr != nil {
-					err = fmt.Errorf("failed to open mount target and fallback unmount failed: open error: %w, unmount output: %s, unmount error: %v", err, string(out), unmountErr)
-					logger.Warningf("Unable to unmount volume at path %s: %v", entry.TargetFile, err)
-					unmountErrors = append(unmountErrors, err)
-				}
+				err = fmt.Errorf("failed to open mount target %s: %w", entry.TargetFile, err)
+				logger.Warningf("Unable to unmount volume at path %s: %v", entry.TargetFile, err)
+				unmountErrors = append(unmountErrors, err)
 				continue
 			}
 			diskPath.Close()
