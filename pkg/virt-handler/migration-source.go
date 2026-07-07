@@ -51,12 +51,12 @@ import (
 	cmdclient "kubevirt.io/kubevirt/pkg/virt-handler/cmd-client"
 	"kubevirt.io/kubevirt/pkg/virt-handler/isolation"
 
+	checksum_controller "kubevirt.io/kubevirt/pkg/virt-handler/checksum-controller"
 	"kubevirt.io/kubevirt/pkg/virt-handler/conntrack"
 	launcher_clients "kubevirt.io/kubevirt/pkg/virt-handler/launcher-clients"
 	migrationproxy "kubevirt.io/kubevirt/pkg/virt-handler/migration-proxy"
 	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/api"
 	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/stats"
-	checksum_controller "kubevirt.io/kubevirt/pkg/virt-handler/checksum-controller"
 )
 
 var errWaitingForTargetPorts = errors.New("waiting for target to publish migration ports")

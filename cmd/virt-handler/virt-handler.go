@@ -84,6 +84,7 @@ import (
 	virtconfig "kubevirt.io/kubevirt/pkg/virt-config"
 	virthandler "kubevirt.io/kubevirt/pkg/virt-handler"
 	virtcache "kubevirt.io/kubevirt/pkg/virt-handler/cache"
+	checksum_controller "kubevirt.io/kubevirt/pkg/virt-handler/checksum-controller"
 	cmdclient "kubevirt.io/kubevirt/pkg/virt-handler/cmd-client"
 	"kubevirt.io/kubevirt/pkg/virt-handler/conntrack"
 	dmetricsmanager "kubevirt.io/kubevirt/pkg/virt-handler/dmetrics-manager"
@@ -92,7 +93,6 @@ import (
 	nodelabeller "kubevirt.io/kubevirt/pkg/virt-handler/node-labeller"
 	"kubevirt.io/kubevirt/pkg/virt-handler/rest"
 	"kubevirt.io/kubevirt/pkg/virt-handler/selinux"
-	checksum_controller "kubevirt.io/kubevirt/pkg/virt-handler/checksum-controller"
 )
 
 const (
