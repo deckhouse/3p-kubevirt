@@ -78,6 +78,10 @@ type monitor struct {
 	// lastProctreeSnapshot throttles the periodic process-tree snapshot.
 	lastProctreeSnapshot time.Time
 	lastRefreshLog       time.Time
+	// verboseRefreshLogs disables refresh-log throttling. It is derived once
+	// from the log-verbosity env var, which is fixed for the process lifetime,
+	// to avoid a getenv+Atoi on every refresh tick.
+	verboseRefreshLogs bool
 }
 
 type ProcessMonitor interface {
@@ -144,6 +148,7 @@ func NewProcessMonitor(domainName string,
 		gracePeriod:              gracePeriod,
 		finalShutdownCallback:    finalShutdownCallback,
 		gracefulShutdownCallback: gracefulShutdownCallback,
+		verboseRefreshLogs:       verboseRefreshLogsEnabled(),
 	}
 }
 
@@ -246,7 +251,7 @@ func (mon *monitor) refresh() {
 }
 
 func (mon *monitor) shouldLogRefresh(now time.Time) bool {
-	if verboseRefreshLogsEnabled() {
+	if mon.verboseRefreshLogs {
 		return true
 	}
 
