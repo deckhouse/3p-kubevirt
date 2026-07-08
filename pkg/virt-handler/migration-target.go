@@ -542,6 +542,10 @@ func (c *MigrationTargetController) execute(key string) error {
 		}
 		c.netStat.Teardown(vmi)
 		c.launcherClients.CloseLauncherClient(vmi)
+		c.migrationProxy.StopTargetListener(string(vmi.UID))
+		if c.conntrackSync != nil {
+			c.conntrackSync.Cleanup(vmi.UID)
+		}
 		return nil
 	}
 
@@ -893,6 +897,24 @@ func (c *MigrationTargetController) addFunc(obj interface{}) {
 }
 
 func (c *MigrationTargetController) deleteFunc(obj interface{}) {
+	// The informer is filtered by the migration target node label, so a delete event
+	// fires when the VMI is deleted or when the label is removed after the migration
+	// finishes or aborts. Either way the key may never be processed with the VMI
+	// still in the cache, so this is the last chance to release the migration
+	// proxies and return their ports to the node-local pool.
+	vmi, ok := obj.(*v1.VirtualMachineInstance)
+	if !ok {
+		if tombstone, isTombstone := obj.(cache.DeletedFinalStateUnknown); isTombstone {
+			vmi, _ = tombstone.Obj.(*v1.VirtualMachineInstance)
+		}
+	}
+	if vmi != nil {
+		c.migrationProxy.StopTargetListener(string(vmi.UID))
+		if c.conntrackSync != nil {
+			c.conntrackSync.Cleanup(vmi.UID)
+		}
+	}
+
 	key, err := controller.KeyFunc(obj)
 	if err == nil {
 		c.queue.Add(key)
