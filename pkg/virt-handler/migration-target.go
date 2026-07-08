@@ -48,6 +48,8 @@ import (
 	hotplugdisk "kubevirt.io/kubevirt/pkg/hotplug-disk"
 	checksum_controller "kubevirt.io/kubevirt/pkg/virt-handler/checksum-controller"
 
+	"syscall"
+
 	"kubevirt.io/kubevirt/pkg/controller"
 	cmdv1 "kubevirt.io/kubevirt/pkg/handler-launcher-com/cmd/v1"
 	hostdisk "kubevirt.io/kubevirt/pkg/host-disk"
@@ -65,7 +67,6 @@ import (
 	launcher_clients "kubevirt.io/kubevirt/pkg/virt-handler/launcher-clients"
 	migrationproxy "kubevirt.io/kubevirt/pkg/virt-handler/migration-proxy"
 	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/api"
-	"syscall"
 )
 
 var (
