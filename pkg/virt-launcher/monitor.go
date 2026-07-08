@@ -257,6 +257,9 @@ func (mon *monitor) shouldLogRefresh(now time.Time) bool {
 
 func verboseRefreshLogsEnabled() bool {
 	virtLauncherLogVerbosity, err := strconv.Atoi(os.Getenv(services.ENV_VAR_VIRT_LAUNCHER_LOG_VERBOSITY))
+	// The refresh message is logged at V(4), but disabling throttling is tied
+	// to the existing "extended" verbosity threshold shared with libvirt/qemu
+	// debug logging.
 	return err == nil && virtLauncherLogVerbosity > services.EXT_LOG_VERBOSITY_THRESHOLD
 }
 
