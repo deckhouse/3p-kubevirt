@@ -48,6 +48,11 @@ const proctreeSnapshotInterval = 30 * time.Second
 // plenty.
 const dstateEscalationInterval = 10 * time.Second
 
+const (
+	refreshLogInitialPeriod = 10 * time.Minute
+	refreshLogInterval      = time.Minute
+)
+
 type OnShutdownCallback func(pid int)
 type OnGracefulShutdownCallback func()
 
@@ -71,6 +76,7 @@ type monitor struct {
 	lastDStateLog time.Time
 	// lastProctreeSnapshot throttles the periodic process-tree snapshot.
 	lastProctreeSnapshot time.Time
+	lastRefreshLog       time.Time
 }
 
 type ProcessMonitor interface {
@@ -160,7 +166,11 @@ func (mon *monitor) refresh() {
 		return
 	}
 
-	log.Log.V(4).Infof("Refreshing. domainName %s pid %d", mon.domainName, mon.pid)
+	now := time.Now()
+	if mon.shouldLogRefresh(now) {
+		log.Log.V(4).Infof("Refreshing. domainName %s pid %d", mon.domainName, mon.pid)
+		mon.lastRefreshLog = now
+	}
 
 	expired := mon.isGracePeriodExpired()
 
@@ -232,6 +242,24 @@ func (mon *monitor) refresh() {
 	}
 
 	return
+}
+
+func (mon *monitor) shouldLogRefresh(now time.Time) bool {
+	if verboseRefreshLogsEnabled() {
+		return true
+	}
+
+	return now.Sub(mon.start) < refreshLogInitialPeriod ||
+		mon.lastRefreshLog.IsZero() ||
+		now.Sub(mon.lastRefreshLog) >= refreshLogInterval
+}
+
+func verboseRefreshLogsEnabled() bool {
+	virtLauncherLogVerbosity, err := strconv.Atoi(os.Getenv(util.ENV_VAR_VIRT_LAUNCHER_LOG_VERBOSITY))
+	// The refresh message is logged at V(4), but disabling throttling is tied
+	// to the existing "extended" verbosity threshold shared with libvirt/qemu
+	// debug logging.
+	return err == nil && virtLauncherLogVerbosity > util.EXT_LOG_VERBOSITY_THRESHOLD
 }
 
 func (mon *monitor) monitorLoop(startTimeout time.Duration, signalStopChan chan struct{}) {
