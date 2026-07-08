@@ -54,11 +54,6 @@ const (
 	refreshLogInterval      = time.Minute
 )
 
-const (
-	refreshLogInitialPeriod = 10 * time.Minute
-	refreshLogInterval      = time.Minute
-)
-
 type OnShutdownCallback func(pid int)
 type OnGracefulShutdownCallback func()
 
@@ -177,11 +172,6 @@ func (mon *monitor) refresh() {
 		return
 	}
 
-	now := time.Now()
-	if mon.shouldLogRefresh(now) {
-		log.Log.V(4).Infof("Refreshing. domainName %s pid %d", mon.domainName, mon.pid)
-		mon.lastRefreshLog = now
-	}
 	now := time.Now()
 	if mon.shouldLogRefresh(now) {
 		log.Log.V(4).Infof("Refreshing. domainName %s pid %d", mon.domainName, mon.pid)
