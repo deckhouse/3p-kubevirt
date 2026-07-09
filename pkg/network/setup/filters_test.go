@@ -105,6 +105,29 @@ var _ = Describe("Network setup filters", func() {
 			Expect(network.FilterNetsForLiveUpdate(vmi)).To(BeEmpty())
 		})
 
+		It("Should return a network to hotplug when a secondary pod interface exists in pod but not in the domain", func() {
+			vmi := libvmi.New(
+				libvmi.WithInterface(*v1.DefaultBridgeNetworkInterface()),
+				libvmi.WithInterface(libvmi.InterfaceWithBindingPlugin(net1Name, v1.PluginBinding{Name: "bpfbridge"})),
+				libvmi.WithNetwork(v1.DefaultPodNetwork()),
+				libvmi.WithNetwork(&v1.Network{Name: net1Name, NetworkSource: v1.NetworkSource{Pod: &v1.PodNetwork{}}}),
+				libvmistatus.WithStatus(
+					libvmistatus.New(
+						libvmistatus.WithInterfaceStatus(v1.VirtualMachineInstanceNetworkInterface{
+							Name:       "default",
+							InfoSource: vmispec.InfoSourceDomain,
+						}),
+						libvmistatus.WithInterfaceStatus(v1.VirtualMachineInstanceNetworkInterface{
+							Name:             net1Name,
+							PodInterfaceName: "d8abcdef1234i",
+						}),
+					),
+				),
+			)
+
+			Expect(network.FilterNetsForLiveUpdate(vmi)).To(Equal([]v1.Network{{Name: net1Name, NetworkSource: v1.NetworkSource{Pod: &v1.PodNetwork{}}}}))
+		})
+
 		It("Should return a network to hotplug when the interface exists in pod but not in the domain", func() {
 			multusAndDomainInfoSource := vmispec.NewInfoSource(vmispec.InfoSourceMultusStatus, vmispec.InfoSourceDomain)
 			vmi := libvmi.New(

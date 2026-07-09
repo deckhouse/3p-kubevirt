@@ -26,6 +26,8 @@ import (
 	k8sfield "k8s.io/apimachinery/pkg/util/validation/field"
 
 	v1 "kubevirt.io/api/core/v1"
+
+	"kubevirt.io/kubevirt/pkg/network/vmispec"
 )
 
 func validateInterfaceStateValue(field *k8sfield.Path, spec *v1.VirtualMachineInstanceSpec) []metav1.StatusCause {
@@ -51,10 +53,15 @@ func validateInterfaceStateValue(field *k8sfield.Path, spec *v1.VirtualMachineIn
 			})
 		}
 
-		if iface.State == v1.InterfaceStateAbsent && iface.Bridge == nil {
+		// Interface hotunplug (state=absent) is supported for the classic bridge
+		// binding and for the bpfbridge network-binding plugin (used by SDN
+		// additional networks). Without allowing bpfbridge here the validator
+		// rejects hotunplug of an additional ClusterNetwork interface.
+		isBPFBridge := vmispec.IsBPFBridgeBinding(iface)
+		if iface.State == v1.InterfaceStateAbsent && iface.Bridge == nil && !isBPFBridge {
 			causes = append(causes, metav1.StatusCause{
 				Type:    metav1.CauseTypeFieldValueInvalid,
-				Message: fmt.Sprintf("%q interface's state %q is supported only for bridge binding", iface.Name, iface.State),
+				Message: fmt.Sprintf("%q interface's state %q is supported only for bridge and bpfbridge bindings", iface.Name, iface.State),
 				Field:   field.Child("domain", "devices", "interfaces").Index(idx).Child("state").String(),
 			})
 		}

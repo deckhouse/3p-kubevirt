@@ -1,0 +1,21 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "go_default_library",
+    srcs = ["attach.go"],
+    importpath = "kubevirt.io/kubevirt/pkg/network/bpfbridge",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//vendor/github.com/cilium/ebpf:go_default_library",
+        "//vendor/github.com/vishvananda/netlink:go_default_library",
+        "//vendor/golang.org/x/sys/unix:go_default_library",
+        "//vendor/k8s.io/apimachinery/pkg/util/errors:go_default_library",
+    ],
+)
+
+genrule(
+    name = "bpf-bridge-object",
+    srcs = ["bpf/bpf_bridge.c"],
+    outs = ["bpf_bridge.o"],
+    cmd = "clang -O2 -g -Wall -Werror -target bpf -c $(location bpf/bpf_bridge.c) -o $@",
+)

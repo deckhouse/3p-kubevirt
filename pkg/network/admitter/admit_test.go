@@ -56,6 +56,22 @@ var _ = Describe("Validating VMI network spec", func() {
 		Entry("is down when bridge binding is used", v1.InterfaceStateLinkDown),
 	)
 
+	It("network interface state absent is allowed for the bpfbridge binding plugin", func() {
+		vm := libvmi.New(
+			libvmi.WithInterface(v1.Interface{
+				Name:    "foo",
+				State:   v1.InterfaceStateAbsent,
+				Binding: &v1.PluginBinding{Name: "bpfbridge"},
+			}),
+			libvmi.WithNetwork(&v1.Network{
+				Name:          "foo",
+				NetworkSource: v1.NetworkSource{Pod: &v1.PodNetwork{}},
+			}),
+		)
+		validator := admitter.NewValidator(k8sfield.NewPath("fake"), &vm.Spec, stubClusterConfigChecker{})
+		Expect(validator.Validate()).To(BeEmpty())
+	})
+
 	It("network interface state value is invalid", func() {
 		vm := libvmi.New(
 			libvmi.WithNetwork(&v1.Network{

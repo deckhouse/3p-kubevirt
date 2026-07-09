@@ -38,10 +38,16 @@ type State struct {
 	cache stateCacheReaderWriterDeleter
 
 	NSExec NSExecutor
+
+	// BPFBridgePodIfaceByNetwork maps a VMI network name to the resolved pod
+	// interface name for bpfbridge-bound interfaces, as computed during Setup.
+	// Teardown reuses this mapping to detach BPF resources from the exact devices
+	// that Setup attached them to, instead of re-resolving with divergent logic.
+	BPFBridgePodIfaceByNetwork map[string]string
 }
 
 func NewState(cache stateCacheReaderWriterDeleter, ns NSExecutor) *State {
-	return &State{cache: cache, NSExec: ns}
+	return &State{cache: cache, NSExec: ns, BPFBridgePodIfaceByNetwork: map[string]string{}}
 }
 
 func (s *State) PendingStartedFinished(nets []v1.Network) ([]v1.Network, []v1.Network, []v1.Network, error) {

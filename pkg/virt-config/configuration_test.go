@@ -1074,4 +1074,43 @@ var _ = Describe("test configuration", func() {
 		Entry("rejects too many decimal places", "1.55", 1, 0.0, true),
 		Entry("accepts exponential notation when value fits precision", "1.5e1", 0, 15.0, false),
 	)
+
+	Describe("GetNetworkBindings", func() {
+		It("returns the native bpfbridge plugin even without CR configuration", func() {
+			clusterConfig, _, _ := testutils.NewFakeClusterConfigUsingKVConfig(&v1.KubeVirtConfiguration{})
+			bindings := clusterConfig.GetNetworkBindings()
+			Expect(bindings).To(HaveKey("bpfbridge"))
+			Expect(bindings["bpfbridge"].DomainAttachmentType).To(Equal(v1.Tap))
+			Expect(bindings["bpfbridge"].Migration).ToNot(BeNil())
+			Expect(bindings["bpfbridge"].Migration.Method).To(Equal(v1.LinkRefresh))
+		})
+
+		It("lets a user-provided CR entry override the native default", func() {
+			clusterConfig, _, _ := testutils.NewFakeClusterConfigUsingKVConfig(&v1.KubeVirtConfiguration{
+				NetworkConfiguration: &v1.NetworkConfiguration{
+					Binding: map[string]v1.InterfaceBindingPlugin{
+						"bpfbridge": {DomainAttachmentType: v1.ManagedTap, SidecarImage: "custom:latest"},
+					},
+				},
+			})
+			bindings := clusterConfig.GetNetworkBindings()
+			Expect(bindings["bpfbridge"]).To(Equal(v1.InterfaceBindingPlugin{
+				DomainAttachmentType: v1.ManagedTap,
+				SidecarImage:         "custom:latest",
+			}))
+		})
+
+		It("preserves user-provided plugins alongside the native defaults", func() {
+			clusterConfig, _, _ := testutils.NewFakeClusterConfigUsingKVConfig(&v1.KubeVirtConfiguration{
+				NetworkConfiguration: &v1.NetworkConfiguration{
+					Binding: map[string]v1.InterfaceBindingPlugin{
+						"custom": {DomainAttachmentType: v1.Tap, SidecarImage: "custom:latest"},
+					},
+				},
+			})
+			bindings := clusterConfig.GetNetworkBindings()
+			Expect(bindings).To(HaveKey("bpfbridge"))
+			Expect(bindings).To(HaveKey("custom"))
+		})
+	})
 })

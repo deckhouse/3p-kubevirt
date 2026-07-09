@@ -60,7 +60,11 @@ func FilterNetworksSpec(nets []v1.Network, predicate func(i v1.Network) bool) []
 
 func LookUpDefaultNetwork(networks []v1.Network) *v1.Network {
 	for i, network := range networks {
-		if network.Pod != nil || (network.Multus != nil && network.Multus.Default) {
+		// A secondary pod network (e.g. a bpfbridge network named "veth_cn…") is
+		// not the default one: without the IsSecondaryPodNetwork check a lone
+		// additional pod network would be misclassified as the default and bound
+		// to eth0, which breaks a VM that legitimately has only an additional network.
+		if (network.Pod != nil && !IsSecondaryPodNetwork(network)) || (network.Multus != nil && network.Multus.Default) {
 			return &networks[i]
 		}
 	}
@@ -97,6 +101,12 @@ func ExtractDRANetworkClaimRequestTuples(spec *v1.VirtualMachineInstanceSpec) ma
 	}
 
 	return validPairFirstIndexByKey
+}
+
+// IsSecondaryPodNetwork reports whether net is a non-default pod network
+// (i.e. a secondary pod network, not the primary "default" one).
+func IsSecondaryPodNetwork(net v1.Network) bool {
+	return net.Pod != nil && net.Name != "default"
 }
 
 func IndexNetworkSpecByName(networks []v1.Network) map[string]v1.Network {

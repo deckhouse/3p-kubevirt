@@ -128,6 +128,14 @@ var _ = Describe("VMI network spec", func() {
 				),
 			),
 		)
+
+		It("bpfbridge is migratable out of the box via DefaultBindingPlugins", func() {
+			vmi := libvmi.New(
+				libvmi.WithInterface(interfaceWithBindingPlugin(podNet0, "bpfbridge")),
+				libvmi.WithNetwork(v1.DefaultPodNetwork()),
+			)
+			Expect(netvmispec.VerifyVMIMigratable(vmi, netvmispec.DefaultBindingPlugins())).To(Succeed())
+		})
 	})
 
 	const (

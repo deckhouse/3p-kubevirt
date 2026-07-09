@@ -32,6 +32,7 @@ import (
 var _ = Describe("Network", func() {
 	podNetwork := createPodNetwork("default")
 	draNetwork := *libvmi.DRANetwork("dra-net", "sriov", "vf1")
+	secondaryPodNetwork := createPodNetwork("veth_cn1234")
 	multusDefaultNetwork := createMultusDefaultNetwork("network0", "default/nad0")
 	multusSecondaryNetwork1 := createMultusSecondaryNetwork("network1", "default/nad1")
 	multusSecondaryNetwork2 := createMultusSecondaryNetwork("network2", "default/nad2")
@@ -75,6 +76,7 @@ var _ = Describe("Network", func() {
 		Entry("when there are no default networks", []v1.Network{multusSecondaryNetwork1, multusSecondaryNetwork2}),
 		Entry("when there is only a DRA network", []v1.Network{draNetwork}),
 		Entry("when there are only DRA and secondary Multus networks", []v1.Network{draNetwork, multusSecondaryNetwork1}),
+		Entry("when there is only a secondary pod network", []v1.Network{secondaryPodNetwork}),
 	)
 	DescribeTable("should succeed to return the default network", func(inputNetworks []v1.Network, expectNetwork *v1.Network) {
 		Expect(vmispec.LookUpDefaultNetwork(inputNetworks)).To(Equal(expectNetwork))
@@ -84,6 +86,13 @@ var _ = Describe("Network", func() {
 				podNetwork,
 				multusSecondaryNetwork1,
 				multusSecondaryNetwork2,
+			},
+			&podNetwork,
+		),
+		Entry("when a default pod network coexists with a secondary pod network",
+			[]v1.Network{
+				podNetwork,
+				secondaryPodNetwork,
 			},
 			&podNetwork,
 		),

@@ -55,10 +55,11 @@ func filterNetsToHotplug(
 
 	nonAbsentNets := vmispec.FilterNetworksByInterfaces(nets, nonAbsentIfaces)
 
+	networksByName := vmispec.IndexNetworkSpecByName(nets)
 	ifaceStatusesInPodAndNotInDomain := vmispec.IndexInterfaceStatusByName(
 		ifaceStatuses,
 		func(ifaceStatus v1.VirtualMachineInstanceNetworkInterface) bool {
-			return vmispec.ContainsInfoSource(ifaceStatus.InfoSource, vmispec.InfoSourceMultusStatus) &&
+			return isInterfacePresentInPod(ifaceStatus, networksByName) &&
 				!vmispec.ContainsInfoSource(ifaceStatus.InfoSource, vmispec.InfoSourceDomain)
 		},
 	)
@@ -72,6 +73,15 @@ func filterNetsToHotplug(
 	}
 
 	return networksToHotplug
+}
+
+func isInterfacePresentInPod(ifaceStatus v1.VirtualMachineInstanceNetworkInterface, networksByName map[string]v1.Network) bool {
+	if vmispec.ContainsInfoSource(ifaceStatus.InfoSource, vmispec.InfoSourceMultusStatus) {
+		return true
+	}
+
+	network, exists := networksByName[ifaceStatus.Name]
+	return exists && network.Pod != nil && network.Name != "default" && ifaceStatus.PodInterfaceName != ""
 }
 
 func filterNetsToHotunplug(

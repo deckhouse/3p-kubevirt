@@ -3,6 +3,7 @@ load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
 go_library(
     name = "go_default_library",
     srcs = [
+        "bindingplugin.go",
         "defaults.go",
         "devices.go",
         "infosource.go",
@@ -17,6 +18,7 @@ go_library(
 go_test(
     name = "go_default_test",
     srcs = [
+        "bindingplugin_test.go",
         "defaults_test.go",
         "infosource_test.go",
         "interface_test.go",
