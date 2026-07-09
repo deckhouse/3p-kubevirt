@@ -797,9 +797,9 @@ func newNetConf(app *virtHandlerApp) *netsetup.NetConf {
 	} else {
 		externalTapProvisioning = netsetup.IsExternalTapProvisioning(node)
 		if externalTapProvisioning {
-			log.Log.Infof("tap is created on the SDN side (node %q has no %q annotation)", app.HostOverride, netsetup.TapProvisionByDVPAnnotation)
+			log.Log.Infof("Enable TAP creation externally by the SDN side (node %q has no %q annotation)", app.HostOverride, netsetup.TapProvisionByDVPAnnotation)
 		} else {
-			log.Log.Infof("tap is created on the kubevirt side (node %q has %q annotation)", app.HostOverride, netsetup.TapProvisionByDVPAnnotation)
+			log.Log.Infof("Enable TAP creation by virt-handler (node %q has %q annotation)", app.HostOverride, netsetup.TapProvisionByDVPAnnotation)
 		}
 	}
 	return netsetup.NewNetConfExtended(app.clusterConfig, externalTapProvisioning)
