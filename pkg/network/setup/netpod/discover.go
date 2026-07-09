@@ -31,6 +31,7 @@ import (
 
 	"kubevirt.io/kubevirt/pkg/network/cache"
 	"kubevirt.io/kubevirt/pkg/network/driver/nmstate"
+	"kubevirt.io/kubevirt/pkg/network/vmispec"
 )
 
 // discover goes over the current pod network configuration and persists/caches
@@ -40,7 +41,7 @@ func (n NetPod) discover(currentStatus *nmstate.Status) error {
 	podIfaceNameByVMINetwork := createNetworkNameScheme(n.vmiSpecNets, n.vmiIfaceStatuses, currentStatus.Interfaces)
 
 	for _, vmiSpecIface := range n.vmiSpecIfaces {
-		if skipPodInterfaceIsNotDefault(vmiSpecIface.Name, n.vmiSpecNets) {
+		if skipPodInterfaceIsNotDefault(vmiSpecIface.Name, n.vmiSpecNets) && !vmispec.IsBPFBridgeBinding(vmiSpecIface) {
 			continue
 		}
 
@@ -106,6 +107,17 @@ func (n NetPod) discover(currentStatus *nmstate.Status) error {
 			// The existence of the pod interface depends on the network binding plugin implementation
 			if podIfaceExists {
 				if err := n.storePodInterfaceData(vmiSpecIface, podIfaceStatus); err != nil {
+					return err
+				}
+			}
+			if vmispec.IsBPFBridgeBinding(vmiSpecIface) {
+				if !podIfaceExists {
+					return fmt.Errorf("pod link (%s) is missing", podIfaceName)
+				}
+				if err := n.storeBridgeBindingDHCPInterfaceData(currentStatus, podIfaceStatus, vmiSpecIface, podIfaceName); err != nil {
+					return err
+				}
+				if err := n.storeBridgeDomainInterfaceData(podIfaceStatus, vmiSpecIface); err != nil {
 					return err
 				}
 			}

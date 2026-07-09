@@ -25,6 +25,7 @@ import (
 	v1 "kubevirt.io/api/core/v1"
 
 	"kubevirt.io/kubevirt/pkg/hooks"
+	"kubevirt.io/kubevirt/pkg/network/vmispec"
 )
 
 func NetBindingPluginSidecarList(vmi *v1.VirtualMachineInstance, config *v1.KubeVirtConfiguration) (hooks.HookSidecarList, error) {
@@ -40,30 +41,34 @@ func NetBindingPluginSidecarList(vmi *v1.VirtualMachineInstance, config *v1.Kube
 }
 
 func netBindingPluginSidecar(vmi *v1.VirtualMachineInstance, config *v1.KubeVirtConfiguration) (hooks.HookSidecarList, error) {
-	var pluginSidecars hooks.HookSidecarList
-	bindingByName := map[string]v1.InterfaceBindingPlugin{}
-	for _, iface := range vmi.Spec.Domain.Devices.Interfaces {
-		if iface.Binding != nil {
-			var exist bool
-			var pluginInfo v1.InterfaceBindingPlugin
-			if config.NetworkConfiguration != nil && config.NetworkConfiguration.Binding != nil {
-				pluginInfo, exist = config.NetworkConfiguration.Binding[iface.Binding.Name]
-				bindingByName[iface.Binding.Name] = pluginInfo
-			}
+	var userProvided map[string]v1.InterfaceBindingPlugin
+	if config.NetworkConfiguration != nil && config.NetworkConfiguration.Binding != nil {
+		userProvided = config.NetworkConfiguration.Binding
+	}
+	bindingByName := vmispec.MergeBindingPlugins(userProvided)
 
-			if !exist {
-				return nil, fmt.Errorf("couldn't find configuration for network bindining: %s", iface.Binding.Name)
+	// Find bindings that are actually used by VMI interfaces
+	var usedBindings = make(map[string]v1.InterfaceBindingPlugin)
+	for _, iface := range vmi.Spec.Domain.Devices.Interfaces {
+		if iface.Binding != nil && iface.Binding.Name != "" {
+			if binding, exists := bindingByName[iface.Binding.Name]; exists {
+				usedBindings[iface.Binding.Name] = binding
+			} else {
+				return nil, fmt.Errorf("couldn't find configuration for network binding: %s", iface.Binding.Name)
 			}
 		}
 	}
 
-	for _, pluginInfo := range bindingByName {
+	// Create sidecars for used bindings
+	var pluginSidecars hooks.HookSidecarList
+	for _, pluginInfo := range usedBindings {
 		if pluginInfo.SidecarImage != "" {
-			pluginSidecars = append(pluginSidecars, hooks.HookSidecar{
+			sidecar := hooks.HookSidecar{
 				Image:           pluginInfo.SidecarImage,
 				ImagePullPolicy: config.ImagePullPolicy,
 				DownwardAPI:     pluginInfo.DownwardAPI,
-			})
+			}
+			pluginSidecars = append(pluginSidecars, sidecar)
 		}
 	}
 

@@ -779,4 +779,43 @@ var _ = Describe("test configuration", func() {
 		Entry("reference when InstancetypeConfiguration.ReferencePolicy is reference", &v1.InstancetypeConfiguration{ReferencePolicy: pointer.P(v1.Reference)}, v1.Reference),
 		Entry("expand InstancetypeConfiguration.ReferencePolicy is expand", &v1.InstancetypeConfiguration{ReferencePolicy: pointer.P(v1.Expand)}, v1.Expand),
 	)
+
+	Describe("GetNetworkBindings", func() {
+		It("returns the native bpfbridge plugin even without CR configuration", func() {
+			clusterConfig, _, _ := testutils.NewFakeClusterConfigUsingKVConfig(&v1.KubeVirtConfiguration{})
+			bindings := clusterConfig.GetNetworkBindings()
+			Expect(bindings).To(HaveKey("bpfbridge"))
+			Expect(bindings["bpfbridge"].DomainAttachmentType).To(Equal(v1.Tap))
+			Expect(bindings["bpfbridge"].Migration).ToNot(BeNil())
+			Expect(bindings["bpfbridge"].Migration.Method).To(Equal(v1.LinkRefresh))
+		})
+
+		It("lets a user-provided CR entry override the native default", func() {
+			clusterConfig, _, _ := testutils.NewFakeClusterConfigUsingKVConfig(&v1.KubeVirtConfiguration{
+				NetworkConfiguration: &v1.NetworkConfiguration{
+					Binding: map[string]v1.InterfaceBindingPlugin{
+						"bpfbridge": {DomainAttachmentType: v1.ManagedTap, SidecarImage: "custom:latest"},
+					},
+				},
+			})
+			bindings := clusterConfig.GetNetworkBindings()
+			Expect(bindings["bpfbridge"]).To(Equal(v1.InterfaceBindingPlugin{
+				DomainAttachmentType: v1.ManagedTap,
+				SidecarImage:         "custom:latest",
+			}))
+		})
+
+		It("preserves user-provided plugins alongside the native defaults", func() {
+			clusterConfig, _, _ := testutils.NewFakeClusterConfigUsingKVConfig(&v1.KubeVirtConfiguration{
+				NetworkConfiguration: &v1.NetworkConfiguration{
+					Binding: map[string]v1.InterfaceBindingPlugin{
+						"custom": {DomainAttachmentType: v1.Tap, SidecarImage: "custom:latest"},
+					},
+				},
+			})
+			bindings := clusterConfig.GetNetworkBindings()
+			Expect(bindings).To(HaveKey("bpfbridge"))
+			Expect(bindings).To(HaveKey("custom"))
+		})
+	})
 })

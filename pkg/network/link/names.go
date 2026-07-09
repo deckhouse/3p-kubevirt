@@ -33,7 +33,7 @@ const tapNameForPrimaryIface = "tap0"
 
 func GenerateTapDeviceName(podInterfaceName string, network v1.Network) string {
 	if vmispec.IsSecondaryMultusNetwork(network) {
-		return "tap" + podInterfaceName[3:]
+		return tapNameFromPodInterfaceName(podInterfaceName, network.Name)
 	}
 
 	if network.Name != "default" {
@@ -41,6 +41,13 @@ func GenerateTapDeviceName(podInterfaceName string, network v1.Network) string {
 	}
 
 	return tapNameForPrimaryIface
+}
+
+func tapNameFromPodInterfaceName(podInterfaceName, fallback string) string {
+	if len(podInterfaceName) <= len("tap") {
+		return fallback
+	}
+	return "tap" + podInterfaceName[len("tap"):]
 }
 
 func GenerateBridgeName(podInterfaceName string) string {

@@ -23,13 +23,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"path/filepath"
 	"strconv"
+	"strings"
 
 	k8serrors "k8s.io/apimachinery/pkg/util/errors"
 
 	"kubevirt.io/kubevirt/pkg/pointer"
 	"kubevirt.io/kubevirt/pkg/util"
 
+	"kubevirt.io/kubevirt/pkg/network/bpfbridge"
 	"kubevirt.io/kubevirt/pkg/network/cache"
 	"kubevirt.io/kubevirt/pkg/network/driver/nmstate"
 	"kubevirt.io/kubevirt/pkg/network/driver/procsys"
@@ -56,6 +59,14 @@ type masqueradeAdapter interface {
 	Setup(bridgeIfaceSpec, podIfaceSpec *nmstate.Interface, vmiIface v1.Interface) error
 }
 
+// bpfBridgeAdapter abstracts the BPF program load + TC attachment so the netpod
+// logic is unit-testable without a real kernel/netlink. The production
+// implementation delegates to pkg/network/bpfbridge.
+type bpfBridgeAdapter interface {
+	EnsureWiring(tapName, podIfaceName string) error
+	Attach(objPath, tapName, podIfaceName string) error
+}
+
 type cacheCreator interface {
 	New(filePath string) *cache.Cache
 }
@@ -75,11 +86,18 @@ type NetPod struct {
 
 	nmstateAdapter    nmstateAdapter
 	masqueradeAdapter masqueradeAdapter
+	bpfBridgeAdapter  bpfBridgeAdapter
 
 	cacheCreator cacheCreator
 	state        *State
 
 	bindingPluginsByName map[string]v1.InterfaceBindingPlugin
+
+	// externalTapProvisioning, when set, delegates secondary bpfbridge TAP creation
+	// to an external service (SDN): nmstate does not create/manage the secondary TAP.
+	// When false (default), bpfbridge provisions TAP devices natively via nmstate. The
+	// BPF attach in setupBPFBridge always runs, whether the TAP is native or external.
+	externalTapProvisioning bool
 
 	log *log.FilteredLogger
 }
@@ -97,6 +115,7 @@ func NewNetPod(vmiNetworks []v1.Network, vmiIfaces []v1.Interface, vmiUID string
 
 		nmstateAdapter:    nmstate.New(),
 		masqueradeAdapter: masquerade.New(),
+		bpfBridgeAdapter:  defaultBpfBridgeAdapter{},
 
 		cacheCreator:         cache.CacheCreator{},
 		bindingPluginsByName: map[string]v1.InterfaceBindingPlugin{},
@@ -121,6 +140,23 @@ func WithNMStateAdapter(h nmstateAdapter) option {
 func WithMasqueradeAdapter(h masqueradeAdapter) option {
 	return func(n *NetPod) {
 		n.masqueradeAdapter = h
+	}
+}
+
+func WithBpfBridgeAdapter(h bpfBridgeAdapter) option {
+	return func(n *NetPod) {
+		n.bpfBridgeAdapter = h
+	}
+}
+
+// WithExternalTapProvisioning configures the bpfbridge binding to delegate
+// secondary TAP provisioning to an external service (SDN) when true: nmstate does
+// not create/manage the secondary TAP. When false (default behaviour), bpfbridge
+// provisions TAP devices natively via nmstate. The BPF TC attach always runs so
+// kubevirt owns the L2 bridge between the TAP and the pod interface.
+func WithExternalTapProvisioning(external bool) option {
+	return func(n *NetPod) {
+		n.externalTapProvisioning = external
 	}
 }
 
@@ -248,6 +284,10 @@ func (n NetPod) config(currentStatus *nmstate.Status) error {
 		return err
 	}
 
+	if err = n.setupBPFBridge(currentStatus); err != nil {
+		return err
+	}
+
 	// Configuring NAT (nftables) is temporary done outside nmstate.
 	// This should be eventually embedded into the nmstate desired state and applied by it.
 	return n.setupNAT(desiredSpec, currentStatus)
@@ -261,7 +301,7 @@ func (n NetPod) composeDesiredSpec(currentStatus *nmstate.Status) (*nmstate.Spec
 	spec := nmstate.Spec{Interfaces: []nmstate.Interface{}}
 
 	for ifIndex, iface := range n.vmiSpecIfaces {
-		if skipPodInterfaceIsNotDefault(iface.Name, n.vmiSpecNets) {
+		if skipPodInterfaceIsNotDefault(iface.Name, n.vmiSpecNets) && !vmispec.IsBPFBridgeBinding(iface) {
 			continue
 		}
 
@@ -310,7 +350,12 @@ func (n NetPod) composeDesiredSpec(currentStatus *nmstate.Status) (*nmstate.Spec
 		case iface.SRIOV != nil:
 		case iface.Binding != nil:
 			bindingPlugin, exists := n.bindingPluginsByName[iface.Binding.Name]
-			if exists && bindingPlugin.DomainAttachmentType == v1.ManagedTap {
+			if exists && vmispec.IsBPFBridgeBinding(iface) {
+				if _, exists := podIfaceStatusByName[podIfaceName]; !exists {
+					return nil, fmt.Errorf("pod link (%s) is missing", podIfaceName)
+				}
+				ifacesSpec, err = n.bpfBridgeSpec(podIfaceName, ifIndex, podIfaceStatusByName)
+			} else if exists && bindingPlugin.DomainAttachmentType == v1.ManagedTap {
 				if _, exists := podIfaceStatusByName[podIfaceName]; !exists {
 					return nil, fmt.Errorf("pod link (%s) is missing", podIfaceName)
 				}
@@ -481,6 +526,38 @@ func (n NetPod) masqueradeBindingSpec(podIfaceName string, vmiIfaceIndex int, if
 	return []nmstate.Interface{bridgeIface, tapIface}, nil
 }
 
+func (n NetPod) bpfBridgeSpec(podIfaceName string, vmiIfaceIndex int, ifaceStatusByName map[string]nmstate.Interface) ([]nmstate.Interface, error) {
+	podIface := ifaceStatusByName[podIfaceName]
+	vmiNetworkName := n.vmiSpecIfaces[vmiIfaceIndex].Name
+	vmiNetwork := vmispec.LookupNetworkByName(n.vmiSpecNets, vmiNetworkName)
+	if vmiNetwork == nil {
+		return nil, fmt.Errorf("network %s not found for bpfbridge interface", vmiNetworkName)
+	}
+
+	// When external TAP provisioning is enabled (external service provisions TAPs),
+	// nmstate must not create/manage the secondary TAP device; skip emitting it in
+	// the desired spec. The default pod network TAP is always created natively.
+	if n.externalTapProvisioning && vmispec.IsSecondaryPodNetwork(*vmiNetwork) {
+		n.log.Infof("bpfbridge setup: skipping native TAP creation for secondary pod interface %q (external provisioning)", podIfaceName)
+		return nil, nil
+	}
+
+	tapIface := nmstate.Interface{
+		Name:     link.GenerateTapDeviceName(podIfaceName, *vmiNetwork),
+		TypeName: nmstate.TypeTap,
+		State:    nmstate.IfaceStateUp,
+		MTU:      podIface.MTU,
+		Tap: &nmstate.TapDevice{
+			Queues: n.networkQueues(vmiIfaceIndex),
+			UID:    n.ownerID,
+			GID:    n.ownerID,
+		},
+		Metadata: &nmstate.IfaceMetadata{Pid: n.podPID, NetworkName: vmiNetworkName},
+	}
+
+	return []nmstate.Interface{tapIface}, nil
+}
+
 func (n NetPod) managedTapSpec(podIfaceName string, vmiIfaceIndex int, ifaceStatusByName map[string]nmstate.Interface) ([]nmstate.Interface, error) {
 
 	vmiNetworkName := n.vmiSpecIfaces[vmiIfaceIndex].Name
@@ -537,6 +614,47 @@ func (n NetPod) managedTapSpec(podIfaceName string, vmiIfaceIndex int, ifaceStat
 	}
 
 	return []nmstate.Interface{bridgeIface, podIface, tapIface, dummyIface}, nil
+}
+
+func (n NetPod) setupBPFBridge(currentStatus *nmstate.Status) error {
+	podIfaceNameByVMINetwork := createNetworkNameScheme(n.vmiSpecNets, n.vmiIfaceStatuses, currentStatus.Interfaces)
+	for ifIndex, iface := range n.vmiSpecIfaces {
+		if !vmispec.IsBPFBridgeBinding(iface) {
+			continue
+		}
+
+		podIfaceName := podIfaceNameByVMINetwork[iface.Name]
+		vmiNetwork := vmispec.LookupNetworkByName(n.vmiSpecNets, iface.Name)
+		if vmiNetwork == nil {
+			return fmt.Errorf("network %s not found for bpfbridge interface", iface.Name)
+		}
+		// Persist the resolved pod interface name so Teardown detaches from the exact
+		// same device, without re-resolving the name scheme with divergent logic.
+		if n.state != nil && n.state.BPFBridgePodIfaceByNetwork != nil {
+			n.state.BPFBridgePodIfaceByNetwork[iface.Name] = podIfaceName
+		}
+		tapName := link.GenerateTapDeviceName(podIfaceName, *vmiNetwork)
+		objPath := filepath.Join("/usr", "share", "network-bpf-bridge-binding", "bpf_bridge.o")
+		if err := n.bpfBridgeAdapter.EnsureWiring(tapName, podIfaceName); err != nil {
+			return fmt.Errorf("bpfbridge wiring failed for iface %s (index %d): %w", iface.Name, ifIndex, err)
+		}
+		if err := n.bpfBridgeAdapter.Attach(objPath, tapName, podIfaceName); err != nil {
+			return fmt.Errorf("bpfbridge attach failed for iface %s (index %d): %w", iface.Name, ifIndex, err)
+		}
+	}
+	return nil
+}
+
+// defaultBpfBridgeAdapter is the production implementation of bpfBridgeAdapter;
+// it delegates to pkg/network/bpfbridge which talks to netlink + libbpf.
+type defaultBpfBridgeAdapter struct{}
+
+func (defaultBpfBridgeAdapter) EnsureWiring(tapName, podIfaceName string) error {
+	return bpfbridge.EnsureWiring(tapName, podIfaceName)
+}
+
+func (defaultBpfBridgeAdapter) Attach(objPath, tapName, podIfaceName string) error {
+	return bpfbridge.Attach(objPath, tapName, podIfaceName)
 }
 
 func (n NetPod) setupNAT(desiredSpec *nmstate.Spec, currentStatus *nmstate.Status) error {
@@ -664,7 +782,95 @@ func createNetworkNameScheme(networks []v1.Network, ifaceStatuses []v1.VirtualMa
 		podIfaceNamesByNetworkName = namescheme.CreateHashedNetworkNameScheme(networks)
 	}
 
-	return namescheme.UpdatePrimaryPodIfaceNameFromVMIStatus(podIfaceNamesByNetworkName, networks, ifaceStatuses)
+	podIfaceNamesByNetworkName = namescheme.UpdatePrimaryPodIfaceNameFromVMIStatus(podIfaceNamesByNetworkName, networks, ifaceStatuses)
+	return updateNonDefaultPodInterfaceNamesFromCurrentStatus(podIfaceNamesByNetworkName, networks, ifaceStatuses, currentIfaces)
+}
+
+func updateNonDefaultPodInterfaceNamesFromCurrentStatus(
+	podIfaceNamesByNetworkName map[string]string,
+	networks []v1.Network,
+	ifaceStatuses []v1.VirtualMachineInstanceNetworkInterface,
+	currentIfaces []nmstate.Interface,
+) map[string]string {
+	currentIfaceByName := map[string]nmstate.Interface{}
+	for _, iface := range currentIfaces {
+		currentIfaceByName[iface.Name] = iface
+	}
+
+	primaryPodIfaceName := podIfaceNamesByNetworkName["default"]
+	if primaryPodIfaceName == "" {
+		primaryPodIfaceName = namescheme.PrimaryPodInterfaceName
+	}
+
+	var secondaryPodNetworks []v1.Network
+	for _, network := range networks {
+		if network.Pod != nil && network.Name != "default" {
+			secondaryPodNetworks = append(secondaryPodNetworks, network)
+		}
+	}
+	if len(secondaryPodNetworks) == 0 {
+		return podIfaceNamesByNetworkName
+	}
+
+	usedCandidateNames := map[string]struct{}{primaryPodIfaceName: {}}
+	for _, network := range secondaryPodNetworks {
+		// A current interface named exactly like the network is only the pod
+		// interface when it is not a KubeVirt-owned device. The managed tap is
+		// named after the network (see link.GenerateTapDeviceName), so without
+		// this guard the tap would be picked as the pod interface, collapsing
+		// tapName == podIfaceName and baking POD_IFINDEX == TAP_IFINDEX into the
+		// bpfbridge program (which then redirects the tap back onto itself).
+		if iface, exists := currentIfaceByName[network.Name]; exists && !isKubeVirtOwnedInterface(iface) && network.Name != primaryPodIfaceName {
+			podIfaceNamesByNetworkName[network.Name] = network.Name
+			usedCandidateNames[network.Name] = struct{}{}
+			continue
+		}
+		if ifaceStatus := vmispec.LookupInterfaceStatusByName(ifaceStatuses, network.Name); ifaceStatus != nil && ifaceStatus.PodInterfaceName != "" {
+			// Two guards on the reported PodInterfaceName:
+			//  - it can be the network name (hence the managed tap) — refuse a
+			//    KubeVirt-owned device;
+			//  - it can be a stale "eth0" written by an older resolution — a
+			//    secondary network must never claim the primary pod interface,
+			//    otherwise it binds to eth0 (POD_IFINDEX=eth0) instead of its CNI
+			//    veth. Reject primaryPodIfaceName so it falls through to the
+			//    candidate loop and picks the real CNI veth.
+			if iface, exists := currentIfaceByName[ifaceStatus.PodInterfaceName]; exists && !isKubeVirtOwnedInterface(iface) && ifaceStatus.PodInterfaceName != primaryPodIfaceName {
+				podIfaceNamesByNetworkName[network.Name] = ifaceStatus.PodInterfaceName
+				usedCandidateNames[ifaceStatus.PodInterfaceName] = struct{}{}
+			}
+		}
+	}
+
+	var candidateNames []string
+	for _, iface := range currentIfaces {
+		if _, used := usedCandidateNames[iface.Name]; used {
+			continue
+		}
+		if isKubeVirtOwnedInterface(iface) || iface.Name == "lo" {
+			continue
+		}
+		candidateNames = append(candidateNames, iface.Name)
+	}
+
+	candidateIndex := 0
+	for _, network := range secondaryPodNetworks {
+		if podIfaceName, exists := podIfaceNamesByNetworkName[network.Name]; exists {
+			if _, linkExists := currentIfaceByName[podIfaceName]; linkExists {
+				continue
+			}
+		}
+		if candidateIndex >= len(candidateNames) {
+			continue
+		}
+		podIfaceNamesByNetworkName[network.Name] = candidateNames[candidateIndex]
+		candidateIndex++
+	}
+
+	return podIfaceNamesByNetworkName
+}
+
+func isKubeVirtOwnedInterface(iface nmstate.Interface) bool {
+	return iface.TypeName == nmstate.TypeTap || iface.TypeName == nmstate.TypeBridge || iface.TypeName == nmstate.TypeDummy || strings.HasPrefix(iface.Name, "tap") || strings.HasPrefix(iface.Name, "k6t-")
 }
 
 func skipPodInterfaceIsNotDefault(name string, networks []v1.Network) bool {
