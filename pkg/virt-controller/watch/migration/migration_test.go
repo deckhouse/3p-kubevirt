@@ -1735,6 +1735,30 @@ var _ = Describe("Migration watcher", func() {
 			Expect(err).To(MatchError(k8serrors.IsNotFound, "IsNotFound"))
 		})
 
+		It("should fail and remove the finalizer when deleted after the VMI is gone", func() {
+			migration := newMigration("testmigration", "somevmi", virtv1.MigrationScheduled)
+			migration.DeletionTimestamp = pointer.P(metav1.Now())
+			migration.Finalizers = append(migration.Finalizers, virtv1.VirtualMachineInstanceMigrationFinalizer)
+			addMigration(migration)
+
+			sanityExecute()
+
+			testutils.ExpectEvent(recorder, virtcontroller.FailedMigrationReason)
+			expectMigrationFailedState(migration.Namespace, migration.Name)
+
+			// The next pass observes the final phase and sheds the finalizer.
+			updated, err := virtClientset.KubevirtV1().VirtualMachineInstanceMigrations(migration.Namespace).Get(context.Background(), migration.Name, metav1.GetOptions{})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(controller.migrationIndexer.Update(updated)).To(Succeed())
+			key, err := virtcontroller.KeyFunc(updated)
+			Expect(err).ToNot(HaveOccurred())
+			mockQueue.Add(key)
+
+			sanityExecute()
+
+			expectMigrationFinalizerRemoved(migration.Namespace, migration.Name)
+		})
+
 		It("should abort the migration", func() {
 			vmi := newVirtualMachine("testvmi", virtv1.Running)
 			addNodeNameToVMI(vmi, "node02")

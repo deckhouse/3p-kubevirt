@@ -235,7 +235,9 @@ func FindSocketOnHost(vmi *v1.VirtualMachineInstance, host string) (string, erro
 		return "", fmt.Errorf("Found multiple sockets for vmi %s/%s. waiting for only one to exist", vmi.Namespace, vmi.Name)
 	}
 
-	return "", fmt.Errorf("No command socket found for vmi %s", vmi.UID)
+	// Wrap os.ErrNotExist so callers can classify the missing socket (the
+	// launcher pod is already gone) instead of treating it as an opaque error.
+	return "", fmt.Errorf("No command socket found for vmi %s: %w", vmi.UID, os.ErrNotExist)
 }
 
 // Finds exactly one socket on a host based on the NODE_NAME env. Returns error otherwise.
