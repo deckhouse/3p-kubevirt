@@ -381,12 +381,6 @@ func (app *virtHandlerApp) Run() {
 		go nodeLabellerController.Run(stop)
 	}
 
-	migrationIpAddress := app.PodIpAddress
-	migrationIpAddress, err = virthandler.FindMigrationIP(migrationIpAddress)
-	if err != nil {
-		panic(err)
-	}
-
 	var portRange *migrationproxy.PortRange
 	if app.migrationPortRangeEnabled {
 		portRange, err = migrationproxy.NewPortRange(app.migrationPortRangeFirst, app.migrationPortRangeLast)
@@ -395,7 +389,7 @@ func (app *virtHandlerApp) Run() {
 		}
 	}
 
-	migrationProxy := migrationproxy.NewMigrationProxyManager(migrationIpAddress, portRange, app.migrationServerTLSConfig, app.migrationOldClientTLSConfig, app.migrationClientTLSConfig, app.clusterConfig)
+	migrationProxy := migrationproxy.NewMigrationProxyManager(portRange, app.migrationServerTLSConfig, app.migrationOldClientTLSConfig, app.migrationClientTLSConfig, app.clusterConfig)
 
 	downwardMetricsManager := dmetricsmanager.NewDownwardMetricsManager(app.HostOverride)
 
@@ -471,7 +465,7 @@ func (app *virtHandlerApp) Run() {
 		app.HostOverride,
 		app.VirtPrivateDir,
 		app.KubeletPodsDir,
-		migrationIpAddress,
+		app.PodIpAddress,
 		launcherClientsManager,
 		vmiTargetInformer,
 		domainSharedInformer,

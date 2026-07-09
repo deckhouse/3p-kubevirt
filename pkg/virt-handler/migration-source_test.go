@@ -187,7 +187,7 @@ var _ = Describe("VirtualMachineInstance migration target", func() {
 		mockIsolationDetector := isolation.NewMockPodIsolationDetector(ctrl)
 		mockIsolationDetector.EXPECT().Detect(gomock.Any()).Return(mockIsolationResult, nil).AnyTimes()
 
-		migrationProxy := migrationproxy.NewMigrationProxyManager("0.0.0.0", nil, tlsConfig, tlsConfig, tlsConfig, config)
+		migrationProxy := migrationproxy.NewMigrationProxyManager(nil, tlsConfig, tlsConfig, tlsConfig, config)
 		launcherClientManager := &launcherclients.MockLauncherClientManager{
 			Initialized: true,
 		}

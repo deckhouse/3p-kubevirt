@@ -215,7 +215,7 @@ var _ = Describe("VirtualMachineInstance migration target", func() {
 
 		mockHotplugVolumeMounter = hotplugvolume.NewMockVolumeMounter(ctrl)
 
-		migrationProxy := migrationproxy.NewMigrationProxyManager("0.0.0.0", nil, tlsConfig, tlsConfig, tlsConfig, config)
+		migrationProxy := migrationproxy.NewMigrationProxyManager(nil, tlsConfig, tlsConfig, tlsConfig, config)
 		launcherClientManager := &launcherclients.MockLauncherClientManager{
 			Initialized: true,
 		}
@@ -227,7 +227,7 @@ var _ = Describe("VirtualMachineInstance migration target", func() {
 			host,
 			privateDir,
 			podsDir,
-			"127.1.1.1", // migration ip address
+			"127.1.1.1",
 			launcherClientManager,
 			vmiInformer,
 			domainInformer,
@@ -351,7 +351,7 @@ var _ = Describe("VirtualMachineInstance migration target", func() {
 
 		destSrcPorts := controller.migrationProxy.GetTargetListenerPorts(string(vmi.UID))
 		updatedVmi := vmi.DeepCopy()
-		updatedVmi.Status.MigrationState.TargetNodeAddress = controller.migrationIpAddress
+		updatedVmi.Status.MigrationState.TargetNodeAddress = "127.1.1.1"
 		updatedVmi.Status.MigrationState.TargetDirectMigrationNodePorts = destSrcPorts
 
 		sanityExecute()
