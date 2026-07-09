@@ -785,21 +785,22 @@ func getMachines(capabilities libvirtxml.Caps) []libvirtxml.CapsGuestMachine {
 	return machines
 }
 
-// newNetConf builds the NetConf, checking the node annotation once to decide
-// whether bpfbridge TAP provisioning is native (kubevirt) or delegated to an
-// external service (SDN). It defaults to native provisioning (the pre-existing
-// behaviour) and only switches to external provisioning after successfully reading
-// the node and confirming the TapProvisionByDVPAnnotation is absent. A failure to
-// read the node keeps native provisioning so a transient API error cannot break VM
-// networking.
+// newNetConf builds the NetConf, deciding once whether bpfbridge TAPs are
+// provisioned by kubevirt or by an external SDN. TAPs are created by kubevirt only
+// when the node carries TapProvisionByDVPAnnotation; otherwise, or if the node
+// cannot be read, provisioning is delegated to the SDN.
 func newNetConf(app *virtHandlerApp) *netsetup.NetConf {
-	externalTapProvisioning := false
+	externalTapProvisioning := true
 	node, err := app.virtCli.CoreV1().Nodes().Get(context.Background(), app.HostOverride, metav1.GetOptions{})
 	if err != nil {
-		log.Log.Reason(err).Warningf("failed to get node %q; falling back to native bpfbridge TAP provisioning", app.HostOverride)
+		log.Log.Reason(err).Warningf("failed to get node %q; falling back to external TAP provisioning", app.HostOverride)
 	} else {
 		externalTapProvisioning = netsetup.IsExternalTapProvisioning(node)
-		log.Log.Infof("bpfbridge tap provisioning: external=%t (node annotation %q)", externalTapProvisioning, netsetup.TapProvisionByDVPAnnotation)
+		if externalTapProvisioning {
+			log.Log.Infof("tap is created on the SDN side (node %q has no %q annotation)", app.HostOverride, netsetup.TapProvisionByDVPAnnotation)
+		} else {
+			log.Log.Infof("tap is created on the kubevirt side (node %q has %q annotation)", app.HostOverride, netsetup.TapProvisionByDVPAnnotation)
+		}
 	}
 	return netsetup.NewNetConfExtended(app.clusterConfig, externalTapProvisioning)
 }
