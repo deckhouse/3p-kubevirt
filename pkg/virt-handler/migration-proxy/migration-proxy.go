@@ -47,8 +47,9 @@ const (
 var migrationPortsRange = []int{LibvirtDirectMigrationPort, LibvirtBlockMigrationPort, ConntrackSyncPort}
 
 type ProxyManager interface {
-	StartTargetListener(key string, targetUnixFiles []string) error
+	StartTargetListener(key string, targetUnixFiles []string, bindAddress string) error
 	GetTargetListenerPorts(key string) map[string]int
+	GetTargetBindAddress(key string) string
 	StopTargetListener(key string)
 
 	StartSourceListener(key string, targetAddress string, destSrcPortMap map[string]int, baseDir string) error
@@ -61,13 +62,12 @@ type ProxyManager interface {
 }
 
 type migrationProxyManager struct {
-	migrationIpAddress string
-	portRange          *PortRange
-	sourceProxies      map[string][]*migrationProxy
-	targetProxies      map[string][]*migrationProxy
-	managerLock        sync.Mutex
-	serverTLSConfig    *tls.Config
-	clientTLSConfig    *tls.Config
+	portRange       *PortRange
+	sourceProxies   map[string][]*migrationProxy
+	targetProxies   map[string][]*migrationProxy
+	managerLock     sync.Mutex
+	serverTLSConfig *tls.Config
+	clientTLSConfig *tls.Config
 
 	isShuttingDown bool
 	config         *virtconfig.ClusterConfig
@@ -118,15 +118,14 @@ func GetMigrationPortsList(isBlockMigration bool) (ports []int) {
 	return
 }
 
-func NewMigrationProxyManager(migrationIpAddress string, portRange *PortRange, serverTLSConfig *tls.Config, clientTLSConfig *tls.Config, config *virtconfig.ClusterConfig) ProxyManager {
+func NewMigrationProxyManager(portRange *PortRange, serverTLSConfig *tls.Config, clientTLSConfig *tls.Config, config *virtconfig.ClusterConfig) ProxyManager {
 	return &migrationProxyManager{
-		migrationIpAddress: migrationIpAddress,
-		portRange:          portRange,
-		sourceProxies:      make(map[string][]*migrationProxy),
-		targetProxies:      make(map[string][]*migrationProxy),
-		serverTLSConfig:    serverTLSConfig,
-		clientTLSConfig:    clientTLSConfig,
-		config:             config,
+		portRange:       portRange,
+		sourceProxies:   make(map[string][]*migrationProxy),
+		targetProxies:   make(map[string][]*migrationProxy),
+		serverTLSConfig: serverTLSConfig,
+		clientTLSConfig: clientTLSConfig,
+		config:          config,
 	}
 }
 
@@ -134,7 +133,7 @@ func SourceUnixFile(baseDir string, key string) string {
 	return filepath.Join(baseDir, "migrationproxy", key+"-source.sock")
 }
 
-func (m *migrationProxyManager) StartTargetListener(key string, targetUnixFiles []string) error {
+func (m *migrationProxyManager) StartTargetListener(key string, targetUnixFiles []string, bindAddress string) error {
 	m.managerLock.Lock()
 	defer m.managerLock.Unlock()
 
@@ -173,7 +172,7 @@ func (m *migrationProxyManager) StartTargetListener(key string, targetUnixFiles 
 		}
 	}
 
-	addr := m.migrationIpAddress
+	addr := bindAddress
 	if net.ParseIP(addr) == nil {
 		addr = ip.GetIPZeroAddress()
 	}
@@ -245,6 +244,15 @@ func ConstructProxyKey(id string, port int) string {
 		key += fmt.Sprintf("-%d", port)
 	}
 	return key
+}
+
+func (m *migrationProxyManager) GetTargetBindAddress(key string) string {
+	m.managerLock.Lock()
+	defer m.managerLock.Unlock()
+	if proxies, ok := m.targetProxies[key]; ok && len(proxies) > 0 {
+		return proxies[0].tcpBindAddress
+	}
+	return ""
 }
 
 func (m *migrationProxyManager) GetTargetListenerPorts(key string) map[string]int {

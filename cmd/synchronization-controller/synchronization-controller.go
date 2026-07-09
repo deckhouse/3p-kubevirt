@@ -48,6 +48,7 @@ import (
 	kvtls "kubevirt.io/kubevirt/pkg/util/tls"
 	"kubevirt.io/kubevirt/pkg/virt-controller/leaderelectionconfig"
 
+	v1 "kubevirt.io/api/core/v1"
 	"kubevirt.io/client-go/kubecli"
 	"kubevirt.io/client-go/kubevirt/scheme"
 	"kubevirt.io/client-go/log"
@@ -167,7 +168,10 @@ func (app *synchronizationControllerApp) Run() {
 	app.ctx = ctx
 
 	envIP, _ := os.LookupEnv("MY_POD_IP")
-	ip, err := virthandler.FindMigrationIP(envIP)
+	ip, err := virthandler.FindMigrationIP(envIP, v1.MigrationInterfaceName)
+	if err != nil {
+		ip = envIP
+	}
 	app.ip = ip
 
 	app.LeaderElection = leaderelectionconfig.DefaultLeaderElectionConfiguration()
