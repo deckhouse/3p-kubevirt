@@ -4,6 +4,7 @@ import (
 	"math"
 
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/component-helpers/scheduling/corev1/nodeaffinity"
 
 	v1 "k8s.io/api/core/v1"
 
@@ -104,6 +105,49 @@ func FilterNodesFromCache(objs []interface{}, predicates ...FilterPredicateFunc)
 		}
 	}
 	return match
+}
+
+// MatchesLabels matches nodes carrying all the given labels, e.g. the node
+// selectors of a virt-launcher pod. An empty selector matches every node.
+func MatchesLabels(selectors map[string]string) FilterPredicateFunc {
+	return func(node *v1.Node) bool {
+		if node == nil {
+			return false
+		}
+		for key, value := range selectors {
+			if node.Labels[key] != value {
+				return false
+			}
+		}
+		return true
+	}
+}
+
+// MatchesRequiredNodeAffinity matches nodes satisfying the required node
+// affinity of the VMI (the virt-launcher pod inherits it). A VMI without
+// required node affinity matches every node.
+func MatchesRequiredNodeAffinity(vmi *virtv1.VirtualMachineInstance) FilterPredicateFunc {
+	if vmi.Spec.Affinity == nil ||
+		vmi.Spec.Affinity.NodeAffinity == nil ||
+		vmi.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution == nil {
+		return func(node *v1.Node) bool { return node != nil }
+	}
+
+	nodeSelector, err := nodeaffinity.NewNodeSelector(vmi.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution)
+	if err != nil {
+		// The scheduler will reject such pods anyway, so an always-false
+		// predicate keeps the picked tsc frequency from leaking outside
+		// the affinity-selected nodes.
+		log.DefaultLogger().Object(vmi).Reason(err).Error("Invalid required node affinity, no node matches")
+		return func(node *v1.Node) bool { return false }
+	}
+
+	return func(node *v1.Node) bool {
+		if node == nil {
+			return false
+		}
+		return nodeSelector.Match(node)
+	}
 }
 
 func IsNodeRunningVmis(vmiStore cache.Store) FilterPredicateFunc {

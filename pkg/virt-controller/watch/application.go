@@ -732,7 +732,10 @@ func (vca *VirtControllerApp) initCommon() {
 		services.WithNetTargetAnnotationsGenerator(netAnnotationsGenerator),
 	)
 
-	topologyHinter := topology.NewTopologyHinter(vca.nodeInformer.GetStore(), vca.vmiInformer.GetStore(), vca.clusterConfig)
+	topologyHinter := topology.NewTopologyHinter(vca.nodeInformer.GetStore(), vca.vmiInformer.GetStore(), vca.clusterConfig,
+		func(vmi *v1.VirtualMachineInstance) map[string]string {
+			return services.RenderPodNodeSelectors(vca.clusterConfig, vmi)
+		})
 
 	vca.vmiController, err = vmi.NewController(vca.templateService,
 		vca.vmiInformer,

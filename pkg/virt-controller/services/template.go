@@ -661,7 +661,7 @@ func (t *templateService) renderLaunchManifest(vmi *v1.VirtualMachineInstance, i
 			RestartPolicy:                 k8sv1.RestartPolicyNever,
 			Containers:                    containers,
 			InitContainers:                initContainers,
-			NodeSelector:                  t.newNodeSelectorRenderer(vmi).Render(),
+			NodeSelector:                  newNodeSelectorRenderer(t.clusterConfig, vmi).Render(),
 			Volumes:                       volumeRenderer.Volumes(),
 			ImagePullSecrets:              imagePullSecrets,
 			DNSConfig:                     vmi.Spec.DNSConfig,
@@ -711,12 +711,19 @@ func (t *templateService) renderLaunchManifest(vmi *v1.VirtualMachineInstance, i
 	return &pod, nil
 }
 
-func (t *templateService) newNodeSelectorRenderer(vmi *v1.VirtualMachineInstance) *NodeSelectorRenderer {
+// RenderPodNodeSelectors returns the node selectors the virt-launcher pod of
+// the given VMI will be scheduled with. The tsc-frequency selector is only
+// included when the VMI already carries TSC topology hints.
+func RenderPodNodeSelectors(clusterConfig *virtconfig.ClusterConfig, vmi *v1.VirtualMachineInstance) map[string]string {
+	return newNodeSelectorRenderer(clusterConfig, vmi).Render()
+}
+
+func newNodeSelectorRenderer(clusterConfig *virtconfig.ClusterConfig, vmi *v1.VirtualMachineInstance) *NodeSelectorRenderer {
 	var opts []NodeSelectorRendererOption
 	if vmi.IsCPUDedicated() {
 		opts = append(opts, WithDedicatedCPU())
 	}
-	if t.clusterConfig.HypervStrictCheckEnabled() {
+	if clusterConfig.HypervStrictCheckEnabled() {
 		opts = append(opts, WithHyperv(vmi.Spec.Domain.Features))
 	}
 
@@ -761,7 +768,7 @@ func (t *templateService) newNodeSelectorRenderer(vmi *v1.VirtualMachineInstance
 
 	return NewNodeSelectorRenderer(
 		vmi.Spec.NodeSelector,
-		t.clusterConfig.GetNodeSelectors(),
+		clusterConfig.GetNodeSelectors(),
 		vmi.Spec.Architecture,
 		opts...,
 	)

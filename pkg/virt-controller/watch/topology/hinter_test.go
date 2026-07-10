@@ -182,6 +182,92 @@ var _ = Describe("Hinter", func() {
 		g.Expect(hinter.TSCFrequenciesInUse()).To(g.ConsistOf(int64(100), int64(90), int64(123), int64(80)))
 	})
 
+	Context("with node placement constraints", func() {
+		It("should pick the lowest frequency among the nodes matching the vmi node selector", func() {
+			hinter := hinterWithNodes(
+				nodeWithExtraLabels(NodeWithTSC("node1", 1000, false), map[string]string{"group": "a"}),
+				NodeWithTSC("node2", 500, false),
+			)
+			vmi := vmiWithTSCFrequencyOnNode("myvmi", 12, "oldnode")
+			vmi.Spec.NodeSelector = map[string]string{"group": "a"}
+			g.Expect(hinter.TopologyHintsForVMI(vmi)).To(g.Equal(
+				&virtv1.TopologyHints{
+					TSCFrequency: pointer.P(int64(1000)),
+				},
+			))
+		})
+
+		It("should pick the lowest frequency among the nodes matching the rendered pod node selectors", func() {
+			hinter := hinterWithNodes(
+				nodeWithExtraLabels(NodeWithTSC("node1", 2000, false), map[string]string{"cpu-feature.node.kubevirt.io/foo": "true"}),
+				NodeWithTSC("node2", 100, false),
+			)
+			hinter.podNodeSelectorsFor = func(vmi *virtv1.VirtualMachineInstance) map[string]string {
+				return map[string]string{"cpu-feature.node.kubevirt.io/foo": "true"}
+			}
+			vmi := vmiWithTSCFrequencyOnNode("myvmi", 12, "oldnode")
+			g.Expect(hinter.TopologyHintsForVMI(vmi)).To(g.Equal(
+				&virtv1.TopologyHints{
+					TSCFrequency: pointer.P(int64(2000)),
+				},
+			))
+		})
+
+		It("should pick the lowest frequency among the nodes matching the required node affinity", func() {
+			hinter := hinterWithNodes(
+				nodeWithExtraLabels(NodeWithTSC("node1", 3000, false), map[string]string{"zone": "a"}),
+				nodeWithExtraLabels(NodeWithTSC("node2", 50, false), map[string]string{"zone": "b"}),
+			)
+			vmi := vmiWithTSCFrequencyOnNode("myvmi", 12, "oldnode")
+			vmi.Spec.Affinity = &v1.Affinity{
+				NodeAffinity: &v1.NodeAffinity{
+					RequiredDuringSchedulingIgnoredDuringExecution: &v1.NodeSelector{
+						NodeSelectorTerms: []v1.NodeSelectorTerm{{
+							MatchExpressions: []v1.NodeSelectorRequirement{{
+								Key:      "zone",
+								Operator: v1.NodeSelectorOpIn,
+								Values:   []string{"a"},
+							}},
+						}},
+					},
+				},
+			}
+			g.Expect(hinter.TopologyHintsForVMI(vmi)).To(g.Equal(
+				&virtv1.TopologyHints{
+					TSCFrequency: pointer.P(int64(3000)),
+				},
+			))
+		})
+
+		It("should return an error when no node matches the vmi node placement", func() {
+			hinter := hinterWithNodes(
+				NodeWithTSC("node1", 1000, false),
+				NodeWithTSC("node2", 500, false),
+			)
+			vmi := vmiWithTSCFrequencyOnNode("myvmi", 12, "oldnode")
+			vmi.Spec.NodeSelector = map[string]string{"group": "missing"}
+			hints, requirement, err := hinter.TopologyHintsForVMI(vmi)
+			g.Expect(err).To(g.HaveOccurred())
+			g.Expect(hints).To(g.BeNil())
+			g.Expect(requirement).ToNot(g.Equal(NotRequired))
+		})
+
+		It("should prefer the configured minimum TSC frequency over the matching nodes", func() {
+			hinter := hinterWithNodes(
+				nodeWithExtraLabels(NodeWithTSC("node1", 1000, false), map[string]string{"group": "a"}),
+				NodeWithTSC("node2", 500, false),
+			)
+			hinter.clusterConfig = clusterConfigWithTSCFrequency(200)
+			vmi := vmiWithTSCFrequencyOnNode("myvmi", 12, "oldnode")
+			vmi.Spec.NodeSelector = map[string]string{"group": "a"}
+			g.Expect(hinter.TopologyHintsForVMI(vmi)).To(g.Equal(
+				&virtv1.TopologyHints{
+					TSCFrequency: pointer.P(int64(200)),
+				},
+			))
+		})
+	})
+
 	DescribeTable("should not propose a TSC frequency on architectures like", func(arch string) {
 		hinter := hinterWithNodes(
 			NodeWithInvalidTSC("node0"),
@@ -257,6 +343,13 @@ func NodeWithTSC(name string, frequency int64, scalable bool, schedulable ...int
 			Labels: labels,
 		},
 	}
+}
+
+func nodeWithExtraLabels(node *v1.Node, labels map[string]string) *v1.Node {
+	for key, value := range labels {
+		node.Labels[key] = value
+	}
+	return node
 }
 
 func NodeWithInvalidTSC(name string) *v1.Node {
