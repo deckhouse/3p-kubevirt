@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/metadata"
 
 	k8sv1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -743,8 +744,28 @@ func (l *Launcher) GuestPing(ctx context.Context, request *cmdv1.GuestPingReques
 func RunServer(socketPath string,
 	domainManager virtwrap.DomainManager,
 	stopChan chan struct{},
-	options *ServerOptions) (chan struct{}, error) {
-	grpcServer := grpc.NewServer([]grpc.ServerOption{}...)
+	options *ServerOptions,
+	activity chan<- struct{}) (chan struct{}, error) {
+
+	var serverOpts []grpc.ServerOption
+	if activity != nil {
+		// Only an explicit keepalive (PingKeepalive, tagged via gRPC metadata)
+		// signals activity; it is used to extend the target domain-wait deadline
+		// (see waitForDomainUUID). Ordinary requests must NOT signal, so a
+		// genuinely stuck target still times out even if other RPCs keep arriving.
+		serverOpts = append(serverOpts, grpc.UnaryInterceptor(
+			func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+				if md, ok := metadata.FromIncomingContext(ctx); ok && len(md.Get(cmdclient.DomainWaitKeepaliveKey)) > 0 {
+					select {
+					case activity <- struct{}{}:
+					default:
+					}
+				}
+				return handler(ctx, req)
+			}))
+	}
+
+	grpcServer := grpc.NewServer(serverOpts...)
 	if options == nil {
 		options = NewServerOptions(false)
 	}

@@ -38,7 +38,7 @@ func main() {
 		return "success", nil
 	})
 	log.Log.Info("running fake server")
-	done, err := cmdserver.RunServer(*socket, domainManager, stopChan, options)
+	done, err := cmdserver.RunServer(*socket, domainManager, stopChan, options, nil)
 	if err != nil {
 		log.Log.Reason(err).Critical("running cmd server")
 	}
