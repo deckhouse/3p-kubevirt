@@ -416,6 +416,20 @@ func (m *MockLauncherClient) Ping() error {
 	return ret0
 }
 
+// PingKeepalive mocks base method.
+func (m *MockLauncherClient) PingKeepalive() error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "PingKeepalive")
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// PingKeepalive indicates an expected call of PingKeepalive.
+func (mr *MockLauncherClientMockRecorder) PingKeepalive() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PingKeepalive", reflect.TypeOf((*MockLauncherClient)(nil).PingKeepalive))
+}
+
 // Ping indicates an expected call of Ping.
 func (mr *MockLauncherClientMockRecorder) Ping() *gomock.Call {
 	mr.mock.ctrl.T.Helper()

@@ -470,7 +470,7 @@ func runCMDServer(wg *sync.WaitGroup, socketPath string,
 	stopChan chan struct{},
 	options *cmdserver.ServerOptions) {
 	wg.Add(1)
-	done, _ := cmdserver.RunServer(socketPath, domainManager, stopChan, options)
+	done, _ := cmdserver.RunServer(socketPath, domainManager, stopChan, options, nil)
 	go func() {
 		<-done
 		wg.Done()

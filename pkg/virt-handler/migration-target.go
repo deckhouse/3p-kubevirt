@@ -74,6 +74,12 @@ var (
 	ErrChecksumMismatch = goerror.New("checksum mismatch")
 )
 
+// domainWaitKeepaliveInterval bounds how often a migration target held by the
+// inbound-migration gate is re-enqueued so it re-pings virt-launcher and keeps
+// the domain-wait deadline reset. It must stay well below the target's
+// --qemu-timeout so the deadline is refreshed before it fires.
+const domainWaitKeepaliveInterval = 30 * time.Second
+
 type netBindingPluginMemoryCalculator interface {
 	Calculate(vmi *v1.VirtualMachineInstance, registeredPlugins map[string]v1.InterfaceBindingPlugin) resource.Quantity
 }
@@ -823,6 +829,20 @@ func (c *MigrationTargetController) processVMI(vmi *v1.VirtualMachineInstance) e
 		// then there's nothing left to prepare on the target side
 		log.Log.Object(vmi).V(4).Info("migration is already in progress")
 		return nil
+	}
+
+	// Keep the target virt-launcher's domain-wait alive only while this migration
+	// is deliberately held by the external migration-configuration gate: the
+	// inbound migration limiter withholds MigrationState.MigrationConfiguration
+	// until a slot is free, and the source does not start until it is filled.
+	// In that window virt-launcher would otherwise panic on its --qemu-timeout.
+	// A quiescent waiting target is not reconciled on its own, so re-enqueue it
+	// on a fixed interval to ping the launcher and reset its deadline repeatedly.
+	// Once the slot is granted (configuration filled) the pings stop and the
+	// standard --qemu-timeout applies unchanged.
+	if vmi.Status.MigrationState != nil && vmi.Status.MigrationState.MigrationConfiguration == nil {
+		_ = client.PingKeepalive()
+		c.queue.AddAfter(controller.VirtualMachineInstanceKey(vmi), domainWaitKeepaliveInterval)
 	}
 
 	vmi = vmi.DeepCopy()
