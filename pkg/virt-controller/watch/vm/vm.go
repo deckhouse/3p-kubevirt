@@ -3499,7 +3499,14 @@ func (c *Controller) sync(vm *virtv1.VirtualMachine, vmi *virtv1.VirtualMachineI
 		if err := c.handleMemoryHotplugRequest(vmCopy, vmi); err != nil {
 			return vm, vmi, common.NewSyncError(fmt.Errorf("error encountered while handling memory hotplug requests: %v", err), hotplugMemoryErrorReason), nil
 		}
+	}
 
+	// Volume migration must proceed independently of a pending restart. Migrating
+	// volumes (e.g. evacuating local storage off a drained node) is orthogonal to
+	// the non-live-updatable changes that wait for a restart, so it must not be
+	// gated behind the RestartRequired condition. A replacement update still only
+	// sets RestartRequired and is a no-op once that condition is already present.
+	if c.clusterConfig.IsVMRolloutStrategyLiveUpdate() {
 		if err := c.handleVolumeUpdateRequest(vmCopy, vmi); err != nil {
 			return vm, vmi, common.NewSyncError(fmt.Errorf("error encountered while handling volumes update requests: %v", err), volumesUpdateErrorReason), nil
 		}
