@@ -12,6 +12,7 @@ go_library(
     importpath = "kubevirt.io/kubevirt/pkg/virt-handler/conntrack",
     visibility = ["//visibility:public"],
     deps = [
+        "//pkg/monitoring/metrics/virt-handler/conntrackstats:go_default_library",
         "//pkg/util:go_default_library",
         "//staging/src/kubevirt.io/api/core/v1:go_default_library",
         "//staging/src/kubevirt.io/client-go/log:go_default_library",

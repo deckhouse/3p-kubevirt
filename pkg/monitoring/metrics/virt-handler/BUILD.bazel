@@ -16,6 +16,7 @@ go_library(
         "//pkg/monitoring/metrics/common/vmisync:go_default_library",
         "//pkg/monitoring/metrics/common/kube-api-rewriter:go_default_library",
         "//pkg/monitoring/metrics/common/workqueue:go_default_library",
+        "//pkg/monitoring/metrics/virt-handler/conntrackstats:go_default_library",
         "//pkg/monitoring/metrics/virt-handler/domainstats:go_default_library",
         "//pkg/monitoring/metrics/virt-handler/gpuinfo:go_default_library",
         "//pkg/monitoring/metrics/virt-handler/migrationdomainstats:go_default_library",

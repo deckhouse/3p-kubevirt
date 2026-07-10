@@ -27,6 +27,7 @@ import (
 	kubeapirewriter "kubevirt.io/kubevirt/pkg/monitoring/metrics/common/kube-api-rewriter"
 	"kubevirt.io/kubevirt/pkg/monitoring/metrics/common/vmisync"
 	"kubevirt.io/kubevirt/pkg/monitoring/metrics/common/workqueue"
+	"kubevirt.io/kubevirt/pkg/monitoring/metrics/virt-handler/conntrackstats"
 	"kubevirt.io/kubevirt/pkg/monitoring/metrics/virt-handler/domainstats"
 	"kubevirt.io/kubevirt/pkg/monitoring/metrics/virt-handler/gpuinfo"
 	"kubevirt.io/kubevirt/pkg/monitoring/metrics/virt-handler/migrationdomainstats"
@@ -52,7 +53,9 @@ func SetupMetrics(
 		return err
 	}
 
-	if err := operatormetrics.RegisterMetrics(componentMetrics, versionMetrics, machineTypeMetrics, guestPanicMetrics); err != nil {
+	if err := operatormetrics.RegisterMetrics(
+		componentMetrics, versionMetrics, machineTypeMetrics, guestPanicMetrics, conntrackstats.ConntrackMetrics,
+	); err != nil {
 		return err
 	}
 	SetVersionInfo()

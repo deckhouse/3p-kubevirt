@@ -30,6 +30,8 @@ import (
 
 	v1 "kubevirt.io/api/core/v1"
 	"kubevirt.io/client-go/log"
+
+	"kubevirt.io/kubevirt/pkg/monitoring/metrics/virt-handler/conntrackstats"
 )
 
 const (
@@ -66,6 +68,7 @@ func (h *SourceHandler) ExportAndSend(vmi *v1.VirtualMachineInstance, socketPath
 	ips := extractVMIIPs(vmi)
 	if len(ips) == 0 {
 		log.Log.Warningf("Conntrack sync: no IPs found for VMI %s", vmiUID)
+		conntrackstats.RecordExportSkipped()
 		return nil
 	}
 
@@ -74,11 +77,13 @@ func (h *SourceHandler) ExportAndSend(vmi *v1.VirtualMachineInstance, socketPath
 
 	var allData []byte
 	var version byte
+	var exportErrors int
 
 	for _, ip := range ips {
 		result, err := h.ciliumClient.ExportConntrack(ctx, ip)
 		if err != nil {
 			log.Log.Warningf("Conntrack sync: failed to export CT for IP %s: %v", ip, err)
+			exportErrors++
 			continue
 		}
 		if len(result.Data) > 0 {
@@ -91,12 +96,19 @@ func (h *SourceHandler) ExportAndSend(vmi *v1.VirtualMachineInstance, socketPath
 	}
 
 	if len(allData) == 0 {
-		log.Log.V(3).Infof("Conntrack sync: no CT entries to send for VMI %s", vmiUID)
+		if exportErrors > 0 {
+			log.Log.Warningf("Conntrack sync: all %d IP export(s) failed for VMI %s", exportErrors, vmiUID)
+			conntrackstats.RecordExportError()
+		} else {
+			log.Log.V(3).Infof("Conntrack sync: no CT entries to send for VMI %s", vmiUID)
+			conntrackstats.RecordExportSkipped()
+		}
 		return nil
 	}
 
 	conn, err := net.Dial("unix", socketPath)
 	if err != nil {
+		conntrackstats.RecordExportError()
 		return fmt.Errorf("failed to connect to proxy socket: %w", err)
 	}
 	defer conn.Close()
@@ -108,9 +120,11 @@ func (h *SourceHandler) ExportAndSend(vmi *v1.VirtualMachineInstance, socketPath
 
 	encoded := msg.Encode()
 	if _, err := conn.Write(encoded); err != nil {
+		conntrackstats.RecordExportError()
 		return fmt.Errorf("failed to send CT data: %w", err)
 	}
 
+	conntrackstats.RecordExportSuccess(len(encoded))
 	log.Log.V(3).Infof("Conntrack sync: sent %d bytes for VMI %s", len(encoded), vmiUID)
 	return nil
 }

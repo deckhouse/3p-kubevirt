@@ -34,6 +34,7 @@ import (
 
 	"kubevirt.io/client-go/log"
 
+	"kubevirt.io/kubevirt/pkg/monitoring/metrics/virt-handler/conntrackstats"
 	"kubevirt.io/kubevirt/pkg/util"
 )
 
@@ -164,12 +165,15 @@ func (h *TargetHandler) onCTReceived(vmiUID types.UID, msg *SyncMessage) {
 		return
 	}
 
-	if ctx.Err() == context.DeadlineExceeded {
-		log.Log.Warningf("Conntrack sync: import timed out for VMI %s", vmiUID)
+	if ctx.Err() != nil {
+		log.Log.Warningf("Conntrack sync: import aborted (hook timeout %v) for VMI %s", SyncTimeout, vmiUID)
+		conntrackstats.RecordImportAborted()
 	} else if err != nil {
 		log.Log.Warningf("Conntrack sync: import failed for VMI %s: %v", vmiUID, err)
+		conntrackstats.RecordImportError()
 	} else {
 		log.Log.V(3).Infof("Conntrack sync: import completed for VMI %s", vmiUID)
+		conntrackstats.RecordImportSuccess()
 	}
 
 	close(state.injectionDone)
@@ -201,12 +205,15 @@ func (h *TargetHandler) onHookSignal(vmiUID types.UID) {
 
 	select {
 	case <-done:
+		conntrackstats.RecordHookWaitCompleted()
+		log.Log.V(3).Infof("Conntrack sync: hook wait completed for VMI %s", vmiUID)
 	case <-time.After(SyncTimeout):
 		h.mu.Lock()
 		if state.cancel != nil {
 			state.cancel()
 		}
 		h.mu.Unlock()
+		conntrackstats.RecordHookWaitTimeout()
 		log.Log.Warningf("Conntrack sync: hook timeout (%v) for VMI %s", SyncTimeout, vmiUID)
 	}
 }
