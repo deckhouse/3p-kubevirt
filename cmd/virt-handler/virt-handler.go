@@ -84,6 +84,7 @@ import (
 	virtconfig "kubevirt.io/kubevirt/pkg/virt-config"
 	virthandler "kubevirt.io/kubevirt/pkg/virt-handler"
 	virtcache "kubevirt.io/kubevirt/pkg/virt-handler/cache"
+	checksum_controller "kubevirt.io/kubevirt/pkg/virt-handler/checksum-controller"
 	cmdclient "kubevirt.io/kubevirt/pkg/virt-handler/cmd-client"
 	"kubevirt.io/kubevirt/pkg/virt-handler/conntrack"
 	dmetricsmanager "kubevirt.io/kubevirt/pkg/virt-handler/dmetrics-manager"
@@ -92,7 +93,6 @@ import (
 	nodelabeller "kubevirt.io/kubevirt/pkg/virt-handler/node-labeller"
 	"kubevirt.io/kubevirt/pkg/virt-handler/rest"
 	"kubevirt.io/kubevirt/pkg/virt-handler/selinux"
-	checksum_controller "kubevirt.io/kubevirt/pkg/virt-handler/checksum-controller"
 )
 
 const (
@@ -345,17 +345,11 @@ func (app *virtHandlerApp) Run() {
 
 	go nodeLabellerController.Run(10, stop)
 
-	migrationIpAddress := app.PodIpAddress
-	migrationIpAddress, err = virthandler.FindMigrationIP(migrationIpAddress)
-	if err != nil {
-		panic(err)
-	}
-
 	downwardMetricsManager := dmetricsmanager.NewDownwardMetricsManager(app.HostOverride)
 
 	launcherClientsManager := launcher_clients.NewLauncherClientsManager(app.VirtShareDir, podIsolationDetector)
 
-	netConf := netsetup.NewNetConf(app.clusterConfig)
+	netConf := newNetConf(app)
 	netStat := netsetup.NewNetStat()
 	passtRepairHandler := passt.NewRepairManager(app.clusterConfig)
 
@@ -379,7 +373,7 @@ func (app *virtHandlerApp) Run() {
 		}
 	}
 
-	migrationProxy := migrationproxy.NewMigrationProxyManager(migrationIpAddress, portRange, app.serverTLSConfig, app.clientTLSConfig, app.clusterConfig)
+	migrationProxy := migrationproxy.NewMigrationProxyManager(portRange, app.serverTLSConfig, app.clientTLSConfig, app.clusterConfig)
 	checksumCtrl := checksum_controller.NewController(vmiSourceInformer, app.virtCli)
 	go checksumCtrl.Run(stop)
 
@@ -409,7 +403,7 @@ func (app *virtHandlerApp) Run() {
 		app.HostOverride,
 		app.VirtPrivateDir,
 		app.KubeletPodsDir,
-		migrationIpAddress,
+		app.PodIpAddress,
 		launcherClientsManager,
 		vmiTargetInformer,
 		domainSharedInformer,
@@ -783,6 +777,26 @@ func getMachines(capabilities libvirtxml.Caps) []libvirtxml.CapsGuestMachine {
 		machines = append(machines, guest.Arch.Machines...)
 	}
 	return machines
+}
+
+// newNetConf builds the NetConf, deciding once whether bpfbridge TAPs are
+// provisioned by kubevirt or by an external SDN. TAPs are created by kubevirt only
+// when the node carries TapProvisionByDVPAnnotation; otherwise, or if the node
+// cannot be read, provisioning is delegated to the SDN.
+func newNetConf(app *virtHandlerApp) *netsetup.NetConf {
+	externalTapProvisioning := true
+	node, err := app.virtCli.CoreV1().Nodes().Get(context.Background(), app.HostOverride, metav1.GetOptions{})
+	if err != nil {
+		log.Log.Reason(err).Warningf("failed to get node %q; falling back to external TAP provisioning", app.HostOverride)
+	} else {
+		externalTapProvisioning = netsetup.IsExternalTapProvisioning(node)
+		if externalTapProvisioning {
+			log.Log.Infof("Enable TAP creation externally by the SDN side (node %q has no %q annotation)", app.HostOverride, netsetup.TapProvisionByDVPAnnotation)
+		} else {
+			log.Log.Infof("Enable TAP creation by virt-handler (node %q has %q annotation)", app.HostOverride, netsetup.TapProvisionByDVPAnnotation)
+		}
+	}
+	return netsetup.NewNetConfExtended(app.clusterConfig, externalTapProvisioning)
 }
 
 func main() {

@@ -159,7 +159,7 @@ func applyDynamicIfaceRequestOnVMI(
 
 		shouldHotplugIface := !existsInVMISpec &&
 			vmIface.State != v1.InterfaceStateAbsent &&
-			(vmIface.InterfaceBindingMethod.Bridge != nil || vmIface.InterfaceBindingMethod.SRIOV != nil)
+			isHotpluggableInterface(vmIface)
 
 		shouldUpdateExistingIfaceState := existsInVMISpec &&
 			vmIface.State != vmiIfaceCopy.State
@@ -177,6 +177,12 @@ func applyDynamicIfaceRequestOnVMI(
 		}
 	}
 	return vmiSpecCopy
+}
+
+func isHotpluggableInterface(iface v1.Interface) bool {
+	return iface.InterfaceBindingMethod.Bridge != nil ||
+		iface.InterfaceBindingMethod.SRIOV != nil ||
+		vmispec.IsBPFBridgeBinding(iface)
 }
 
 func clearDetachedIfacesFromVMI(

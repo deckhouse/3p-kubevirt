@@ -8,9 +8,9 @@ import (
 	"sync"
 	"syscall"
 
-	"kubevirt.io/kubevirt/pkg/checkpoint"
 	hostdisk "kubevirt.io/kubevirt/pkg/host-disk"
 	"kubevirt.io/kubevirt/pkg/unsafepath"
+	virtcache "kubevirt.io/kubevirt/pkg/virt-handler/cache"
 
 	"golang.org/x/sys/unix"
 
@@ -106,7 +106,6 @@ var (
 	unmountCommand = func(diskPath *safepath.Path) ([]byte, error) {
 		return virt_chroot.UmountChroot(diskPath).CombinedOutput()
 	}
-
 	isMounted = func(path *safepath.Path) (bool, error) {
 		return isolation.IsMounted(path)
 	}
@@ -129,7 +128,7 @@ var (
 )
 
 type volumeMounter struct {
-	checkpointManager  checkpoint.CheckpointManager
+	checkpointManager  virtcache.IterableCheckpointManager
 	mountRecords       map[types.UID]*vmiMountTargetRecord
 	mountRecordsLock   sync.Mutex
 	skipSafetyCheck    bool
@@ -175,7 +174,7 @@ func NewVolumeMounterWithCreator(mountStateDir string, kubeletPodsDir string, ho
 func newVolumeMounter(mountStateDir string, kubeletPodsDir string, host string) *volumeMounter {
 	return &volumeMounter{
 		mountRecords:       make(map[types.UID]*vmiMountTargetRecord),
-		checkpointManager:  checkpoint.NewSimpleCheckpointManager(mountStateDir),
+		checkpointManager:  virtcache.NewIterableCheckpointManager(mountStateDir),
 		hotplugDiskManager: hotplugdisk.NewHotplugDiskManager(kubeletPodsDir),
 		ownershipManager:   diskutils.DefaultOwnershipManager,
 		kubeletPodsDir:     kubeletPodsDir,
@@ -868,6 +867,7 @@ func (m *volumeMounter) UnmountAll(vmi *v1.VirtualMachineInstance, cgroupManager
 
 		// Collect all device rules for removal first
 		var deviceRules []*devices.Rule
+		var unmountErrors []error
 
 		for _, entry := range record.MountTargetEntries {
 			diskPath, err := safepath.NewFileNoFollow(entry.TargetFile)
@@ -876,24 +876,27 @@ func (m *volumeMounter) UnmountAll(vmi *v1.VirtualMachineInstance, cgroupManager
 					logger.Infof("Device %v is not mounted anymore, continuing.", entry.TargetFile)
 					continue
 				}
+				err = fmt.Errorf("failed to open mount target %s: %w", entry.TargetFile, err)
 				logger.Warningf("Unable to unmount volume at path %s: %v", entry.TargetFile, err)
+				unmountErrors = append(unmountErrors, err)
 				continue
 			}
 			diskPath.Close()
 			if isBlock, err := isBlockDevice(diskPath.Path()); err != nil {
 				logger.Warningf("Unable to unmount volume at path %s: %v", diskPath, err)
+				unmountErrors = append(unmountErrors, err)
 			} else if isBlock {
 				deviceRule, err := m.unmountBlockHotplugVolumes(diskPath.Path(), cgroupManager)
 				if err != nil {
 					logger.Warningf("Unable to remove block device at path %s: %v", diskPath, err)
-					// Don't return error, try next.
+					unmountErrors = append(unmountErrors, err)
 				} else if deviceRule != nil {
 					deviceRules = append(deviceRules, deviceRule)
 				}
 			} else {
 				if err := m.unmountFileSystemHotplugVolumes(diskPath.Path()); err != nil {
 					logger.Warningf("Unable to unmount volume at path %s: %v", diskPath, err)
-					// Don't return error, try next.
+					unmountErrors = append(unmountErrors, err)
 				}
 			}
 		}
@@ -916,10 +919,38 @@ func (m *volumeMounter) UnmountAll(vmi *v1.VirtualMachineInstance, cgroupManager
 			}
 		}
 
+		if len(unmountErrors) > 0 {
+			return fmt.Errorf("failed to unmount all hotplug volumes: %w", errors.Join(unmountErrors...))
+		}
+
 		err = m.deleteMountTargetRecord(vmi)
 		if err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// CleanupOrphanedCheckpoints unmounts hotplug volumes and deletes the mount
+// checkpoint for every checkpointed VMI that is not in activeVMIs.
+func (m *volumeMounter) CleanupOrphanedCheckpoints(activeVMIs map[types.UID]struct{}) error {
+	var unmountErrors []error
+
+	for _, uid := range m.checkpointManager.ListKeys() {
+		if _, ok := activeVMIs[types.UID(uid)]; ok {
+			continue
+		}
+
+		vmi := v1.NewVMIReferenceFromNameWithNS("", "")
+		vmi.UID = types.UID(uid)
+
+		if err := m.UnmountAll(vmi, nil); err != nil {
+			unmountErrors = append(unmountErrors, fmt.Errorf("failed to clean up hotplug checkpoint %s: %w", uid, err))
+		}
+	}
+
+	if len(unmountErrors) > 0 {
+		return fmt.Errorf("failed to clean up hotplug checkpoints: %w", errors.Join(unmountErrors...))
 	}
 	return nil
 }

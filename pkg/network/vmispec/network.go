@@ -56,7 +56,12 @@ func FilterNetworksSpec(nets []v1.Network, predicate func(i v1.Network) bool) []
 
 func LookUpDefaultNetwork(networks []v1.Network) *v1.Network {
 	for i, network := range networks {
-		if !IsSecondaryMultusNetwork(network) {
+		// The default (primary) network is neither a secondary multus network
+		// nor a secondary pod network. Without the IsSecondaryPodNetwork check a
+		// lone additional pod network (e.g. a bpfbridge network named "veth_cn…",
+		// Multus == nil) would be misclassified as the default and bound to eth0,
+		// which breaks a VM that legitimately has only an additional network.
+		if !IsSecondaryMultusNetwork(network) && !IsSecondaryPodNetwork(network) {
 			return &networks[i]
 		}
 	}
@@ -65,6 +70,12 @@ func LookUpDefaultNetwork(networks []v1.Network) *v1.Network {
 
 func IsSecondaryMultusNetwork(net v1.Network) bool {
 	return net.Multus != nil && !net.Multus.Default
+}
+
+// IsSecondaryPodNetwork reports whether net is a non-default pod network
+// (i.e. a secondary pod network, not the primary "default" one).
+func IsSecondaryPodNetwork(net v1.Network) bool {
+	return net.Pod != nil && net.Name != "default"
 }
 
 func IndexNetworkSpecByName(networks []v1.Network) map[string]v1.Network {

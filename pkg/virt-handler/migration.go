@@ -22,30 +22,33 @@ package virthandler
 import (
 	"fmt"
 	"net"
-
-	v1 "kubevirt.io/api/core/v1"
 )
 
-// FindMigrationIP looks for dedicated migration network migration0. If found, sets migration IP to it
-func FindMigrationIP(migrationIp string) (string, error) {
-	ief, err := net.InterfaceByName(v1.MigrationInterfaceName)
+// MigrationInterfaceNodeAnnotation is the Node annotation written by the
+// Deckhouse virtualization module to name a dedicated migration interface
+// resolved from a SystemNetwork CR (sdn module).
+const MigrationInterfaceNodeAnnotation = "virtualization.deckhouse.io/migration-iface"
+
+// FindMigrationIP returns the IP to bind live migration to.
+func FindMigrationIP(migrationIp, ifaceName string) (string, error) {
+	ief, err := net.InterfaceByName(ifaceName)
 	if err != nil {
-		return migrationIp, nil
+		return migrationIp, fmt.Errorf("migration interface %q not present on host", ifaceName)
 	}
 	addrs, err := ief.Addrs()
 	if err != nil { // get addresses
-		return migrationIp, fmt.Errorf("%s present but doesn't have an IP", v1.MigrationInterfaceName)
+		return migrationIp, fmt.Errorf("%s present but doesn't have an IP", ifaceName)
 	}
 	for _, addr := range addrs {
-		if !addr.(*net.IPNet).IP.IsGlobalUnicast() {
-			// skip local/multicast IPs
+		ipnet := addr.(*net.IPNet).IP
+		if !ipnet.IsGlobalUnicast() && !ipnet.IsLinkLocalUnicast() {
 			continue
 		}
-		ip := addr.(*net.IPNet).IP.To16()
+		ip := ipnet.To16()
 		if ip != nil {
 			return ip.String(), nil
 		}
 	}
 
-	return migrationIp, fmt.Errorf("no IP found on %s", v1.MigrationInterfaceName)
+	return migrationIp, fmt.Errorf("no IP found on %s", ifaceName)
 }

@@ -374,8 +374,11 @@ func (c *Controller) execute(key string) error {
 			logger.V(3).Infof("Deleting migration for deleted vmi %s/%s", migration.Namespace, migration.Spec.VMIName)
 			return c.clientset.VirtualMachineInstanceMigration(migration.Namespace).Delete(context.Background(), migration.Name, v1.DeleteOptions{})
 		}
-		// nothing to process for a migration that has no VMI
-		return nil
+		// The migration is being deleted and its VMI is already gone. Run the status
+		// update so the migration is failed and the finalizer is removed; returning
+		// without it leaves the object in Terminating forever, which wedges namespace
+		// deletion and the owning resources.
+		return c.updateStatus(migration, nil, nil, nil)
 	}
 
 	vmi = vmiObj.(*virtv1.VirtualMachineInstance)
@@ -537,7 +540,7 @@ func (c *Controller) updateStatus(migration *virtv1.VirtualMachineInstanceMigrat
 			return err
 		}
 		c.recorder.Eventf(migration, k8sv1.EventTypeWarning, controller.FailedMigrationReason, msg)
-		log.Log.Object(migration).Errorf(msg)
+		log.Log.Object(migration).Error(msg)
 		setMigrationFailedConditionIfNotExists(migrationCopy, virtv1.VirtualMachineInstanceMigrationFailedReasonTargetPodShutdownDuringMigration, msg)
 		if err := c.handlePostHandoffMigrationCancel(migration, vmi); err != nil {
 			return err
@@ -600,7 +603,7 @@ func (c *Controller) updateStatus(migration *virtv1.VirtualMachineInstanceMigrat
 			return err
 		}
 		c.recorder.Eventf(migration, k8sv1.EventTypeWarning, controller.FailedMigrationReason, msg)
-		log.Log.Object(migration).Errorf(msg)
+		log.Log.Object(migration).Error(msg)
 
 		setMigrationFailedConditionIfNotExists(migrationCopy, virtv1.VirtualMachineInstanceMigrationFailedReasonTargetAttachmentPodShutdownDuringMigration, msg)
 	} else {
@@ -1223,7 +1226,7 @@ func (c *Controller) markMigrationAbortInVmiStatus(migration *virtv1.VirtualMach
 		if err != nil {
 			msg := fmt.Sprintf("failed to set MigrationState in VMI status. :%v", err)
 			c.recorder.Eventf(migration, k8sv1.EventTypeWarning, controller.FailedAbortMigrationReason, msg)
-			return fmt.Errorf(msg)
+			return errors.New(msg)
 		}
 		log.Log.Object(vmi).Infof("Signaled migration %s/%s to be aborted.", migration.Namespace, migration.Name)
 		c.recorder.Eventf(migration, k8sv1.EventTypeNormal, controller.SuccessfulAbortMigrationReason, "Migration is ready to be canceled by virt-handler.")

@@ -113,6 +113,7 @@ func (l *podNIC) PlugPhase2(domain *api.Domain) error {
 
 func (l *podNIC) newDHCPConfigurator() dhcpconfigurator.Configurator {
 	var dhcpConfigurator dhcpconfigurator.Configurator
+
 	if l.vmiSpecIface.Bridge != nil {
 		dhcpConfigurator = dhcpconfigurator.NewBridgeConfigurator(
 			l.cacheCreator,

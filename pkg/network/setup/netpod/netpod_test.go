@@ -38,6 +38,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	. "github.com/onsi/gomega/gstruct"
 
 	"kubevirt.io/kubevirt/pkg/network/cache"
 	"kubevirt.io/kubevirt/pkg/network/driver/nmstate"
@@ -1110,7 +1111,7 @@ var _ = Describe("netpod", func() {
 			nmstate.Spec{
 				Interfaces: []nmstate.Interface{},
 				LinuxStack: nmstate.LinuxStack{IPv4: nmstate.LinuxStackIP4{
-					PingGroupRange:        []int{107, 107},
+					PingGroupRange:        []int{64535, 64535},
 					UnprivilegedPortStart: pointer.P(0),
 				}},
 			},
@@ -1845,6 +1846,323 @@ var _ = Describe("netpod", func() {
 		Expect(err).To(HaveOccurred())
 	})
 
+	When("binding plugin with bpfbridge binding", func() {
+		It("setup succeeds with native tap creation", func() {
+			const podIfaceOrignalMAC = "12:34:56:78:90:ab"
+
+			nmstatestub := nmstateStub{status: nmstate.Status{
+				Interfaces: []nmstate.Interface{{
+					Name:       "eth0",
+					Index:      0,
+					TypeName:   nmstate.TypeVETH,
+					State:      nmstate.IfaceStateUp,
+					MacAddress: podIfaceOrignalMAC,
+					MTU:        1500,
+				}},
+			}}
+
+			vmiIface := v1.Interface{Name: defaultPodNetworkName, Binding: &v1.PluginBinding{Name: "bpfbridge"}}
+			bpfStub := &bpfBridgeStub{}
+			netPod := netpod.NewNetPod(
+				[]v1.Network{*v1.DefaultPodNetwork()},
+				[]v1.Interface{vmiIface},
+				vmiUID, 0, 0, 0, state,
+				netpod.WithNMStateAdapter(&nmstatestub),
+				netpod.WithCacheCreator(&baseCacheCreator),
+				netpod.WithBindingPlugins(map[string]v1.InterfaceBindingPlugin{
+					"bpfbridge": {DomainAttachmentType: v1.Tap},
+				}),
+				netpod.WithBpfBridgeAdapter(bpfStub),
+				netpod.WithExternalTapProvisioning(false),
+			)
+			Expect(netPod.Setup()).To(Succeed())
+			Expect(nmstatestub.spec.Interfaces).To(ContainElement(
+				nmstate.Interface{
+					Name:     "tap0",
+					TypeName: nmstate.TypeTap,
+					State:    nmstate.IfaceStateUp,
+					MTU:      1500,
+					Tap:      &nmstate.TapDevice{Queues: 0, UID: 0, GID: 0},
+					Metadata: &nmstate.IfaceMetadata{Pid: 0, NetworkName: defaultPodNetworkName},
+				},
+			))
+			Expect(bpfStub.ensureWiringCalls).To(ContainElement("tap0"))
+			Expect(bpfStub.attachCalls).To(HaveLen(1))
+		})
+
+		It("creates native taps for non-default pod networks", func() {
+			const secondaryNetworkName = "veth_cn76a0e2ba"
+			nmstatestub := nmstateStub{status: nmstate.Status{
+				Interfaces: []nmstate.Interface{
+					{
+						Name:       "eth0",
+						Index:      0,
+						TypeName:   nmstate.TypeVETH,
+						State:      nmstate.IfaceStateUp,
+						MacAddress: "12:34:56:78:90:ab",
+						MTU:        1500,
+					},
+					{
+						Name:       secondaryNetworkName,
+						Index:      1,
+						TypeName:   nmstate.TypeVETH,
+						State:      nmstate.IfaceStateUp,
+						MacAddress: "22:34:56:78:90:ab",
+						MTU:        1400,
+					},
+				},
+			}}
+
+			vmiIfaces := []v1.Interface{
+				{Name: defaultPodNetworkName, Binding: &v1.PluginBinding{Name: "bpfbridge"}},
+				{Name: secondaryNetworkName, Binding: &v1.PluginBinding{Name: "bpfbridge"}},
+			}
+			netPod := netpod.NewNetPod(
+				[]v1.Network{
+					*v1.DefaultPodNetwork(),
+					{Name: secondaryNetworkName, NetworkSource: v1.NetworkSource{Pod: &v1.PodNetwork{}}},
+				},
+				vmiIfaces,
+				vmiUID, 0, 0, 0, state,
+				netpod.WithNMStateAdapter(&nmstatestub),
+				netpod.WithCacheCreator(&baseCacheCreator),
+				netpod.WithBindingPlugins(map[string]v1.InterfaceBindingPlugin{
+					"bpfbridge": {DomainAttachmentType: v1.Tap},
+				}),
+				netpod.WithBpfBridgeAdapter(&bpfBridgeStub{}),
+				netpod.WithExternalTapProvisioning(false),
+			)
+			Expect(netPod.Setup()).To(Succeed())
+			Expect(nmstatestub.spec.Interfaces).To(ContainElements(
+				nmstate.Interface{
+					Name:     "tap0",
+					TypeName: nmstate.TypeTap,
+					State:    nmstate.IfaceStateUp,
+					MTU:      1500,
+					Tap:      &nmstate.TapDevice{Queues: 0, UID: 0, GID: 0},
+					Metadata: &nmstate.IfaceMetadata{Pid: 0, NetworkName: defaultPodNetworkName},
+				},
+				nmstate.Interface{
+					Name:     secondaryNetworkName,
+					TypeName: nmstate.TypeTap,
+					State:    nmstate.IfaceStateUp,
+					MTU:      1400,
+					Tap:      &nmstate.TapDevice{Queues: 0, UID: 0, GID: 0},
+					Metadata: &nmstate.IfaceMetadata{Pid: 0, NetworkName: secondaryNetworkName},
+				},
+			))
+		})
+
+		It("skips native TAP creation for secondary interfaces in external provisioning mode but keeps default and attaches BPF", func() {
+			const podIfaceOrignalMAC = "12:34:56:78:90:ab"
+			const secondaryNetworkName = "veth_cn76a0e2ba"
+
+			nmstatestub := nmstateStub{status: nmstate.Status{
+				Interfaces: []nmstate.Interface{
+					{
+						Name:       "eth0",
+						Index:      0,
+						TypeName:   nmstate.TypeVETH,
+						State:      nmstate.IfaceStateUp,
+						MacAddress: podIfaceOrignalMAC,
+						MTU:        1500,
+					},
+					{
+						Name:       secondaryNetworkName,
+						Index:      1,
+						TypeName:   nmstate.TypeVETH,
+						State:      nmstate.IfaceStateUp,
+						MacAddress: "22:34:56:78:90:ab",
+						MTU:        1400,
+					},
+				},
+			}}
+
+			vmiIfaces := []v1.Interface{
+				{Name: defaultPodNetworkName, Binding: &v1.PluginBinding{Name: "bpfbridge"}},
+				{Name: secondaryNetworkName, Binding: &v1.PluginBinding{Name: "bpfbridge"}},
+			}
+			bpfStub := &bpfBridgeStub{}
+			netPod := netpod.NewNetPod(
+				[]v1.Network{
+					*v1.DefaultPodNetwork(),
+					{Name: secondaryNetworkName, NetworkSource: v1.NetworkSource{Pod: &v1.PodNetwork{}}},
+				},
+				vmiIfaces,
+				vmiUID, 0, 0, 0, state,
+				netpod.WithNMStateAdapter(&nmstatestub),
+				netpod.WithCacheCreator(&baseCacheCreator),
+				netpod.WithBindingPlugins(map[string]v1.InterfaceBindingPlugin{
+					"bpfbridge": {DomainAttachmentType: v1.Tap},
+				}),
+				netpod.WithBpfBridgeAdapter(bpfStub),
+				netpod.WithExternalTapProvisioning(true),
+			)
+			Expect(netPod.Setup()).To(Succeed())
+
+			// The default TAP is still created natively by kubevirt.
+			Expect(nmstatestub.spec.Interfaces).To(ContainElement(
+				nmstate.Interface{
+					Name:     "tap0",
+					TypeName: nmstate.TypeTap,
+					State:    nmstate.IfaceStateUp,
+					MTU:      1500,
+					Tap:      &nmstate.TapDevice{Queues: 0, UID: 0, GID: 0},
+					Metadata: &nmstate.IfaceMetadata{Pid: 0, NetworkName: defaultPodNetworkName},
+				},
+			))
+			// The secondary TAP is NOT created by nmstate — DVP provisions it externally.
+			Expect(nmstatestub.spec.Interfaces).ToNot(ContainElement(
+				MatchFields(IgnoreExtras, Fields{"Name": Equal(secondaryNetworkName), "TypeName": Equal(nmstate.TypeTap)}),
+			))
+			// BPF attach runs for both interfaces.
+			Expect(bpfStub.ensureWiringCalls).To(ContainElements("tap0", secondaryNetworkName))
+			Expect(bpfStub.attachCalls).To(HaveLen(2))
+		})
+
+		It("resolves the secondary pod interface to the CNI veth, not the managed tap, when a tap named after the network already exists", func() {
+			const podIfaceOriginalMAC = "12:34:56:78:90:ab"
+			const secondaryNetworkName = "veth_cn76a0e2ba"
+			const secondaryPodIface = "poda1b2c3d4e5"
+
+			// Simulates a reconcile: the managed tap is already present. Its name
+			// equals the network name (see link.GenerateTapDeviceName), so it sits
+			// next to the real CNI veth in the current status. The tap must NOT be
+			// chosen as the pod interface — otherwise tapName == podIfaceName and
+			// the bpfbridge program bakes POD_IFINDEX == TAP_IFINDEX, redirecting
+			// the tap onto itself and black-holing the interface's traffic.
+			nmstatestub := nmstateStub{status: nmstate.Status{
+				Interfaces: []nmstate.Interface{
+					{
+						Name:       "eth0",
+						Index:      0,
+						TypeName:   nmstate.TypeVETH,
+						State:      nmstate.IfaceStateUp,
+						MacAddress: podIfaceOriginalMAC,
+						MTU:        1500,
+					},
+					{
+						Name:       secondaryPodIface,
+						Index:      5,
+						TypeName:   nmstate.TypeVETH,
+						State:      nmstate.IfaceStateUp,
+						MacAddress: "22:34:56:78:90:ab",
+						MTU:        1400,
+					},
+					{
+						Name:       secondaryNetworkName,
+						Index:      6,
+						TypeName:   nmstate.TypeTap,
+						State:      nmstate.IfaceStateUp,
+						MacAddress: "32:34:56:78:90:ab",
+						MTU:        1400,
+					},
+				},
+			}}
+
+			vmiIfaces := []v1.Interface{
+				{Name: defaultPodNetworkName, Binding: &v1.PluginBinding{Name: "bpfbridge"}},
+				{Name: secondaryNetworkName, Binding: &v1.PluginBinding{Name: "bpfbridge"}},
+			}
+			// The VMI status reports the pod interface name as the network name,
+			// which is also the managed tap's name — this must not steer the
+			// resolution onto the tap either.
+			vmiIfaceStatuses := []v1.VirtualMachineInstanceNetworkInterface{
+				{Name: secondaryNetworkName, PodInterfaceName: secondaryNetworkName},
+			}
+			bpfStub := &bpfBridgeStub{}
+			netPod := netpod.NewNetPod(
+				[]v1.Network{
+					*v1.DefaultPodNetwork(),
+					{Name: secondaryNetworkName, NetworkSource: v1.NetworkSource{Pod: &v1.PodNetwork{}}},
+				},
+				vmiIfaces,
+				vmiUID, 0, 0, 0, state,
+				netpod.WithNMStateAdapter(&nmstatestub),
+				netpod.WithCacheCreator(&baseCacheCreator),
+				netpod.WithVMIIfaceStatuses(vmiIfaceStatuses),
+				netpod.WithBindingPlugins(map[string]v1.InterfaceBindingPlugin{
+					"bpfbridge": {DomainAttachmentType: v1.Tap},
+				}),
+				netpod.WithBpfBridgeAdapter(bpfStub),
+				netpod.WithExternalTapProvisioning(true),
+			)
+			Expect(netPod.Setup()).To(Succeed())
+
+			// The tap for the secondary network is named after the network, but the
+			// pod side of the bpfbridge proxy must resolve to the CNI veth so the
+			// two ifindexes baked into the program differ.
+			Expect(bpfStub.attachCalls).To(ContainElement(attachCall{
+				objPath:      "/usr/share/network-bpf-bridge-binding/bpf_bridge.o",
+				tapName:      secondaryNetworkName,
+				podIfaceName: secondaryPodIface,
+			}))
+		})
+
+		It("does not bind a lone secondary pod network to the primary eth0 even when the VMI status still reports eth0", func() {
+			const secondaryNetworkName = "veth_cn8dff7175"
+			const secondaryPodIface = "d8cedc0f80dfi" // the real CNI veth toward the node
+
+			// A VM with ONLY an additional network (no default). The pod still has
+			// eth0 (primary CNI iface), and the VMI status carries a stale
+			// PodInterfaceName=eth0 for the secondary (written by an older,
+			// pre-fix resolution). Must resolve to the CNI veth, never eth0.
+			nmstatestub := nmstateStub{status: nmstate.Status{
+				Interfaces: []nmstate.Interface{
+					{
+						Name:       "eth0",
+						Index:      1219,
+						TypeName:   nmstate.TypeVETH,
+						State:      nmstate.IfaceStateUp,
+						MacAddress: "12:34:56:78:90:ab",
+						MTU:        1500,
+					},
+					{
+						Name:       secondaryPodIface,
+						Index:      3,
+						TypeName:   nmstate.TypeVETH,
+						State:      nmstate.IfaceStateUp,
+						MacAddress: "22:34:56:78:90:ab",
+						MTU:        1400,
+					},
+				},
+			}}
+			vmiIfaces := []v1.Interface{
+				{Name: secondaryNetworkName, Binding: &v1.PluginBinding{Name: "bpfbridge"}},
+			}
+			vmiIfaceStatuses := []v1.VirtualMachineInstanceNetworkInterface{
+				{Name: secondaryNetworkName, PodInterfaceName: "eth0"},
+			}
+			bpfStub := &bpfBridgeStub{}
+			netPod := netpod.NewNetPod(
+				[]v1.Network{
+					{Name: secondaryNetworkName, NetworkSource: v1.NetworkSource{Pod: &v1.PodNetwork{}}},
+				},
+				vmiIfaces,
+				vmiUID, 0, 0, 0, state,
+				netpod.WithNMStateAdapter(&nmstatestub),
+				netpod.WithCacheCreator(&baseCacheCreator),
+				netpod.WithVMIIfaceStatuses(vmiIfaceStatuses),
+				netpod.WithBindingPlugins(map[string]v1.InterfaceBindingPlugin{
+					"bpfbridge": {DomainAttachmentType: v1.Tap},
+				}),
+				netpod.WithBpfBridgeAdapter(bpfStub),
+				netpod.WithExternalTapProvisioning(true),
+			)
+			Expect(netPod.Setup()).To(Succeed())
+
+			Expect(bpfStub.attachCalls).To(ContainElement(attachCall{
+				objPath:      "/usr/share/network-bpf-bridge-binding/bpf_bridge.o",
+				tapName:      secondaryNetworkName,
+				podIfaceName: secondaryPodIface,
+			}))
+			for _, c := range bpfStub.attachCalls {
+				Expect(c.podIfaceName).ToNot(Equal("eth0"))
+			}
+		})
+
+	})
+
 	When("binding plugin with managedTap domainAttachmentType", func() {
 		const managedTap = "managed-tap"
 
@@ -1997,6 +2315,30 @@ type masqueradeStub struct {
 }
 
 var errMasqueradeSetup = errors.New("masquerade Setup Test Error")
+
+// bpfBridgeStub is a no-op bpfBridgeAdapter that records the arguments it was
+// called with so tests can assert on the BPF wiring/attach invocations without
+// touching real netlink or libbpf.
+type bpfBridgeStub struct {
+	ensureWiringErr   error
+	attachErr         error
+	ensureWiringCalls []string
+	attachCalls       []attachCall
+}
+
+type attachCall struct {
+	objPath, tapName, podIfaceName string
+}
+
+func (b *bpfBridgeStub) EnsureWiring(tapName, podIfaceName string) error {
+	b.ensureWiringCalls = append(b.ensureWiringCalls, tapName)
+	return b.ensureWiringErr
+}
+
+func (b *bpfBridgeStub) Attach(objPath, tapName, podIfaceName string) error {
+	b.attachCalls = append(b.attachCalls, attachCall{objPath, tapName, podIfaceName})
+	return b.attachErr
+}
 
 func (m *masqueradeStub) Setup(bridgeIfaceSpec, podIfaceSpec *nmstate.Interface, vmiIfaceSpec v1.Interface) error {
 	if m.setupErr != nil {

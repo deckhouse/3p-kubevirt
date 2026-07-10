@@ -48,6 +48,8 @@ import (
 	hotplugdisk "kubevirt.io/kubevirt/pkg/hotplug-disk"
 	checksum_controller "kubevirt.io/kubevirt/pkg/virt-handler/checksum-controller"
 
+	"syscall"
+
 	"kubevirt.io/kubevirt/pkg/controller"
 	cmdv1 "kubevirt.io/kubevirt/pkg/handler-launcher-com/cmd/v1"
 	hostdisk "kubevirt.io/kubevirt/pkg/host-disk"
@@ -65,7 +67,6 @@ import (
 	launcher_clients "kubevirt.io/kubevirt/pkg/virt-handler/launcher-clients"
 	migrationproxy "kubevirt.io/kubevirt/pkg/virt-handler/migration-proxy"
 	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/api"
-	"syscall"
 )
 
 var (
@@ -89,7 +90,7 @@ type MigrationTargetController struct {
 	hotplugVolumeMounter             hotplug_volume.VolumeMounter
 	queue                            workqueue.TypedRateLimitingInterface[string]
 	launcherClients                  launcher_clients.LauncherClientsManager
-	migrationIpAddress               string
+	podIpAddress                     string
 	migrationProxy                   migrationproxy.ProxyManager
 	netBindingPluginMemoryCalculator netBindingPluginMemoryCalculator
 	netConf                          netconf
@@ -108,7 +109,7 @@ func NewMigrationTargetController(
 	host string,
 	virtPrivateDir string,
 	kubeletPodsDir string,
-	migrationIpAddress string,
+	podIpAddress string,
 	launcherClients launcher_clients.LauncherClientsManager,
 	vmiInformer cache.SharedIndexInformer,
 	domainInformer cache.SharedInformer,
@@ -159,7 +160,7 @@ func NewMigrationTargetController(
 		containerDiskMounter:             container_disk.NewMounter(podIsolationDetector, containerDiskState, clusterConfig),
 		queue:                            queue,
 		launcherClients:                  launcherClients,
-		migrationIpAddress:               migrationIpAddress,
+		podIpAddress:                     podIpAddress,
 		migrationProxy:                   migrationProxy,
 		netBindingPluginMemoryCalculator: netBindingPluginMemoryCalculator,
 		netConf:                          netConf,
@@ -202,6 +203,21 @@ func NewMigrationTargetController(
 	}
 
 	return c, nil
+}
+
+func (c *MigrationTargetController) resolveMigrationIP() (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	node, err := c.clientset.CoreV1().Nodes().Get(ctx, c.host, metav1.GetOptions{})
+	if err != nil {
+		log.Log.Reason(err).Warningf("failed to get node %q for migration interface annotation lookup", c.host)
+		return c.podIpAddress, nil
+	}
+	ifaceName := node.Annotations[MigrationInterfaceNodeAnnotation]
+	if ifaceName == "" {
+		return c.podIpAddress, nil
+	}
+	return FindMigrationIP(c.podIpAddress, ifaceName)
 }
 
 func domainIsActiveOnTarget(domain *api.Domain) bool {
@@ -306,18 +322,19 @@ func (c *MigrationTargetController) updateStatus(vmi *v1.VirtualMachineInstance,
 	if vmi.Status.MigrationState != nil {
 		hostAddress = vmi.Status.MigrationState.TargetNodeAddress
 	}
-	if hostAddress != c.migrationIpAddress {
+	boundAddress := c.migrationProxy.GetTargetBindAddress(vmiUID)
+	if boundAddress != "" && hostAddress != boundAddress {
 		portsList := make([]string, 0, len(destSrcPortsMap))
 
 		for k := range destSrcPortsMap {
 			portsList = append(portsList, k)
 		}
 		portsStrList := strings.Trim(strings.Join(strings.Fields(fmt.Sprint(portsList)), ","), "[]")
-		c.recorder.Event(vmi, k8sv1.EventTypeNormal, v1.PreparingTarget.String(), fmt.Sprintf("Migration Target is listening at %s, on ports: %s", c.migrationIpAddress, portsStrList))
-		vmi.Status.MigrationState.TargetNodeAddress = c.migrationIpAddress
+		c.recorder.Event(vmi, k8sv1.EventTypeNormal, v1.PreparingTarget.String(), fmt.Sprintf("Migration Target is listening at %s, on ports: %s", boundAddress, portsStrList))
+		vmi.Status.MigrationState.TargetNodeAddress = boundAddress
 		vmi.Status.MigrationState.TargetDirectMigrationNodePorts = destSrcPortsMap
 		if vmi.Status.MigrationState.TargetState != nil {
-			vmi.Status.MigrationState.TargetState.NodeAddress = pointer.P(c.migrationIpAddress)
+			vmi.Status.MigrationState.TargetState.NodeAddress = pointer.P(boundAddress)
 			vmi.Status.MigrationState.TargetState.DirectMigrationNodePorts = destSrcPortsMap
 		}
 	}
@@ -541,6 +558,10 @@ func (c *MigrationTargetController) execute(key string) error {
 		}
 		c.netStat.Teardown(vmi)
 		c.launcherClients.CloseLauncherClient(vmi)
+		c.migrationProxy.StopTargetListener(string(vmi.UID))
+		if c.conntrackSync != nil {
+			c.conntrackSync.Cleanup(vmi.UID)
+		}
 		return nil
 	}
 
@@ -632,7 +653,11 @@ func (c *MigrationTargetController) handleTargetMigrationProxy(vmi *v1.VirtualMa
 	if err != nil {
 		return err
 	}
-	err = c.migrationProxy.StartTargetListener(vmiUID, migrationTargetSockets)
+	bindAddress, err := c.resolveMigrationIP()
+	if err != nil {
+		return fmt.Errorf("resolve migration IP for vmi %s: %w", vmiUID, err)
+	}
+	err = c.migrationProxy.StartTargetListener(vmiUID, migrationTargetSockets, bindAddress)
 	if err != nil {
 		return err
 	}
@@ -892,6 +917,24 @@ func (c *MigrationTargetController) addFunc(obj interface{}) {
 }
 
 func (c *MigrationTargetController) deleteFunc(obj interface{}) {
+	// The informer is filtered by the migration target node label, so a delete event
+	// fires when the VMI is deleted or when the label is removed after the migration
+	// finishes or aborts. Either way the key may never be processed with the VMI
+	// still in the cache, so this is the last chance to release the migration
+	// proxies and return their ports to the node-local pool.
+	vmi, ok := obj.(*v1.VirtualMachineInstance)
+	if !ok {
+		if tombstone, isTombstone := obj.(cache.DeletedFinalStateUnknown); isTombstone {
+			vmi, _ = tombstone.Obj.(*v1.VirtualMachineInstance)
+		}
+	}
+	if vmi != nil {
+		c.migrationProxy.StopTargetListener(string(vmi.UID))
+		if c.conntrackSync != nil {
+			c.conntrackSync.Cleanup(vmi.UID)
+		}
+	}
+
 	key, err := controller.KeyFunc(obj)
 	if err == nil {
 		c.queue.Add(key)
