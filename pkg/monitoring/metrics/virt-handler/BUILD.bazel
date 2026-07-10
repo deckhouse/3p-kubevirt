@@ -13,6 +13,7 @@ go_library(
         "//pkg/monitoring/metrics/common/client:go_default_library",
         "//pkg/monitoring/metrics/common/kube-api-rewriter:go_default_library",
         "//pkg/monitoring/metrics/common/workqueue:go_default_library",
+        "//pkg/monitoring/metrics/virt-handler/conntrackstats:go_default_library",
         "//pkg/monitoring/metrics/virt-handler/domainstats:go_default_library",
         "//pkg/monitoring/metrics/virt-handler/migrationdomainstats:go_default_library",
         "//staging/src/kubevirt.io/client-go/version:go_default_library",
