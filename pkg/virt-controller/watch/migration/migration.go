@@ -102,6 +102,12 @@ const defaultCatchAllPendingTimeoutSeconds = int64(60 * 15)
 const pendingPriority = -100
 const activePriority = 100
 
+// migrationConcurrencyLimitReached is set on a pending migration whose target
+// pod cannot be scheduled yet because a cluster-wide or per-node migration
+// concurrency limit is currently taken. It makes the reason observable instead
+// of leaving the migration silently pending.
+const migrationConcurrencyLimitReached virtv1.VirtualMachineInstanceMigrationConditionType = "MigrationConcurrencyLimitReached"
+
 var migrationBackoffError = errors.New(controller.MigrationBackoffReason)
 
 type Controller struct {
@@ -710,6 +716,7 @@ func (c *Controller) processMigrationPhase(
 				migrationCopy.Status.Phase = virtv1.MigrationScheduling
 			}
 		}
+		c.reconcileConcurrencyLimitCondition(conditionManager, migrationCopy, pod != nil, vmi)
 	case virtv1.MigrationWaitingForSync:
 		if vmi.IsMigrationSourceSynchronized() {
 			migrationCopy.Status.Phase = virtv1.MigrationPending
@@ -722,6 +729,9 @@ func (c *Controller) processMigrationPhase(
 	case virtv1.MigrationScheduling:
 		if conditionManager.HasCondition(migrationCopy, virtv1.VirtualMachineInstanceMigrationRejectedByResourceQuota) {
 			conditionManager.RemoveCondition(migrationCopy, virtv1.VirtualMachineInstanceMigrationRejectedByResourceQuota)
+		}
+		if conditionManager.HasCondition(migrationCopy, migrationConcurrencyLimitReached) {
+			conditionManager.RemoveCondition(migrationCopy, migrationConcurrencyLimitReached)
 		}
 		if migration.IsDecentralizedSource() {
 			if err := c.patchMigratedVolumesForDecentralizedMigration(vmi); err != nil {
@@ -2126,6 +2136,60 @@ func (c *Controller) outboundMigrationsOnNode(node string, runningMigrations []*
 		}
 	}
 	return sum
+}
+
+// reconcileConcurrencyLimitCondition sets or clears the concurrency-limit
+// condition on a pending migration whose target pod has not been created yet,
+// so the reason it keeps waiting is observable instead of silent.
+func (c *Controller) reconcileConcurrencyLimitCondition(cm *controller.VirtualMachineInstanceMigrationConditionManager, migrationCopy *virtv1.VirtualMachineInstanceMigration, podExists bool, vmi *virtv1.VirtualMachineInstance) {
+	message := ""
+	if !podExists && vmi != nil {
+		message = c.concurrencyLimitMessage(vmi)
+	}
+
+	if message != "" {
+		if !cm.HasCondition(migrationCopy, migrationConcurrencyLimitReached) {
+			migrationCopy.Status.Conditions = append(migrationCopy.Status.Conditions, virtv1.VirtualMachineInstanceMigrationCondition{
+				Type:          migrationConcurrencyLimitReached,
+				Status:        k8sv1.ConditionTrue,
+				Message:       message,
+				LastProbeTime: v1.Now(),
+			})
+		}
+		return
+	}
+
+	if cm.HasCondition(migrationCopy, migrationConcurrencyLimitReached) {
+		cm.RemoveCondition(migrationCopy, migrationConcurrencyLimitReached)
+	}
+}
+
+// concurrencyLimitMessage mirrors the scheduler's cluster and per-node outbound
+// migration limit checks and returns a human-readable reason when a limit is
+// reached, or an empty string otherwise.
+func (c *Controller) concurrencyLimitMessage(vmi *virtv1.VirtualMachineInstance) string {
+	runningMigrations, err := c.findRunningMigrations()
+	if err != nil {
+		return ""
+	}
+
+	cfg := c.clusterConfig.GetMigrationConfiguration()
+	if cfg == nil {
+		return ""
+	}
+
+	if cfg.ParallelMigrationsPerCluster != nil && len(runningMigrations) >= int(*cfg.ParallelMigrationsPerCluster) {
+		return fmt.Sprintf("Waiting for a free migration slot: the cluster live migration limit is reached (%d/%d running).", len(runningMigrations), *cfg.ParallelMigrationsPerCluster)
+	}
+
+	if cfg.ParallelOutboundMigrationsPerNode != nil {
+		outbound := c.outboundMigrationsOnNode(vmi.Status.NodeName, runningMigrations)
+		if outbound >= int(*cfg.ParallelOutboundMigrationsPerNode) {
+			return fmt.Sprintf("Waiting for a free migration slot: node %q has no free outbound migration slot (%d/%d running).", vmi.Status.NodeName, outbound, *cfg.ParallelOutboundMigrationsPerNode)
+		}
+	}
+
+	return ""
 }
 
 // findRunningMigrations calculates how many migrations are running or in flight to be triggered to running
