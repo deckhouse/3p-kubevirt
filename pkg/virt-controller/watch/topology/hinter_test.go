@@ -20,14 +20,15 @@ import (
 
 var _ = Describe("Hinter", func() {
 
-	It("should return the lowes TSC frequency in the cluster", func() {
+	It("should return the lowes TSC frequency of the given nodes", func() {
 		hinter := hinterWithNodes(
 			NodeWithInvalidTSC("node0"),
 			NodeWithTSC("node0", 1234, true),
 			NodeWithTSC("node1", 123, true),
 			NodeWithTSC("node2", 12345, false),
 		)
-		g.Expect(hinter.LowestTSCFrequencyOnCluster()).To(g.BeNumerically("==", 123))
+		nodes := FilterNodesFromCache(hinter.nodeStore.List(), HasInvTSCFrequency)
+		g.Expect(hinter.lowestTSCFrequency(nodes)).To(g.BeNumerically("==", 123))
 	})
 
 	It("should pick up when a minimum TSC frequency is set in the config", func() {
@@ -37,11 +38,12 @@ var _ = Describe("Hinter", func() {
 			NodeWithTSC("node1", 123, true),
 			NodeWithTSC("node2", 12345, false),
 		)
-		g.Expect(hinter.LowestTSCFrequencyOnCluster()).To(g.BeNumerically("==", 123))
+		nodes := FilterNodesFromCache(hinter.nodeStore.List(), HasInvTSCFrequency)
+		g.Expect(hinter.lowestTSCFrequency(nodes)).To(g.BeNumerically("==", 123))
 		hinter.clusterConfig = clusterConfigWithTSCFrequency(200)
-		g.Expect(hinter.LowestTSCFrequencyOnCluster()).To(g.BeNumerically("==", 200))
+		g.Expect(hinter.lowestTSCFrequency(nodes)).To(g.BeNumerically("==", 200))
 		hinter.clusterConfig = clusterConfigWithoutTSCFrequency()
-		g.Expect(hinter.LowestTSCFrequencyOnCluster()).To(g.BeNumerically("==", 123))
+		g.Expect(hinter.lowestTSCFrequency(nodes)).To(g.BeNumerically("==", 123))
 	})
 
 	It("should propose a TSC frequency for the VMI", func() {
@@ -202,7 +204,7 @@ var _ = Describe("Hinter", func() {
 				nodeWithExtraLabels(NodeWithTSC("node1", 2000, false), map[string]string{"cpu-feature.node.kubevirt.io/foo": "true"}),
 				NodeWithTSC("node2", 100, false),
 			)
-			hinter.podNodeSelectorsFor = func(vmi *virtv1.VirtualMachineInstance) map[string]string {
+			hinter.podNodeSelectorsFunc = func(vmi *virtv1.VirtualMachineInstance) map[string]string {
 				return map[string]string{"cpu-feature.node.kubevirt.io/foo": "true"}
 			}
 			vmi := vmiWithTSCFrequencyOnNode("myvmi", 12, "oldnode")

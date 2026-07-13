@@ -19,7 +19,6 @@ type Hinter interface {
 	TopologyHintsForVMI(vmi *k6tv1.VirtualMachineInstance) (hints *k6tv1.TopologyHints, requirement TscFrequencyRequirementType, err error)
 	IsTscFrequencyRequired(vmi *k6tv1.VirtualMachineInstance) bool
 	TSCFrequenciesInUse() []int64
-	LowestTSCFrequencyOnCluster() (int64, error)
 }
 
 // PodNodeSelectorsFunc returns the node selectors the virt-launcher pod of the
@@ -28,10 +27,10 @@ type Hinter interface {
 type PodNodeSelectorsFunc func(vmi *k6tv1.VirtualMachineInstance) map[string]string
 
 type topologyHinter struct {
-	clusterConfig       *virtconfig.ClusterConfig
-	nodeStore           cache.Store
-	vmiStore            cache.Store
-	podNodeSelectorsFor PodNodeSelectorsFunc
+	clusterConfig        *virtconfig.ClusterConfig
+	nodeStore            cache.Store
+	vmiStore             cache.Store
+	podNodeSelectorsFunc PodNodeSelectorsFunc
 }
 
 func (t *topologyHinter) IsTscFrequencyRequired(vmi *k6tv1.VirtualMachineInstance) bool {
@@ -69,8 +68,8 @@ func (t *topologyHinter) TopologyHintsForVMI(vmi *k6tv1.VirtualMachineInstance) 
 // selectors of the future virt-launcher pod and the required node affinity.
 func (t *topologyHinter) candidateNodesForVMI(vmi *k6tv1.VirtualMachineInstance) []*v1.Node {
 	nodeSelectors := vmi.Spec.NodeSelector
-	if t.podNodeSelectorsFor != nil {
-		nodeSelectors = t.podNodeSelectorsFor(vmi)
+	if t.podNodeSelectorsFunc != nil {
+		nodeSelectors = t.podNodeSelectorsFunc(vmi)
 	}
 
 	return FilterNodesFromCache(t.nodeStore.List(),
@@ -140,17 +139,6 @@ func pickStableBaselineTSCFrequency(clusterMin int64, frequenciesInUse []int64, 
 	return clusterMin
 }
 
-func (t *topologyHinter) LowestTSCFrequencyOnCluster() (int64, error) {
-	nodes := FilterNodesFromCache(t.nodeStore.List(),
-		HasInvTSCFrequency,
-		Or(
-			IsSchedulable,
-			IsNodeRunningVmis(t.vmiStore),
-		),
-	)
-	return t.lowestTSCFrequency(nodes)
-}
-
 func (t *topologyHinter) TSCFrequenciesInUse() []int64 {
 	frequencyMap := map[int64]struct{}{}
 	for _, obj := range t.vmiStore.List() {
@@ -166,6 +154,6 @@ func (t *topologyHinter) TSCFrequenciesInUse() []int64 {
 	return frequencies
 }
 
-func NewTopologyHinter(nodeStore cache.Store, vmiStore cache.Store, clusterConfig *virtconfig.ClusterConfig, podNodeSelectorsFor PodNodeSelectorsFunc) *topologyHinter {
-	return &topologyHinter{nodeStore: nodeStore, vmiStore: vmiStore, clusterConfig: clusterConfig, podNodeSelectorsFor: podNodeSelectorsFor}
+func NewTopologyHinter(nodeStore cache.Store, vmiStore cache.Store, clusterConfig *virtconfig.ClusterConfig, podNodeSelectorsFunc PodNodeSelectorsFunc) *topologyHinter {
+	return &topologyHinter{nodeStore: nodeStore, vmiStore: vmiStore, clusterConfig: clusterConfig, podNodeSelectorsFunc: podNodeSelectorsFunc}
 }
