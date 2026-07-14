@@ -2,7 +2,6 @@ package topology
 
 import (
 	"context"
-	"fmt"
 
 	. "github.com/onsi/ginkgo/v2"
 	g "github.com/onsi/gomega"
@@ -37,11 +36,10 @@ var _ = Describe("Nodetopologyupdater", func() {
 	Context("with no VMs with TSC frequency set running", func() {
 
 		BeforeEach(func() {
-			hinter.EXPECT().LowestTSCFrequencyOnCluster().Return(int64(100), nil)
 			hinter.EXPECT().TSCFrequenciesInUse().Return(nil)
 		})
 
-		It("should add the lowest scheduling frequency to a node", func() {
+		It("should add the node's own frequency to a node", func() {
 			nodes := []*v1.Node{NodeWithTSC("mynode", 123, true)}
 			trackNodes(kubeClient, nodes...)
 			stats := topologyUpdater.sync(nodes)
@@ -49,13 +47,12 @@ var _ = Describe("Nodetopologyupdater", func() {
 			node, err := kubeClient.CoreV1().Nodes().Get(context.Background(), "mynode", metav1.GetOptions{})
 			g.Expect(err).ToNot(g.HaveOccurred())
 			g.Expect(node.Labels).To(g.HaveKeyWithValue(ToTSCSchedulableLabel(123), "true"))
-			g.Expect(node.Labels).To(g.HaveKeyWithValue(ToTSCSchedulableLabel(100), "true"))
 		})
 
 		It("should continue if it encounters invalid nodes", func() {
 			nodes := []*v1.Node{
 				NodeWithTSC("mynode1", 123, true),
-				NodeWithTSC("syncednode", 123, true, 123, 100),
+				NodeWithTSC("syncednode", 123, true, 123),
 				NodeWithInvalidTSC("invalid"),
 				NodeWithTSC("mynode2", 123, true),
 			}
@@ -64,19 +61,8 @@ var _ = Describe("Nodetopologyupdater", func() {
 			expectUpdates(stats, 1, 1, 2)
 		})
 
-		It("should only add the nodes own frequency if the node is not schedulable", func() {
-			nodes := []*v1.Node{NodeWithTSC("mynode", 123, false)}
-			trackNodes(kubeClient, nodes...)
-			stats := topologyUpdater.sync(nodes)
-			expectUpdates(stats, 0, 0, 1)
-			node, err := kubeClient.CoreV1().Nodes().Get(context.Background(), "mynode", metav1.GetOptions{})
-			g.Expect(err).ToNot(g.HaveOccurred())
-			g.Expect(node.Labels).To(g.HaveKeyWithValue(ToTSCSchedulableLabel(123), "true"))
-			g.Expect(node.Labels).ToNot(g.HaveKeyWithValue(ToTSCSchedulableLabel(100), "true"))
-		})
-
 		It("should do nothing if all frequencies are already present", func() {
-			nodes := []*v1.Node{NodeWithTSC("mynode", 123, true, 100, 123)}
+			nodes := []*v1.Node{NodeWithTSC("mynode", 123, true, 123)}
 			stats := topologyUpdater.sync(nodes)
 			expectUpdates(stats, 0, 1, 0)
 		})
@@ -89,7 +75,6 @@ var _ = Describe("Nodetopologyupdater", func() {
 			node, err := kubeClient.CoreV1().Nodes().Get(context.Background(), "mynode", metav1.GetOptions{})
 			g.Expect(err).ToNot(g.HaveOccurred())
 			g.Expect(node.Labels).To(g.HaveKeyWithValue(ToTSCSchedulableLabel(123), "true"))
-			g.Expect(node.Labels).To(g.HaveKeyWithValue(ToTSCSchedulableLabel(100), "true"))
 			g.Expect(node.Labels).ToNot(g.HaveKeyWithValue(ToTSCSchedulableLabel(99), "true"))
 			g.Expect(node.Labels).ToNot(g.HaveKeyWithValue(ToTSCSchedulableLabel(200), "true"))
 		})
@@ -98,12 +83,11 @@ var _ = Describe("Nodetopologyupdater", func() {
 
 	Context("with repeated labels", func() {
 		BeforeEach(func() {
-			hinter.EXPECT().LowestTSCFrequencyOnCluster().Return(int64(100), nil)
 			hinter.EXPECT().TSCFrequenciesInUse().Return([]int64{80, 80, 80, 60})
 		})
 
 		It("should do nothing if all frequencies are already present", func() {
-			nodes := []*v1.Node{NodeWithTSC("mynode", 123, true, 100, 123, 80, 60)}
+			nodes := []*v1.Node{NodeWithTSC("mynode", 123, true, 123, 80, 60)}
 			stats := topologyUpdater.sync(nodes)
 			expectUpdates(stats, 0, 1, 0)
 		})
@@ -111,11 +95,10 @@ var _ = Describe("Nodetopologyupdater", func() {
 
 	Context("with VMs with TSC frequency running", func() {
 		BeforeEach(func() {
-			hinter.EXPECT().LowestTSCFrequencyOnCluster().Return(int64(100), nil)
 			hinter.EXPECT().TSCFrequenciesInUse().Return([]int64{99, 101})
 		})
 
-		It("should keep old cluster minimums if still used by VMs", func() {
+		It("should keep frequencies still used by VMs", func() {
 			nodes := []*v1.Node{NodeWithTSC("mynode", 123, true, 98, 99, 101, 200, 123)}
 			trackNodes(kubeClient, nodes...)
 			stats := topologyUpdater.sync(nodes)
@@ -123,24 +106,10 @@ var _ = Describe("Nodetopologyupdater", func() {
 			node, err := kubeClient.CoreV1().Nodes().Get(context.Background(), "mynode", metav1.GetOptions{})
 			g.Expect(err).ToNot(g.HaveOccurred())
 			g.Expect(node.Labels).To(g.HaveKeyWithValue(ToTSCSchedulableLabel(123), "true"))
-			g.Expect(node.Labels).To(g.HaveKeyWithValue(ToTSCSchedulableLabel(100), "true"))
 			g.Expect(node.Labels).ToNot(g.HaveKeyWithValue(ToTSCSchedulableLabel(98), "true"))
 			g.Expect(node.Labels).To(g.HaveKeyWithValue(ToTSCSchedulableLabel(99), "true"))
 			g.Expect(node.Labels).To(g.HaveKeyWithValue(ToTSCSchedulableLabel(101), "true"))
 			g.Expect(node.Labels).ToNot(g.HaveKeyWithValue(ToTSCSchedulableLabel(200), "true"))
-		})
-	})
-
-	Context("if not minimum TSC frequency can be determined", func() {
-		BeforeEach(func() {
-			hinter.EXPECT().LowestTSCFrequencyOnCluster().Return(int64(100), fmt.Errorf("no node with a frequency"))
-		})
-
-		It("should do nothing", func() {
-			nodes := []*v1.Node{NodeWithTSC("mynode", 123, true, 98, 99, 101, 200, 123)}
-			trackNodes(kubeClient, nodes...)
-			stats := topologyUpdater.sync(nodes)
-			expectUpdates(stats, 0, len(nodes), 0)
 		})
 	})
 })

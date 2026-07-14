@@ -253,7 +253,7 @@ var _ = Describe("VirtualMachineInstance watcher", func() {
 			cdiInformer,
 			cdiConfigInformer,
 			config,
-			topology.NewTopologyHinter(&cache.FakeCustomStore{}, &cache.FakeCustomStore{}, config),
+			topology.NewTopologyHinter(&cache.FakeCustomStore{}, &cache.FakeCustomStore{}, config, nil),
 			stubNetworkAnnotationsGenerator{},
 			stubNetStatusUpdate,
 			validateNetVMISpecStub(),
