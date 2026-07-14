@@ -3488,16 +3488,27 @@ func (c *Controller) sync(vm *virtv1.VirtualMachine, vmi *virtv1.VirtualMachineI
 			return vm, vmi, common.NewSyncError(fmt.Errorf("Error encountered while handling CPU change request: %v", err), hotplugCPUErrorReason), nil
 		}
 
-		if err := c.handleAffinityChangeRequest(vmCopy, vmi); err != nil {
-			return vm, vmi, common.NewSyncError(fmt.Errorf("Error encountered while handling node affinity change request: %v", err), affinityChangeErrorReason), nil
-		}
-
 		if err := c.handleTolerationsChangeRequest(vmCopy, vmi); err != nil {
 			return vm, vmi, common.NewSyncError(fmt.Errorf("Error encountered while handling tolerations change request: %v", err), tolerationsChangeErrorReason), nil
 		}
 
 		if err := c.handleMemoryHotplugRequest(vmCopy, vmi); err != nil {
 			return vm, vmi, common.NewSyncError(fmt.Errorf("error encountered while handling memory hotplug requests: %v", err), hotplugMemoryErrorReason), nil
+		}
+	}
+
+	// Volume migration must proceed independently of a pending restart. Migrating
+	// volumes (e.g. evacuating local storage off a drained node) is orthogonal to
+	// the non-live-updatable changes that wait for a restart, so it must not be
+	// gated behind the RestartRequired condition. Node affinity is handled here too:
+	// migrating a local volume to another node requires the target affinity to be
+	// applied to the VMI, otherwise the migration target pod is pinned to the source
+	// node and cannot be scheduled. Affinity is applied before the volume update so
+	// it is in place before the migration starts. A replacement volume update still
+	// only sets RestartRequired and is a no-op once that condition is present.
+	if c.clusterConfig.IsVMRolloutStrategyLiveUpdate() {
+		if err := c.handleAffinityChangeRequest(vmCopy, vmi); err != nil {
+			return vm, vmi, common.NewSyncError(fmt.Errorf("Error encountered while handling node affinity change request: %v", err), affinityChangeErrorReason), nil
 		}
 
 		if err := c.handleVolumeUpdateRequest(vmCopy, vmi); err != nil {
