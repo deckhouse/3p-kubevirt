@@ -54,21 +54,6 @@ func (mr *MockHinterMockRecorder) IsTscFrequencyRequired(vmi any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IsTscFrequencyRequired", reflect.TypeOf((*MockHinter)(nil).IsTscFrequencyRequired), vmi)
 }
 
-// LowestTSCFrequencyOnCluster mocks base method.
-func (m *MockHinter) LowestTSCFrequencyOnCluster() (int64, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "LowestTSCFrequencyOnCluster")
-	ret0, _ := ret[0].(int64)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// LowestTSCFrequencyOnCluster indicates an expected call of LowestTSCFrequencyOnCluster.
-func (mr *MockHinterMockRecorder) LowestTSCFrequencyOnCluster() *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LowestTSCFrequencyOnCluster", reflect.TypeOf((*MockHinter)(nil).LowestTSCFrequencyOnCluster))
-}
-
 // TSCFrequenciesInUse mocks base method.
 func (m *MockHinter) TSCFrequenciesInUse() []int64 {
 	m.ctrl.T.Helper()

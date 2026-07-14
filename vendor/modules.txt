@@ -666,10 +666,6 @@ golang.org/x/exp/typeparams
 # golang.org/x/mod v0.35.0
 ## explicit; go 1.25.0
 golang.org/x/mod/semver
-# golang.org/x/net v0.49.0 => golang.org/x/net v0.55.0
-## explicit; go 1.25.0
-# golang.org/x/net v0.53.0 => golang.org/x/net v0.55.0
-## explicit; go 1.25.0
 # golang.org/x/net v0.54.0 => golang.org/x/net v0.55.0
 ## explicit; go 1.25.0
 golang.org/x/net/bpf
@@ -711,8 +707,6 @@ golang.org/x/sys/windows
 # golang.org/x/term v0.43.0
 ## explicit; go 1.25.0
 golang.org/x/term
-# golang.org/x/text v0.33.0
-## explicit; go 1.25.0
 # golang.org/x/text v0.37.0
 ## explicit; go 1.25.0
 golang.org/x/text/encoding
@@ -1402,6 +1396,9 @@ k8s.io/client-go/util/jsonpath
 k8s.io/client-go/util/keyutil
 k8s.io/client-go/util/retry
 k8s.io/client-go/util/workqueue
+# k8s.io/component-helpers v0.34.2
+## explicit; go 1.24.0
+k8s.io/component-helpers/scheduling/corev1/nodeaffinity
 # k8s.io/klog/v2 v2.140.0
 ## explicit; go 1.21
 k8s.io/klog/v2
@@ -1455,9 +1452,9 @@ k8s.io/utils/pointer
 k8s.io/utils/ptr
 k8s.io/utils/trace
 # kubevirt.io/api v0.0.0-00010101000000-000000000000 => ./staging/src/kubevirt.io/api
-## explicit; go 1.24.0
+## explicit; go 1.25.0
 # kubevirt.io/api v1.8.0 => ./staging/src/kubevirt.io/api
-## explicit; go 1.24.0
+## explicit; go 1.25.0
 # kubevirt.io/client-go v0.0.0-00010101000000-000000000000 => ./staging/src/kubevirt.io/client-go
 ## explicit; go 1.25.0
 # kubevirt.io/containerized-data-importer-api v1.64.0

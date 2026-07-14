@@ -3,7 +3,6 @@ package topology
 //go:generate mockgen -source $GOFILE -package=$GOPACKAGE -destination=generated_mock_$GOFILE
 
 import (
-	"fmt"
 	"time"
 
 	nodeutils "kubevirt.io/kubevirt/pkg/util/nodes"
@@ -48,14 +47,10 @@ func (n *nodeTopologyUpdater) Run(interval time.Duration, stopChan <-chan struct
 }
 
 func (n *nodeTopologyUpdater) sync(nodes []*v1.Node) *updateStats {
-	requiredFrequencies, err := n.requiredFrequencies()
-	if err != nil {
-		log.DefaultLogger().Reason(err).Error("Skipping TSC frequency updates on all nodes")
-		return &updateStats{skipped: len(nodes)}
-	}
+	frequenciesInUse := n.hinter.TSCFrequenciesInUse()
 	stats := &updateStats{}
 	for _, node := range nodes {
-		nodeCopy, err := calculateNodeLabelChanges(node, requiredFrequencies, nodes)
+		nodeCopy, err := calculateNodeLabelChanges(node, frequenciesInUse, nodes)
 		if err != nil {
 			stats.error++
 			log.DefaultLogger().Object(node).Reason(err).Error("Could not calculate TSC frequencies for node")
@@ -75,7 +70,7 @@ func (n *nodeTopologyUpdater) sync(nodes []*v1.Node) *updateStats {
 	return stats
 }
 
-func calculateNodeLabelChanges(original *v1.Node, requiredFrequencies []int64, nodes []*v1.Node) (modified *v1.Node, err error) {
+func calculateNodeLabelChanges(original *v1.Node, frequenciesInUse []int64, nodes []*v1.Node) (modified *v1.Node, err error) {
 	nodeFreq, scalable, err := TSCFrequencyFromNode(original)
 	if err != nil {
 		log.DefaultLogger().Reason(err).Object(original).Errorf("Can't determine original TSC frequency of node %s", original.Name)
@@ -83,7 +78,7 @@ func calculateNodeLabelChanges(original *v1.Node, requiredFrequencies []int64, n
 	}
 	freqsOnNode := TSCFrequenciesOnNode(original)
 	freqsFromNodes := TSCFrequenciesFromNodes(nodes)
-	toAdd, toRemove := CalculateTSCLabelDiff(requiredFrequencies, freqsOnNode, freqsFromNodes, nodeFreq, scalable)
+	toAdd, toRemove := CalculateTSCLabelDiff(frequenciesInUse, freqsOnNode, freqsFromNodes, nodeFreq, scalable)
 	toAddLabels := ToTSCSchedulableLabels(toAdd)
 	toRemoveLabels := ToTSCSchedulableLabels(toRemove)
 
@@ -95,14 +90,6 @@ func calculateNodeLabelChanges(original *v1.Node, requiredFrequencies []int64, n
 		delete(nodeCopy.Labels, freq)
 	}
 	return nodeCopy, nil
-}
-
-func (n nodeTopologyUpdater) requiredFrequencies() ([]int64, error) {
-	lowestFrequency, err := n.hinter.LowestTSCFrequencyOnCluster()
-	if err != nil {
-		return nil, fmt.Errorf("failed to calculate lowest TSC frequency for nodes: %v", err)
-	}
-	return append(n.hinter.TSCFrequenciesInUse(), lowestFrequency), nil
 }
 
 func NewNodeTopologyUpdater(clientset kubecli.KubevirtClient, hinter Hinter, nodeInformer cache.SharedIndexInformer) NodeTopologyUpdater {
