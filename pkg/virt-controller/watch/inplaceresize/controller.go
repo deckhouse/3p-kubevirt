@@ -372,6 +372,12 @@ func (c *Controller) syncPodResourceResizeCondition(ctx context.Context, vmi *v1
 			}
 		}
 
+		// After a successful pod resize, but before persisting the condition patch, bring the pod's
+		// coreFraction annotation in sync with the VMI so requireCPUHotplug stops re-adding VCPUChange.
+		if err := c.syncPodCoreFraction(ctx, vmi, pod); err != nil {
+			return vmi, fmt.Errorf("failed to patch pod with coreFraction: %v", err)
+		}
+
 	case podResizePending:
 		c.vmiConditions.UpdateCondition(vmi, &v1.VirtualMachineInstanceCondition{
 			Type:    v1.VirtualMachineInstancePodResourceResizeInProgress,
@@ -424,7 +430,51 @@ func (c *Controller) syncPodResourceResizeCondition(ctx context.Context, vmi *v1
 	if err != nil {
 		return vmi, fmt.Errorf("failed to patch vmi conditions: %v", err)
 	}
+
 	return newVmi, nil
+}
+
+func (c *Controller) syncPodCoreFraction(ctx context.Context, vmi *v1.VirtualMachineInstance, pod *k8sv1.Pod) error {
+	vmiAnn, vmiOk := vmi.GetAnnotations()[v1.CPUResourcesRequestsFraction]
+	podAnn, podOk := pod.GetAnnotations()[v1.CPUResourcesRequestsFraction]
+
+	if vmiAnn == podAnn && vmiOk == podOk {
+		return nil
+	}
+
+	pathEscaped := fmt.Sprintf("/metadata/annotations/%s", patch.EscapeJSONPointer(v1.CPUResourcesRequestsFraction))
+
+	var patchSet *patch.PatchSet
+	switch {
+	case !vmiOk:
+		// Fraction was removed from the VMI: drop the stale annotation from the pod.
+		patchSet = patch.New(
+			patch.WithTest(pathEscaped, podAnn),
+			patch.WithRemove(pathEscaped),
+		)
+	case podOk:
+		// Fraction changed: replace the stale value on the pod.
+		patchSet = patch.New(
+			patch.WithTest(pathEscaped, podAnn),
+			patch.WithReplace(pathEscaped, vmiAnn),
+		)
+	default:
+		// Fraction appeared on the VMI but is absent on the pod: add it.
+		patchSet = patch.New(
+			patch.WithAdd(pathEscaped, vmiAnn),
+		)
+	}
+
+	patchBytes, err := patchSet.GeneratePayload()
+	if err != nil {
+		return fmt.Errorf("failed to generate patch payload: %w", err)
+	}
+
+	if _, err = c.clientset.CoreV1().Pods(pod.Namespace).Patch(ctx, pod.Name, types.JSONPatchType, patchBytes, metav1.PatchOptions{}); err != nil {
+		return fmt.Errorf("failed to sync coreFraction annotation to pod: %w", err)
+	}
+
+	return nil
 }
 
 func isDynamicCoresHotplug(vmi *v1.VirtualMachineInstance) bool {
