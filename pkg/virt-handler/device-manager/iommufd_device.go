@@ -332,7 +332,7 @@ func (dpi *IOMMUFDDevicePlugin) healthCheck() error {
 		case err := <-watcher.Errors:
 			logger.Reason(err).Errorf("error watching devices and device plugin directory")
 		case event := <-watcher.Events:
-			logger.V(4).Infof("health Event: %v", event)
+			logger.V(6).Infof("health Event: %v", event)
 			if event.Name == devicePath {
 				if event.Op == fsnotify.Create {
 					logger.Infof("/dev/iommu appeared")
