@@ -266,7 +266,7 @@ func (plugin *USBDevicePlugin) healthCheck() error {
 		case err := <-watcher.Errors:
 			plugin.logger.Reason(err).Errorf("error watching devices and device plugin directory")
 		case event := <-watcher.Events:
-			plugin.logger.V(2).Infof("health Event: %v", event)
+			plugin.logger.V(6).Infof("health Event: %v", event)
 			if id, exist := monitoredDevices[event.Name]; exist {
 				// Health in this case is if the device path actually exists
 				if event.Op == fsnotify.Create {
