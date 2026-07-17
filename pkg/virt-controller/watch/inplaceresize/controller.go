@@ -219,6 +219,10 @@ func (c *Controller) execute(ctx context.Context, key string) error {
 		c.logger.Reason(err).Error("Failed to fetch pods for namespace from cache.")
 		return err
 	}
+	if pod == nil {
+		c.logger.V(6).Infof("Skipping in-place resize for VMI %s/%s as there is no pod associated with it", vmi.Namespace, vmi.Name)
+		return nil
+	}
 
 	err = c.sync(ctx, vmi, pod)
 	if err != nil {
