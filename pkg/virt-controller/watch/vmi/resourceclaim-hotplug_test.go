@@ -27,3 +27,28 @@ var _ = Describe("ResourceClaim hotplug matching", func() {
 		Expect(podResourceClaimsMatchesReadyResourceClaims(pod, readyClaims)).To(BeTrue())
 	})
 })
+
+var _ = Describe("Hotplug attachment SELinux gate", func() {
+	It("defers creation while the VMI SELinux context is empty", func() {
+		vmi := &v1.VirtualMachineInstance{}
+		Expect(selinuxContextResolved(vmi)).To(BeFalse())
+	})
+
+	It("allows creation once the VMI SELinux context is populated", func() {
+		vmi := &v1.VirtualMachineInstance{}
+		vmi.Status.SelinuxContext = "test_u:test_r:test_t:s0"
+		Expect(selinuxContextResolved(vmi)).To(BeTrue())
+	})
+
+	It("allows creation from the migration source context when the VMI context is empty", func() {
+		vmi := &v1.VirtualMachineInstance{}
+		vmi.Status.MigrationState = &v1.VirtualMachineInstanceMigrationState{
+			SourceState: &v1.VirtualMachineInstanceMigrationSourceState{
+				VirtualMachineInstanceCommonMigrationState: v1.VirtualMachineInstanceCommonMigrationState{
+					SelinuxContext: "test_u:test_r:test_t:s0",
+				},
+			},
+		}
+		Expect(selinuxContextResolved(vmi)).To(BeTrue())
+	})
+})

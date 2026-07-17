@@ -4223,6 +4223,34 @@ var _ = Describe("Template", func() {
 			Expect(pod.Spec.Tolerations).To(BeEquivalentTo(addUnschedulableToleration(vmi.Spec.Tolerations)))
 		})
 
+		It("should fail to render a hotplug attachment pod while the VMI SELinux context is not yet populated", func() {
+			vmi := api.NewMinimalVMI("fake-vmi")
+			ownerPod, err := svc.RenderLaunchManifest(vmi)
+			Expect(err).ToNot(HaveOccurred())
+
+			claimMap := map[string]*k8sv1.PersistentVolumeClaim{}
+			_, err = svc.RenderHotplugAttachmentPodTemplate([]*v1.Volume{}, nil, ownerPod, vmi, claimMap)
+			Expect(err).To(MatchError(ContainSubstring("VMI is missing SELinux context")))
+		})
+
+		It("should render a hotplug attachment pod from the migration source SELinux context when the VMI context is empty", func() {
+			vmi := api.NewMinimalVMI("fake-vmi")
+			ownerPod, err := svc.RenderLaunchManifest(vmi)
+			Expect(err).ToNot(HaveOccurred())
+
+			vmi.Status.MigrationState = &v1.VirtualMachineInstanceMigrationState{
+				SourceState: &v1.VirtualMachineInstanceMigrationSourceState{
+					VirtualMachineInstanceCommonMigrationState: v1.VirtualMachineInstanceCommonMigrationState{
+						SelinuxContext: "test_u:test_r:test_t:s0",
+					},
+				},
+			}
+			claimMap := map[string]*k8sv1.PersistentVolumeClaim{}
+			pod, err := svc.RenderHotplugAttachmentPodTemplate([]*v1.Volume{}, nil, ownerPod, vmi, claimMap)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(pod.Spec.Containers[0].SecurityContext.SELinuxOptions.Level).To(Equal("s0"))
+		})
+
 		It("should compute the correct tolerations when rendering hotplug attachment trigger pods", func() {
 			vmi := api.NewMinimalVMI("fake-vmi")
 			vmi.Spec.Tolerations = append(vmi.Spec.Tolerations, k8sv1.Toleration{Key: "test"})
