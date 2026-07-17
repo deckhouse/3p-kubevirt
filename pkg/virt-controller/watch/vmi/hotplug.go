@@ -39,7 +39,7 @@ func (c *Controller) handleHotplugs(hotplugVolumes []*v1.Volume, hotplugResource
 		return podVolumesMatchesReadyVolumes(attachmentPod, readyHotplugVolumes) && podResourceClaimsMatchesReadyResourceClaims(attachmentPod, readyResourceClaims)
 	})
 
-	if currentPod == nil && !hasPendingPods(oldPods) && (len(readyHotplugVolumes) > 0 || len(readyResourceClaims) > 0) {
+	if currentPod == nil && !hasPendingPods(oldPods) && (len(readyHotplugVolumes) > 0 || len(readyResourceClaims) > 0) && selinuxContextResolved(vmi) {
 		// The threshold defines how long we should delay requeueing based on the number
 		// of ready hotplug volumes and resource claims.
 		//
@@ -80,6 +80,23 @@ func (c *Controller) handleHotplugs(hotplugVolumes []*v1.Volume, hotplugResource
 	}
 
 	return nil
+}
+
+// selinuxContextResolved reports whether the VMI carries the SELinux context an
+// attachment pod template needs to match the launcher's MCS level. virt-handler
+// only populates Status.SelinuxContext once the domain exists, so between the
+// launcher pod becoming Ready and the VMI reaching Running the context is empty.
+// Rendering an attachment pod in that window fails with "VMI is missing SELinux
+// context", surfaced as a transient FailedCreate that self-resolves. Deferring
+// creation until the context (or its migration-source fallback) is set avoids
+// that spurious error; populating Status.SelinuxContext re-triggers reconcile.
+// Keep this in sync with matchSELinuxLevelOfVMI in the services package.
+func selinuxContextResolved(vmi *v1.VirtualMachineInstance) bool {
+	if vmi.Status.SelinuxContext != "" {
+		return true
+	}
+	migrationState := vmi.Status.MigrationState
+	return migrationState != nil && migrationState.SourceState != nil && migrationState.SourceState.SelinuxContext != ""
 }
 
 // cleanupAttachmentPods deletes all old attachment pods when the following is true
