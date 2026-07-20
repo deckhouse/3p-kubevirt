@@ -25,6 +25,7 @@ go_library(
         "//vendor/golang.org/x/sys/unix:go_default_library",
         "//vendor/google.golang.org/grpc:go_default_library",
         "//vendor/google.golang.org/grpc/codes:go_default_library",
+        "//vendor/google.golang.org/grpc/metadata:go_default_library",
         "//vendor/google.golang.org/grpc/status:go_default_library",
         "//vendor/k8s.io/apimachinery/pkg/api/resource:go_default_library",
         "//vendor/k8s.io/apimachinery/pkg/util/json:go_default_library",
