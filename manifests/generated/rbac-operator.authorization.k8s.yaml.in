@@ -450,15 +450,6 @@ rules:
   - list
   - watch
 - apiGroups:
-  - cdi.kubevirt.io
-  resources:
-  - datasources
-  - datavolumes
-  verbs:
-  - get
-  - list
-  - watch
-- apiGroups:
   - ""
   resources:
   - namespaces
@@ -691,12 +682,6 @@ rules:
   - virtualmachineinstances/sev/injectlaunchsecret
   verbs:
   - update
-- apiGroups:
-  - cdi.kubevirt.io
-  resources:
-  - '*'
-  verbs:
-  - '*'
 - apiGroups:
   - k8s.cni.cncf.io
   resources:

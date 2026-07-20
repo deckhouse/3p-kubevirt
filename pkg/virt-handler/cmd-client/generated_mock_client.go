@@ -416,6 +416,12 @@ func (m *MockLauncherClient) Ping() error {
 	return ret0
 }
 
+// Ping indicates an expected call of Ping.
+func (mr *MockLauncherClientMockRecorder) Ping() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Ping", reflect.TypeOf((*MockLauncherClient)(nil).Ping))
+}
+
 // PingKeepalive mocks base method.
 func (m *MockLauncherClient) PingKeepalive() error {
 	m.ctrl.T.Helper()
@@ -428,12 +434,6 @@ func (m *MockLauncherClient) PingKeepalive() error {
 func (mr *MockLauncherClientMockRecorder) PingKeepalive() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PingKeepalive", reflect.TypeOf((*MockLauncherClient)(nil).PingKeepalive))
-}
-
-// Ping indicates an expected call of Ping.
-func (mr *MockLauncherClientMockRecorder) Ping() *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Ping", reflect.TypeOf((*MockLauncherClient)(nil).Ping))
 }
 
 // ResetVirtualMachine mocks base method.
