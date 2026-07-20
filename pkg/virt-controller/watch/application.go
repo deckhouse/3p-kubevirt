@@ -653,9 +653,7 @@ func (vca *VirtControllerApp) onStartedLeading() func(ctx context.Context) {
 		if vca.isDRAEnabled {
 			go vca.draStatusController.Run(vca.draStatusControllerThreads, stop)
 		}
-		if vca.clusterConfig.InPlaceResizeEnabled() {
-			go vca.inPlaceResizeController.Run(vca.inPlaceResizeControllerThreads, ctx)
-		}
+		go vca.inPlaceResizeController.Run(vca.inPlaceResizeControllerThreads, ctx)
 		go vca.rsController.Run(vca.rsControllerThreads, stop)
 		go vca.poolController.Run(vca.poolControllerThreads, stop)
 		go vca.vmController.Run(vca.vmControllerThreads, stop)
@@ -780,17 +778,15 @@ func (vca *VirtControllerApp) initCommon() {
 		)
 	}
 
-	if vca.clusterConfig.InPlaceResizeEnabled() {
-		inPlaceResizeRecorder := vca.newRecorder(k8sv1.NamespaceAll, "in-place-resize-controller")
-		vca.inPlaceResizeController, err = inplaceresize.NewInPlaceResizeController(
-			vca.clusterConfig,
-			vca.vmiInformer,
-			vca.kvPodInformer,
-			inPlaceResizeRecorder,
-			vca.clientSet,
-			vca.templateService,
-		)
-	}
+	inPlaceResizeRecorder := vca.newRecorder(k8sv1.NamespaceAll, "in-place-resize-controller")
+	vca.inPlaceResizeController, err = inplaceresize.NewInPlaceResizeController(
+		vca.clusterConfig,
+		vca.vmiInformer,
+		vca.kvPodInformer,
+		inPlaceResizeRecorder,
+		vca.clientSet,
+		vca.templateService,
+	)
 
 	recorder := vca.newRecorder(k8sv1.NamespaceAll, "node-controller")
 	vca.nodeController, err = node.NewController(vca.clientSet, vca.nodeInformer, vca.vmiInformer, recorder)
