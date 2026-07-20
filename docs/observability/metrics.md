@@ -27,6 +27,10 @@
 | kubevirt_vm_running_status_last_transition_timestamp_seconds | Metric | Counter | Virtual Machine last transition timestamp to running status. |
 | kubevirt_vm_starting_status_last_transition_timestamp_seconds | Metric | Counter | Virtual Machine last transition timestamp to starting status. |
 | kubevirt_vm_vnic_info | Metric | Gauge | Details of Virtual Machine (VM) vNIC interfaces, such as vNIC name, binding type, network name, and binding name for each vNIC defined in the VM's configuration. |
+| kubevirt_vmi_conntrack_sync_exported_bytes_total | Metric | Counter | Total bytes sent during conntrack sync for live migrations. |
+| kubevirt_vmi_conntrack_sync_exports_total | Metric | Counter | Total conntrack sync export attempts during live migration, by result (success, skipped, error). |
+| kubevirt_vmi_conntrack_sync_hook_waits_total | Metric | Counter | Total virt-launcher hook waits for conntrack injection, by result (completed, timeout). |
+| kubevirt_vmi_conntrack_sync_imports_total | Metric | Counter | Total conntrack sync import attempts on the migration target, by result (success, aborted, error). |
 | kubevirt_vmi_cpu_system_usage_seconds_total | Metric | Counter | Total CPU time spent in system mode. |
 | kubevirt_vmi_cpu_usage_seconds_total | Metric | Counter | Total CPU time spent in all modes (sum of both vcpu and hypervisor usage). |
 | kubevirt_vmi_cpu_user_usage_seconds_total | Metric | Counter | Total CPU time spent in user mode. |
