@@ -89,7 +89,8 @@ func (c *Controller) handleHotplugs(hotplugVolumes []*v1.Volume, hotplugResource
 // pod fails with a transient "VMI is missing SELinux context" FailedCreate.
 // Deferring creation until the context (or its migration-source fallback) is
 // propagated avoids that spurious error; the status update re-triggers
-// reconcile.
+// reconcile. "none" is a valid propagated value (SELinux disabled on the
+// node), so any non-empty context counts as resolved.
 func selinuxContextResolved(vmi *v1.VirtualMachineInstance) bool {
 	if vmi.Status.SelinuxContext != "" {
 		return true
