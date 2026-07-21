@@ -157,7 +157,7 @@ func (c *Controller) Run(threadiness int, ctx context.Context) {
 	}
 
 	<-ctx.Done()
-	log.Log.Info("Stopping DRA Status controller")
+	log.Log.Info("Stopping InPlaceResize controller")
 }
 
 func (c *Controller) runWorker(ctx context.Context) {
