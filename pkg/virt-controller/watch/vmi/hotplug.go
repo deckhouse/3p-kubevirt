@@ -82,15 +82,14 @@ func (c *Controller) handleHotplugs(hotplugVolumes []*v1.Volume, hotplugResource
 	return nil
 }
 
-// selinuxContextResolved reports whether the VMI carries the SELinux context an
-// attachment pod template needs to match the launcher's MCS level. virt-handler
-// only populates Status.SelinuxContext once the domain exists, so between the
-// launcher pod becoming Ready and the VMI reaching Running the context is empty.
-// Rendering an attachment pod in that window fails with "VMI is missing SELinux
-// context", surfaced as a transient FailedCreate that self-resolves. Deferring
-// creation until the context (or its migration-source fallback) is set avoids
-// that spurious error; populating Status.SelinuxContext re-triggers reconcile.
-// Keep this in sync with matchSELinuxLevelOfVMI in the services package.
+// selinuxContextResolved reports whether virt-handler has propagated the
+// SELinux context into the VMI status. virt-handler sets Status.SelinuxContext
+// only once the domain exists, so between the launcher pod becoming Ready and
+// the VMI reaching Running the context is empty and rendering an attachment
+// pod fails with a transient "VMI is missing SELinux context" FailedCreate.
+// Deferring creation until the context (or its migration-source fallback) is
+// propagated avoids that spurious error; the status update re-triggers
+// reconcile.
 func selinuxContextResolved(vmi *v1.VirtualMachineInstance) bool {
 	if vmi.Status.SelinuxContext != "" {
 		return true
