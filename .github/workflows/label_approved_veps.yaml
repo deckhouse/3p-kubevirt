@@ -1,7 +1,7 @@
 name: Label Approved VEP PRs
+# Disabled: repository CI/automation moved to GitLab.
+# Kept for manual dispatch only; no automatic runs on pull_request_target.
 on:
-  pull_request_target:
-    types: [opened, edited, reopened, synchronize]
   workflow_dispatch:
 
 permissions:

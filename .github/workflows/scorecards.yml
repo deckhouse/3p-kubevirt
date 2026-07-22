@@ -1,14 +1,8 @@
 name: Scorecard supply-chain security
+# Disabled: repository CI/automation moved to GitLab.
+# Kept for manual dispatch only; no automatic runs on schedule/push/branch_protection_rule.
 on:
-  # For Branch-Protection check. Only the default branch is supported. See
-  # https://github.com/ossf/scorecard/blob/main/docs/checks.md#branch-protection
-  branch_protection_rule:
-  # To guarantee Maintained check is occasionally updated. See
-  # https://github.com/ossf/scorecard/blob/main/docs/checks.md#maintained
-  schedule:
-    - cron: '18 8 * * 6'
-  push:
-    branches: [ "main" ]
+  workflow_dispatch:
 
 # Declare default permissions as read only.
 permissions: read-all
