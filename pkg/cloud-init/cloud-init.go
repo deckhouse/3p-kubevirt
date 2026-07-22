@@ -499,6 +499,10 @@ func getDomainBasePath(domain string, namespace string) string {
 	return fmt.Sprintf("%s/%s/%s", cloudInitLocalDir, namespace, domain)
 }
 
+func IsGeneratedIsoPath(path string) bool {
+	return strings.HasPrefix(path, cloudInitLocalDir+"/")
+}
+
 func GetIsoFilePath(source DataSourceType, domain, namespace string) string {
 	switch source {
 	case DataSourceNoCloud:
