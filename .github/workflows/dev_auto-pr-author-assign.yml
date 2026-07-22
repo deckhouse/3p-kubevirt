@@ -15,9 +15,10 @@
 # .github/workflows/auto-author-assign.yml
 name: Auto Author Assign
 
+# Disabled: repository CI/automation moved to GitLab.
+# Kept for manual dispatch only; no automatic runs on pull_request.
 on:
-  pull_request:
-    types: [opened, reopened]
+  workflow_dispatch:
 
 permissions:
   pull-requests: write
