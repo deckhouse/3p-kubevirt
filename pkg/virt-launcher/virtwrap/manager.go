@@ -1708,6 +1708,10 @@ func (l *LibvirtDomainManager) syncDisks(
 		}
 		err = dom.DetachDeviceFlags(strings.ToLower(string(detachBytes)), affectDeviceLiveAndConfigLibvirtFlags)
 		if err != nil {
+			if isCloudInitDisk(detachDisk) {
+				logger.Reason(err).Warningf("failed to live-detach cloud-init disk %s; will be removed on next restart", detachDisk.Alias.GetName())
+				continue
+			}
 			logger.Reason(err).Error("detaching device")
 			return err
 		}
@@ -2021,6 +2025,10 @@ func checkIfDiskReadyToUseFunc(filename string) (bool, error) {
 	return true, nil
 }
 
+func isCloudInitDisk(disk api.Disk) bool {
+	return cloudinit.IsGeneratedIsoPath(disksource.Resolve(disk).SourcePath())
+}
+
 // diskKey returns a stable identity for a Disk. Prefers the user-defined alias,
 // then the hotplug source-path basename, and falls back to target.device for
 // non-hotplug disks. Target letters can shift between hotplug attachment pod
@@ -2045,10 +2053,13 @@ func getDetachedDisks(oldDisks, newDisks []api.Disk) []api.Disk {
 	res := make([]api.Disk, 0)
 	for _, oldDisk := range oldDisks {
 		ds := disksource.Resolve(oldDisk)
-		if !ds.IsHotplugDisk() {
-			continue
-		}
-		if oldDisk.Target.Bus != "" && oldDisk.Target.Bus != v1.DiskBusVirtio && oldDisk.Target.Bus != v1.DiskBusSCSI {
+		switch {
+		case ds.IsHotplugDisk():
+			if oldDisk.Target.Bus != "" && oldDisk.Target.Bus != v1.DiskBusVirtio && oldDisk.Target.Bus != v1.DiskBusSCSI {
+				continue
+			}
+		case isCloudInitDisk(oldDisk):
+		default:
 			continue
 		}
 		if _, ok := newDiskMap[diskKey(oldDisk)]; !ok {

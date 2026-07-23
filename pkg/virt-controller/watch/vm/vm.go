@@ -3058,14 +3058,66 @@ func validLiveUpdateVolumes(oldVMSpec *virtv1.VirtualMachineSpec, vm *virtv1.Vir
 			delete(oldVols, v.Name)
 		}
 	}
-	// Evaluate if any volumes were removed and they were hotplugged volumes
+	// Evaluate if any volumes were removed and they were hotplugged or cloud-init volumes
 	for _, v := range oldVols {
-		if !storagetypes.IsHotplugVolume(v) {
+		if !storagetypes.IsHotplugVolume(v) && !isCloudInitVolume(v) {
 			return false
 		}
 	}
 
 	return true
+}
+
+func isCloudInitVolume(v *virtv1.Volume) bool {
+	return v.CloudInitNoCloud != nil || v.CloudInitConfigDrive != nil
+}
+
+func (c *Controller) handleProvisioningVolumeDetach(vm *virtv1.VirtualMachine, vmi *virtv1.VirtualMachineInstance) error {
+	if vmi == nil || vmi.DeletionTimestamp != nil || !vmi.IsRunning() || migrations.IsMigrating(vmi) {
+		return nil
+	}
+
+	vmVolumes := storagetypes.GetVolumesByName(&vm.Spec.Template.Spec)
+	detached := make(map[string]struct{})
+	var detachedNames []string
+	for _, volume := range vmi.Spec.Volumes {
+		if _, inVM := vmVolumes[volume.Name]; !inVM && isCloudInitVolume(&volume) {
+			detached[volume.Name] = struct{}{}
+			detachedNames = append(detachedNames, volume.Name)
+		}
+	}
+	if len(detached) == 0 {
+		return nil
+	}
+
+	newVolumes := make([]virtv1.Volume, 0, len(vmi.Spec.Volumes)-len(detached))
+	for _, volume := range vmi.Spec.Volumes {
+		if _, ok := detached[volume.Name]; !ok {
+			newVolumes = append(newVolumes, volume)
+		}
+	}
+	newDisks := make([]virtv1.Disk, 0, len(vmi.Spec.Domain.Devices.Disks))
+	for _, disk := range vmi.Spec.Domain.Devices.Disks {
+		if _, ok := detached[disk.Name]; !ok {
+			newDisks = append(newDisks, disk)
+		}
+	}
+
+	patchSet := patch.New(
+		patch.WithTest("/spec/volumes", vmi.Spec.Volumes),
+		patch.WithTest("/spec/domain/devices/disks", vmi.Spec.Domain.Devices.Disks),
+		patch.WithReplace("/spec/volumes", newVolumes),
+		patch.WithReplace("/spec/domain/devices/disks", newDisks),
+	)
+	patchBytes, err := patchSet.GeneratePayload()
+	if err != nil {
+		return err
+	}
+	if _, err := c.clientset.VirtualMachineInstance(vmi.Namespace).Patch(context.Background(), vmi.Name, types.JSONPatchType, patchBytes, metav1.PatchOptions{}); err != nil {
+		return err
+	}
+	log.Log.Object(vm).Infof("Detaching provisioning volumes from VMI: %v", detachedNames)
+	return nil
 }
 
 func validLiveUpdateDisks(oldVMSpec *virtv1.VirtualMachineSpec, vm *virtv1.VirtualMachine) bool {
@@ -3092,16 +3144,18 @@ func validLiveUpdateDisks(oldVMSpec *virtv1.VirtualMachineSpec, vm *virtv1.Virtu
 			delete(oldDisks, newDisk.Name)
 		}
 	}
-	// Evaluate if any disks were removed and they were hotplugged volumes
+	// Evaluate if any disks were removed and they were hotplugged or cloud-init volumes
 	for _, oldDisk := range oldDisks {
 		v, ok := oldVols[oldDisk.Name]
-		if ok && !storagetypes.IsHotplugVolume(v) {
+		cloudInit := ok && isCloudInitVolume(v)
+		if ok && !storagetypes.IsHotplugVolume(v) && !cloudInit {
 			return false
 		}
 
-		// if a CDRom disk was removed from VM spec, a restart is required
+		// if a CDRom disk was removed from VM spec, a restart is required;
+		// cloud-init CD-ROMs are detached from the running VMI instead
 		_, newDiskExists := newDisks[oldDisk.Name]
-		if oldDisk.CDRom != nil && !newDiskExists {
+		if oldDisk.CDRom != nil && !newDiskExists && !cloudInit {
 			return false
 		}
 	}
@@ -3598,6 +3652,10 @@ func (c *Controller) sync(vm *virtv1.VirtualMachine, vmi *virtv1.VirtualMachineI
 				return vm, vmi, common.NewSyncError(fmt.Errorf("error encountered while handling wait as receiver volume migration requests: %v", err), volumesUpdateErrorReason), nil
 			}
 		} else {
+			if err := c.handleProvisioningVolumeDetach(vmCopy, vmi); err != nil {
+				return vm, vmi, common.NewSyncError(fmt.Errorf("error encountered while detaching provisioning volumes: %v", err), volumesUpdateErrorReason), nil
+			}
+
 			if err := c.handleVolumeUpdateRequest(vmCopy, vmi); err != nil {
 				return vm, vmi, common.NewSyncError(fmt.Errorf("error encountered while handling volumes update requests: %v", err), volumesUpdateErrorReason), nil
 			}
