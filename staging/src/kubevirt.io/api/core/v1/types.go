@@ -900,6 +900,11 @@ const (
 	VirtualMachineInstanceMigrationAbortRequested          VirtualMachineInstanceMigrationConditionType = "migrationAbortRequested"
 	VirtualMachineInstanceMigrationRejectedByResourceQuota VirtualMachineInstanceMigrationConditionType = "migrationRejectedByResourceQuota"
 	VirtualMachineInstanceMigrationFailed                  VirtualMachineInstanceMigrationConditionType = "migrationFailed"
+	// VirtualMachineInstanceMigrationConcurrencyLimitReached is set on a pending migration
+	// whose target pod cannot be scheduled yet because a cluster-wide or per-node outbound
+	// migration concurrency limit is currently taken. It makes the reason observable instead
+	// of leaving the migration silently pending.
+	VirtualMachineInstanceMigrationConcurrencyLimitReached VirtualMachineInstanceMigrationConditionType = "MigrationConcurrencyLimitReached"
 )
 
 const (
@@ -912,6 +917,13 @@ const (
 	VirtualMachineInstanceMigrationFailedReasonMigrationStateWasTakenOverByAnotherMigrationObject string = "MigrationStateWasTakenOverByAnotherMigrationObject"
 	VirtualMachineInstanceMigrationFailedReasonSourceNodeReportedMigrationFailed                  string = "SourceNodeReportedMigrationFailed"
 	VirtualMachineInstanceMigrationFailedReasonTargetAttachmentPodShutdownDuringMigration         string = "TargetAttachmentPodShutdownDuringMigration"
+)
+
+// Machine-readable reasons for the VirtualMachineInstanceMigrationConcurrencyLimitReached
+// condition, so consumers can tell which limit blocks the migration without parsing the message.
+const (
+	VirtualMachineInstanceMigrationConcurrencyLimitReachedReasonCluster      string = "ClusterMigrationLimitReached"
+	VirtualMachineInstanceMigrationConcurrencyLimitReachedReasonOutboundNode string = "OutboundNodeMigrationLimitReached"
 )
 
 type VirtualMachineInstanceCondition struct {

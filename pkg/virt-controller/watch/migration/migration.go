@@ -710,6 +710,7 @@ func (c *Controller) processMigrationPhase(
 				migrationCopy.Status.Phase = virtv1.MigrationScheduling
 			}
 		}
+		c.reconcileConcurrencyLimitCondition(conditionManager, migrationCopy, pod != nil, vmi)
 	case virtv1.MigrationWaitingForSync:
 		if vmi.IsMigrationSourceSynchronized() {
 			migrationCopy.Status.Phase = virtv1.MigrationPending
@@ -722,6 +723,9 @@ func (c *Controller) processMigrationPhase(
 	case virtv1.MigrationScheduling:
 		if conditionManager.HasCondition(migrationCopy, virtv1.VirtualMachineInstanceMigrationRejectedByResourceQuota) {
 			conditionManager.RemoveCondition(migrationCopy, virtv1.VirtualMachineInstanceMigrationRejectedByResourceQuota)
+		}
+		if conditionManager.HasCondition(migrationCopy, virtv1.VirtualMachineInstanceMigrationConcurrencyLimitReached) {
+			conditionManager.RemoveCondition(migrationCopy, virtv1.VirtualMachineInstanceMigrationConcurrencyLimitReached)
 		}
 		if migration.IsDecentralizedSource() {
 			if err := c.patchMigratedVolumesForDecentralizedMigration(vmi); err != nil {
@@ -2126,6 +2130,59 @@ func (c *Controller) outboundMigrationsOnNode(node string, runningMigrations []*
 		}
 	}
 	return sum
+}
+
+// reconcileConcurrencyLimitCondition sets or clears the concurrency-limit
+// condition on a pending migration whose target pod has not been created yet,
+// so the reason it keeps waiting is observable instead of silent.
+func (c *Controller) reconcileConcurrencyLimitCondition(cm *controller.VirtualMachineInstanceMigrationConditionManager, migrationCopy *virtv1.VirtualMachineInstanceMigration, podExists bool, vmi *virtv1.VirtualMachineInstance) {
+	reason, message := "", ""
+	if !podExists && vmi != nil {
+		reason, message = c.concurrencyLimitReasonAndMessage(vmi)
+	}
+
+	if message != "" {
+		cm.UpdateCondition(migrationCopy, &virtv1.VirtualMachineInstanceMigrationCondition{
+			Type:          virtv1.VirtualMachineInstanceMigrationConcurrencyLimitReached,
+			Status:        k8sv1.ConditionTrue,
+			Reason:        reason,
+			Message:       message,
+			LastProbeTime: v1.Now(),
+		})
+		return
+	}
+
+	if cm.HasCondition(migrationCopy, virtv1.VirtualMachineInstanceMigrationConcurrencyLimitReached) {
+		cm.RemoveCondition(migrationCopy, virtv1.VirtualMachineInstanceMigrationConcurrencyLimitReached)
+	}
+}
+
+// concurrencyLimitReasonAndMessage mirrors the scheduler's cluster and per-node
+// outbound migration limit checks and returns a machine-readable reason with a
+// human-readable message when a limit is reached, or empty strings otherwise.
+func (c *Controller) concurrencyLimitReasonAndMessage(vmi *virtv1.VirtualMachineInstance) (string, string) {
+	runningMigrations, err := c.findRunningMigrations()
+	if err != nil {
+		return "", ""
+	}
+
+	cfg := c.clusterConfig.GetMigrationConfiguration()
+	if cfg == nil {
+		return "", ""
+	}
+
+	if cfg.ParallelMigrationsPerCluster != nil && len(runningMigrations) >= int(*cfg.ParallelMigrationsPerCluster) {
+		return virtv1.VirtualMachineInstanceMigrationConcurrencyLimitReachedReasonCluster, "The cluster live migration concurrency limit is reached."
+	}
+
+	if cfg.ParallelOutboundMigrationsPerNode != nil {
+		outbound := c.outboundMigrationsOnNode(vmi.Status.NodeName, runningMigrations)
+		if outbound >= int(*cfg.ParallelOutboundMigrationsPerNode) {
+			return virtv1.VirtualMachineInstanceMigrationConcurrencyLimitReachedReasonOutboundNode, "The per-node outbound live migration concurrency limit is reached."
+		}
+	}
+
+	return "", ""
 }
 
 // findRunningMigrations calculates how many migrations are running or in flight to be triggered to running
