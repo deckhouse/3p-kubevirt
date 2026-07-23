@@ -1441,6 +1441,10 @@ func (l *LibvirtDomainManager) syncDisks(
 		}
 		err = dom.DetachDeviceFlags(strings.ToLower(string(detachBytes)), affectDeviceLiveAndConfigLibvirtFlags)
 		if err != nil {
+			if isCloudInitDisk(detachDisk) {
+				logger.Reason(err).Warningf("failed to live-detach cloud-init disk %s; will be removed on next restart", detachDisk.Alias.GetName())
+				continue
+			}
 			logger.Reason(err).Error("detaching device")
 			return err
 		}
@@ -1697,6 +1701,10 @@ func isHotplugDisk(disk api.Disk) bool {
 	return strings.HasPrefix(getSourceFile(disk), v1.HotplugDiskDir)
 }
 
+func isCloudInitDisk(disk api.Disk) bool {
+	return cloudinit.IsGeneratedIsoPath(getSourceFile(disk))
+}
+
 // diskKey returns a stable identity for a Disk. Prefers the user-defined alias,
 // then the hotplug source-path basename, and falls back to target.device for
 // non-hotplug disks.
@@ -1719,7 +1727,7 @@ func getDetachedDisks(oldDisks, newDisks []api.Disk) []api.Disk {
 	}
 	res := make([]api.Disk, 0)
 	for _, oldDisk := range oldDisks {
-		if !isHotplugDisk(oldDisk) {
+		if !isHotplugDisk(oldDisk) && !isCloudInitDisk(oldDisk) {
 			continue
 		}
 		if _, ok := newDiskMap[diskKey(oldDisk)]; !ok {

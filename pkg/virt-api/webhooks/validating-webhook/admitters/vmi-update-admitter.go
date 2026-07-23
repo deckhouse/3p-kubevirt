@@ -31,6 +31,7 @@ import (
 
 	v1 "kubevirt.io/api/core/v1"
 
+	"kubevirt.io/kubevirt/pkg/util/migrations"
 	webhookutils "kubevirt.io/kubevirt/pkg/util/webhooks"
 	virtconfig "kubevirt.io/kubevirt/pkg/virt-config"
 	"kubevirt.io/kubevirt/pkg/virt-operator/resource/generate/components"
@@ -175,7 +176,7 @@ func admitStorageUpdate(newVolumes, oldVolumes []v1.Volume, newDisks, oldDisks [
 	newDiskMap := getDiskMap(newDisks)
 	oldDiskMap := getDiskMap(oldDisks)
 
-	permanentAr := verifyPermanentVolumes(newPermanentVolumeMap, oldPermanentVolumeMap, newDiskMap, oldDiskMap, migratedVolumeMap)
+	permanentAr := verifyPermanentVolumes(newPermanentVolumeMap, oldPermanentVolumeMap, newDiskMap, oldDiskMap, migratedVolumeMap, migrations.IsMigrating(newVMI))
 	if permanentAr != nil {
 		return permanentAr
 	}
@@ -267,15 +268,30 @@ func isMigratedVolume(newVol, oldVol *v1.Volume, migratedVolumeMap map[string]bo
 	return ok
 }
 
-func verifyPermanentVolumes(newPermanentVolumeMap, oldPermanentVolumeMap map[string]v1.Volume, newDisks, oldDisks map[string]v1.Disk, migratedVolumeMap map[string]bool) *admissionv1.AdmissionResponse {
+func verifyPermanentVolumes(newPermanentVolumeMap, oldPermanentVolumeMap map[string]v1.Volume, newDisks, oldDisks map[string]v1.Disk, migratedVolumeMap map[string]bool, isMigrating bool) *admissionv1.AdmissionResponse {
 	if len(newPermanentVolumeMap) != len(oldPermanentVolumeMap) {
-		// Removed one of the permanent volumes, reject admission.
-		return webhookutils.ToAdmissionResponse([]metav1.StatusCause{
-			{
-				Type:    metav1.CauseTypeFieldValueInvalid,
-				Message: "Number of permanent volumes has changed",
-			},
-		})
+		onlyCloudInitRemoved := !isMigrating && len(newPermanentVolumeMap) < len(oldPermanentVolumeMap)
+		if onlyCloudInitRemoved {
+			for k, vol := range oldPermanentVolumeMap {
+				if _, ok := newPermanentVolumeMap[k]; ok {
+					continue
+				}
+				_, diskKept := newDisks[k]
+				if diskKept || !isCloudInitVolume(&vol) {
+					onlyCloudInitRemoved = false
+					break
+				}
+			}
+		}
+		if !onlyCloudInitRemoved {
+			// Removed one of the permanent volumes, reject admission.
+			return webhookutils.ToAdmissionResponse([]metav1.StatusCause{
+				{
+					Type:    metav1.CauseTypeFieldValueInvalid,
+					Message: "Number of permanent volumes has changed",
+				},
+			})
+		}
 	}
 
 	// Ensure we didn't modify any permanent volumes
@@ -312,6 +328,10 @@ func verifyPermanentVolumes(newPermanentVolumeMap, oldPermanentVolumeMap map[str
 		}
 	}
 	return nil
+}
+
+func isCloudInitVolume(v *v1.Volume) bool {
+	return v.CloudInitNoCloud != nil || v.CloudInitConfigDrive != nil
 }
 
 func getDiskMap(disks []v1.Disk) map[string]v1.Disk {

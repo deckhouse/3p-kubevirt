@@ -5845,6 +5845,149 @@ var _ = Describe("VirtualMachine", func() {
 				Expect(vm.Status.Conditions).To(restartRequiredMatcher(k8sv1.ConditionTrue), "restart required")
 			})
 
+			It("should not appear when a cloud-init volume is removed from the template", func() {
+				testutils.UpdateFakeKubeVirtClusterConfig(kvStore, kv)
+
+				By("Creating a VM with a cloud-init volume")
+				vm.Spec.Template.Spec.Domain.Devices.Disks = append(vm.Spec.Template.Spec.Domain.Devices.Disks, v1.Disk{
+					Name: "cloudinit",
+				})
+				vm.Spec.Template.Spec.Volumes = append(vm.Spec.Template.Spec.Volumes, v1.Volume{
+					Name: "cloudinit",
+					VolumeSource: v1.VolumeSource{
+						CloudInitNoCloud: &v1.CloudInitNoCloudSource{
+							UserDataSecretRef: &k8sv1.LocalObjectReference{Name: "cloud-init-secret"},
+						},
+					},
+				})
+
+				vmi = controller.setupVMIFromVM(vm)
+				watchtesting.MarkAsReady(vmi)
+				controller.vmiIndexer.Add(vmi)
+				vmi, err := virtFakeClient.KubevirtV1().VirtualMachineInstances(vm.Namespace).Create(context.TODO(), vmi, metav1.CreateOptions{})
+				Expect(err).NotTo(HaveOccurred())
+
+				By("Creating a Controller Revision with the cloud-init volume")
+				controller.crIndexer.Add(createVMRevision(vm))
+
+				By("Removing the cloud-init volume and disk from the template")
+				vm.Spec.Template.Spec.Domain.Devices.Disks = vm.Spec.Template.Spec.Domain.Devices.Disks[:len(vm.Spec.Template.Spec.Domain.Devices.Disks)-1]
+				vm.Spec.Template.Spec.Volumes = vm.Spec.Template.Spec.Volumes[:len(vm.Spec.Template.Spec.Volumes)-1]
+				vm, err = virtFakeClient.KubevirtV1().VirtualMachines(vm.Namespace).Create(context.TODO(), vm, metav1.CreateOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				addVirtualMachine(vm)
+
+				By("Executing the controller expecting no RestartRequired condition")
+				sanityExecute(vm)
+				vm, err = virtFakeClient.KubevirtV1().VirtualMachines(vm.Namespace).Get(context.TODO(), vm.Name, metav1.GetOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(vm.Status.Conditions).ToNot(restartRequiredMatcher(k8sv1.ConditionTrue), "restart should not be required")
+
+				By("Expecting the cloud-init volume and disk to be hot-detached from the VMI")
+				updatedVMI, err := virtFakeClient.KubevirtV1().VirtualMachineInstances(vm.Namespace).Get(context.TODO(), vmi.Name, metav1.GetOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				for _, volume := range updatedVMI.Spec.Volumes {
+					Expect(volume.Name).ToNot(Equal("cloudinit"), "cloud-init volume should be removed from the VMI")
+				}
+				for _, disk := range updatedVMI.Spec.Domain.Devices.Disks {
+					Expect(disk.Name).ToNot(Equal("cloudinit"), "cloud-init disk should be removed from the VMI")
+				}
+			})
+
+			It("should not detach a cloud-init ConfigDrive volume from a migrating VMI", func() {
+				testutils.UpdateFakeKubeVirtClusterConfig(kvStore, kv)
+
+				By("Creating a VM with a cloud-init ConfigDrive volume")
+				vm.Spec.Template.Spec.Domain.Devices.Disks = append(vm.Spec.Template.Spec.Domain.Devices.Disks, v1.Disk{
+					Name: "cloudinit",
+				})
+				vm.Spec.Template.Spec.Volumes = append(vm.Spec.Template.Spec.Volumes, v1.Volume{
+					Name: "cloudinit",
+					VolumeSource: v1.VolumeSource{
+						CloudInitConfigDrive: &v1.CloudInitConfigDriveSource{
+							UserDataSecretRef: &k8sv1.LocalObjectReference{Name: "cloud-init-secret"},
+						},
+					},
+				})
+
+				vmi = controller.setupVMIFromVM(vm)
+				watchtesting.MarkAsReady(vmi)
+				// Mark the VMI as migrating: handleProvisioningVolumeDetach must skip it.
+				vmi.Status.MigrationState = &v1.VirtualMachineInstanceMigrationState{
+					StartTimestamp: &[]metav1.Time{metav1.NewTime(metav1.Now().Add(-time.Minute))}[0],
+				}
+				controller.vmiIndexer.Add(vmi)
+				vmi, err := virtFakeClient.KubevirtV1().VirtualMachineInstances(vm.Namespace).Create(context.TODO(), vmi, metav1.CreateOptions{})
+				Expect(err).NotTo(HaveOccurred())
+
+				controller.crIndexer.Add(createVMRevision(vm))
+
+				By("Removing the cloud-init volume and disk from the template")
+				vm.Spec.Template.Spec.Domain.Devices.Disks = vm.Spec.Template.Spec.Domain.Devices.Disks[:len(vm.Spec.Template.Spec.Domain.Devices.Disks)-1]
+				vm.Spec.Template.Spec.Volumes = vm.Spec.Template.Spec.Volumes[:len(vm.Spec.Template.Spec.Volumes)-1]
+				vm, err = virtFakeClient.KubevirtV1().VirtualMachines(vm.Namespace).Create(context.TODO(), vm, metav1.CreateOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				addVirtualMachine(vm)
+
+				By("Executing the controller expecting the cloud-init volume to be preserved during migration")
+				sanityExecute(vm)
+				updatedVMI, err := virtFakeClient.KubevirtV1().VirtualMachineInstances(vm.Namespace).Get(context.TODO(), vmi.Name, metav1.GetOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				hasCloudInit := false
+				for _, volume := range updatedVMI.Spec.Volumes {
+					if volume.Name == "cloudinit" {
+						hasCloudInit = true
+						break
+					}
+				}
+				Expect(hasCloudInit).To(BeTrue(), "cloud-init volume must not be detached from a migrating VMI")
+			})
+
+			It("should not detach a sysprep volume from the running VMI", func() {
+				testutils.UpdateFakeKubeVirtClusterConfig(kvStore, kv)
+
+				By("Creating a VM with a sysprep volume")
+				vm.Spec.Template.Spec.Domain.Devices.Disks = append(vm.Spec.Template.Spec.Domain.Devices.Disks, v1.Disk{
+					Name: "sysprep",
+				})
+				vm.Spec.Template.Spec.Volumes = append(vm.Spec.Template.Spec.Volumes, v1.Volume{
+					Name: "sysprep",
+					VolumeSource: v1.VolumeSource{
+						Sysprep: &v1.SysprepSource{
+							Secret: &k8sv1.LocalObjectReference{Name: "sysprep-secret"},
+						},
+					},
+				})
+
+				vmi = controller.setupVMIFromVM(vm)
+				watchtesting.MarkAsReady(vmi)
+				controller.vmiIndexer.Add(vmi)
+				vmi, err := virtFakeClient.KubevirtV1().VirtualMachineInstances(vm.Namespace).Create(context.TODO(), vmi, metav1.CreateOptions{})
+				Expect(err).NotTo(HaveOccurred())
+
+				controller.crIndexer.Add(createVMRevision(vm))
+
+				By("Removing the sysprep volume and disk from the template")
+				vm.Spec.Template.Spec.Domain.Devices.Disks = vm.Spec.Template.Spec.Domain.Devices.Disks[:len(vm.Spec.Template.Spec.Domain.Devices.Disks)-1]
+				vm.Spec.Template.Spec.Volumes = vm.Spec.Template.Spec.Volumes[:len(vm.Spec.Template.Spec.Volumes)-1]
+				vm, err = virtFakeClient.KubevirtV1().VirtualMachines(vm.Namespace).Create(context.TODO(), vm, metav1.CreateOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				addVirtualMachine(vm)
+
+				By("Executing the controller expecting the sysprep volume to be preserved")
+				sanityExecute(vm)
+				updatedVMI, err := virtFakeClient.KubevirtV1().VirtualMachineInstances(vm.Namespace).Get(context.TODO(), vmi.Name, metav1.GetOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				hasSysprep := false
+				for _, volume := range updatedVMI.Spec.Volumes {
+					if volume.Name == "sysprep" {
+						hasSysprep = true
+						break
+					}
+				}
+				Expect(hasSysprep).To(BeTrue(), "sysprep volume must not be detached from a running VMI")
+			})
+
 			It("should appear when VM sockets count is reduced", func() {
 				testutils.UpdateFakeKubeVirtClusterConfig(kvStore, kv)
 

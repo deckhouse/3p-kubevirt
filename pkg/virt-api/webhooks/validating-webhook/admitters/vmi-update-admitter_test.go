@@ -23,6 +23,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -460,6 +461,57 @@ var _ = Describe("Validating VMIUpdate Admitter", func() {
 		return res
 	}
 
+	makeCloudInitVolumes := func(indexes ...int) []v1.Volume {
+		res := make([]v1.Volume, 0)
+		for _, index := range indexes {
+			res = append(res, v1.Volume{
+				Name: fmt.Sprintf("volume-name-%d", index),
+				VolumeSource: v1.VolumeSource{
+					CloudInitNoCloud: &v1.CloudInitNoCloudSource{
+						UserDataSecretRef: &k8sv1.LocalObjectReference{
+							Name: fmt.Sprintf("secret-name-%d", index),
+						},
+					},
+				},
+			})
+		}
+		return res
+	}
+
+	makeCloudInitConfigDriveVolumes := func(indexes ...int) []v1.Volume {
+		res := make([]v1.Volume, 0)
+		for _, index := range indexes {
+			res = append(res, v1.Volume{
+				Name: fmt.Sprintf("volume-name-%d", index),
+				VolumeSource: v1.VolumeSource{
+					CloudInitConfigDrive: &v1.CloudInitConfigDriveSource{
+						UserDataSecretRef: &k8sv1.LocalObjectReference{
+							Name: fmt.Sprintf("secret-name-%d", index),
+						},
+					},
+				},
+			})
+		}
+		return res
+	}
+
+	makeSysprepVolumes := func(indexes ...int) []v1.Volume {
+		res := make([]v1.Volume, 0)
+		for _, index := range indexes {
+			res = append(res, v1.Volume{
+				Name: fmt.Sprintf("volume-name-%d", index),
+				VolumeSource: v1.VolumeSource{
+					Sysprep: &v1.SysprepSource{
+						Secret: &k8sv1.LocalObjectReference{
+							Name: fmt.Sprintf("secret-name-%d", index),
+						},
+					},
+				},
+			})
+		}
+		return res
+	}
+
 	makeVolumesWithMemoryDumpVol := func(total int, indexes ...int) []v1.Volume {
 		res := make([]v1.Volume, 0)
 		for i := 0; i < total; i++ {
@@ -721,6 +773,54 @@ var _ = Describe("Validating VMIUpdate Admitter", func() {
 			makeFilesystems(),
 			makeStatus(1, 0),
 			makeExpected("Number of permanent volumes has changed", "")),
+		Entry("Should accept if we remove a cloud-init volume together with its disk",
+			makeVolumes(),
+			makeCloudInitVolumes(0),
+			makeDisks(),
+			makeDisks(0),
+			makeFilesystems(),
+			makeStatus(1, 0),
+			nil),
+		Entry("Should accept if we remove a cloud-init volume and disk but keep other permanent volumes",
+			makeVolumes(0),
+			append(makeVolumes(0), makeCloudInitVolumes(1)...),
+			makeDisks(0),
+			makeDisks(0, 1),
+			makeFilesystems(),
+			makeStatus(2, 0),
+			nil),
+		Entry("Should reject if we remove a cloud-init volume but keep its disk",
+			makeVolumes(),
+			makeCloudInitVolumes(0),
+			makeDisks(0),
+			makeDisks(0),
+			makeFilesystems(),
+			makeStatus(1, 0),
+			makeExpected("mismatch between volumes declared (0) and required (1)", "")),
+		Entry("Should accept if we remove a ConfigDrive cloud-init volume together with its disk",
+			makeVolumes(),
+			makeCloudInitConfigDriveVolumes(0),
+			makeDisks(),
+			makeDisks(0),
+			makeFilesystems(),
+			makeStatus(1, 0),
+			nil),
+		Entry("Should reject if we remove a sysprep permanent volume",
+			makeVolumes(),
+			makeSysprepVolumes(0),
+			makeDisks(),
+			makeDisks(0),
+			makeFilesystems(),
+			makeStatus(1, 0),
+			makeExpected("Number of permanent volumes has changed", "")),
+		Entry("Should accept if we remove a cloud-init volume while keeping a sysprep permanent volume",
+			makeSysprepVolumes(1),
+			append(makeSysprepVolumes(1), makeCloudInitVolumes(0)...),
+			makeDisks(1),
+			makeDisks(1, 0),
+			makeFilesystems(),
+			makeStatus(2, 0),
+			nil),
 		Entry("Should reject if we add a disk without a matching volume",
 			makeVolumes(0, 1),
 			makeVolumes(0),
@@ -892,6 +992,28 @@ var _ = Describe("Validating VMIUpdate Admitter", func() {
 				makeStatus(2, 0),
 				makeExpected("mismatch between volumes declared (3) and required (2)", "")),
 		)
+	})
+
+	It("Should reject removing a cloud-init permanent volume during a live migration", func() {
+		oldVolumes := makeCloudInitVolumes(0)
+		oldDisks := makeDisks(0)
+		volumeStatuses := makeStatus(1, 0)
+
+		newVMI := api.NewMinimalVMI("testvmi")
+		newVMI.Spec.Volumes = makeVolumes()
+		newVMI.Spec.Domain.Devices.Disks = makeDisks()
+		newVMI.Spec.Domain.Devices.Filesystems = makeFilesystems()
+		// Simulate an in-progress live migration: a started MigrationState with no EndTimestamp
+		// makes migrations.IsMigrating return true.
+		past := metav1.NewTime(metav1.Now().Add(-time.Minute))
+		newVMI.Status.MigrationState = &v1.VirtualMachineInstanceMigrationState{
+			StartTimestamp: &past,
+		}
+
+		result := admitStorageUpdate(newVMI.Spec.Volumes, oldVolumes, newVMI.Spec.Domain.Devices.Disks, oldDisks, volumeStatuses, newVMI, vmiUpdateAdmitter.clusterConfig)
+		Expect(result).NotTo(BeNil(), "removing a cloud-init permanent volume during a migration must be rejected")
+		Expect(result.Allowed).To(BeFalse(), "removing a cloud-init permanent volume during a migration must be rejected")
+		Expect(result.Result.Message).To(ContainSubstring("Number of permanent volumes has changed"))
 	})
 
 	DescribeTable("Admit or deny based on user", func(user string, expected types.GomegaMatcher) {

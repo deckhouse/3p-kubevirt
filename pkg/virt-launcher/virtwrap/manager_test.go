@@ -47,6 +47,7 @@ import (
 	api2 "kubevirt.io/client-go/api"
 
 	cloudinit "kubevirt.io/kubevirt/pkg/cloud-init"
+	"kubevirt.io/kubevirt/pkg/config"
 	ephemeraldiskutils "kubevirt.io/kubevirt/pkg/ephemeral-disk-utils"
 	"kubevirt.io/kubevirt/pkg/ephemeral-disk/fake"
 	cmdv1 "kubevirt.io/kubevirt/pkg/handler-launcher-com/cmd/v1"
@@ -2265,7 +2266,7 @@ var _ = Describe("Manager", func() {
 			manager, _ := newLibvirtDomainManagerDefault()
 			Expect(manager.PrepareMigrationTarget(vmi, true, &cmdv1.VirtualMachineOptions{})).To(Succeed())
 
-			bootFailed, exists := manager.metadataCache.BootFailed.Load()
+			bootFailed, exists := metadataCache.BootFailed.Load()
 			Expect(exists).To(BeTrue())
 			Expect(bootFailed).To(BeTrue())
 		})
@@ -2991,6 +2992,73 @@ var _ = Describe("getDetachedDisks", func() {
 			},
 			[]api.Disk{}),
 	)
+
+	Context("with a cloud-init disk", func() {
+		makeDisks := func(withCloudInit bool) []api.Disk {
+			res := []api.Disk{
+				{
+					Target: api.DiskTarget{
+						Device: "sda",
+					},
+					Source: api.DiskSource{
+						Name: "test",
+						File: "file",
+					},
+				},
+			}
+			if withCloudInit {
+				res = append(res, api.Disk{
+					Alias: api.NewUserDefinedAlias("cloudinit"),
+					Target: api.DiskTarget{
+						Device: "sdb",
+					},
+					Source: api.DiskSource{
+						Name: "cloudinit",
+						File: cloudinit.GetIsoFilePath(cloudinit.DataSourceNoCloud, "testvmi", "default"),
+					},
+				})
+			}
+			return res
+		}
+
+		It("contains the cloud-init disk if it is removed from new", func() {
+			oldDisks := makeDisks(true)
+			Expect(getDetachedDisks(oldDisks, makeDisks(false))).To(Equal([]api.Disk{oldDisks[1]}))
+		})
+
+		It("is empty if the cloud-init disk is present in old and new", func() {
+			Expect(getDetachedDisks(makeDisks(true), makeDisks(true))).To(BeEmpty())
+		})
+
+		It("does not return a sysprep disk even if it is removed from new", func() {
+			oldDisks := []api.Disk{
+				{
+					Alias:  api.NewUserDefinedAlias("sysprep"),
+					Target: api.DiskTarget{Device: "sdc"},
+					Source: api.DiskSource{
+						Name: "sysprep",
+						File: config.GetSysprepDiskPath("sysprep"),
+					},
+				},
+			}
+			// sysprep disk is present in old, absent in new, but must NOT be detached live.
+			Expect(getDetachedDisks(oldDisks, []api.Disk{})).To(BeEmpty())
+		})
+
+		It("returns a ConfigDrive cloud-init disk if it is removed from new", func() {
+			oldDisks := []api.Disk{
+				{
+					Alias:  api.NewUserDefinedAlias("cloudinit"),
+					Target: api.DiskTarget{Device: "sdb"},
+					Source: api.DiskSource{
+						Name: "cloudinit",
+						File: cloudinit.GetIsoFilePath(cloudinit.DataSourceConfigDrive, "testvmi", "default"),
+					},
+				},
+			}
+			Expect(getDetachedDisks(oldDisks, []api.Disk{})).To(Equal(oldDisks))
+		})
+	})
 })
 
 var _ = Describe("getUpdatedDisks", func() {
