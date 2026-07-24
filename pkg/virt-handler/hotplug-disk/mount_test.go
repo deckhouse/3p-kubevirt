@@ -37,6 +37,7 @@ import (
 	"kubevirt.io/kubevirt/pkg/safepath"
 	"kubevirt.io/kubevirt/pkg/unsafepath"
 	virtcache "kubevirt.io/kubevirt/pkg/virt-handler/cache"
+	cmdclient "kubevirt.io/kubevirt/pkg/virt-handler/cmd-client"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -63,7 +64,9 @@ import (
 func findmntByVolume(volume string) []*mount.Info {
 	return []*mount.Info{
 		{
-			Mountpoint: path.Join("/", volume),
+			// LookupFindmntInfoByVolume matches mountpoints under the /path
+			// prefix used by the isolation detector.
+			Mountpoint: path.Join("/path", volume),
 			Source:     "/dev/testvolume",
 			FSType:     "xfs",
 			Options:    "rw,relatime,seclabel,attr2,inode64,logbufs=8,logbsize=32k,noquota",
@@ -99,6 +102,16 @@ var (
 	orgNodeIsolationResult = nodeIsolationResult
 	orgParentPathForMount  = parentPathForMount
 )
+
+// preparePodSocket creates the launcher command socket findVirtlauncherUID
+// checks to consider a pod alive.
+func preparePodSocket(tempDir, uid string) {
+	socketDir := filepath.Join(tempDir, uid, "volumes/kubernetes.io~empty-dir/sockets")
+	ExpectWithOffset(1, os.MkdirAll(socketDir, 0755)).To(Succeed())
+	f, err := os.Create(filepath.Join(socketDir, cmdclient.StandardLauncherSocketFileName))
+	ExpectWithOffset(1, err).NotTo(HaveOccurred())
+	ExpectWithOffset(1, f.Close()).To(Succeed())
+}
 
 var _ = Describe("HotplugVolume", func() {
 	var (
@@ -290,6 +303,9 @@ var _ = Describe("HotplugVolume", func() {
 			err = os.MkdirAll(targetPodPath, 0755)
 			Expect(err).ToNot(HaveOccurred())
 
+			cmdclient.SetPodsBaseDir(tempDir)
+			preparePodSocket(tempDir, "abcd")
+
 			record = &vmiMountTargetRecord{}
 
 			m = &volumeMounter{
@@ -358,6 +374,8 @@ var _ = Describe("HotplugVolume", func() {
 			Expect(res).To(BeEquivalentTo("abcd"))
 			vmi.Status.ActivePods["abcdef"] = "host"
 			err = os.MkdirAll(filepath.Join(tempDir, "abcdef/volumes/kubernetes.io~empty-dir/hotplug-disks"), 0755)
+			Expect(err).ToNot(HaveOccurred())
+			preparePodSocket(tempDir, "abcdef")
 			res = m.findVirtlauncherUID(vmi)
 			Expect(res).To(BeEquivalentTo(""))
 		})
@@ -386,16 +404,19 @@ var _ = Describe("HotplugVolume", func() {
 				return true, nil
 			}
 
-			By("Mounting and validating expected rule is set")
-			setExpectedCgroupRuns(2)
-			expectCgroupRule(devices.BlockDevice, 482, 64, true)
-			_, err = m.mountBlockHotplugVolume(vmi, "testvolume", blockSourcePodUID, record, cgroupManagerMock)
+			By("Mounting and validating the expected allow rule is returned")
+			rule, err := m.mountBlockHotplugVolume(vmi, "testvolume", blockSourcePodUID, record, cgroupManagerMock)
 			Expect(err).ToNot(HaveOccurred())
+			Expect(rule).To(Equal(&devices.Rule{
+				Type: devices.BlockDevice, Major: 482, Minor: 64, Permissions: "rwm", Allow: true,
+			}))
 
-			By("Unmounting, we verify the reverse process happens")
-			expectCgroupRule(devices.BlockDevice, 482, 64, false)
-			_, err = m.unmountBlockHotplugVolumes(deviceFile, cgroupManagerMock)
+			By("Unmounting, we verify the reverse rule is returned")
+			rule, err = m.unmountBlockHotplugVolumes(deviceFile, cgroupManagerMock)
 			Expect(err).ToNot(HaveOccurred())
+			Expect(rule).To(Equal(&devices.Rule{
+				Type: devices.BlockDevice, Major: 482, Minor: 64, Permissions: "rwm", Allow: false,
+			}))
 		})
 
 		It("getSourceMajorMinor should return an error if no uid", func() {
@@ -467,11 +488,12 @@ var _ = Describe("HotplugVolume", func() {
 			deviceFileName, err := newFile(tempDir, "devicefile")
 			Expect(err).ToNot(HaveOccurred())
 
-			By("Mounting and validating expected rule is set")
-			setExpectedCgroupRuns(1)
-			expectCgroupRule(devices.BlockDevice, 482, 64, false)
-			_, err = m.unmountBlockHotplugVolumes(deviceFileName, cgroupManagerMock)
+			By("Unmounting and validating the expected deny rule is returned")
+			rule, err := m.unmountBlockHotplugVolumes(deviceFileName, cgroupManagerMock)
 			Expect(err).ToNot(HaveOccurred())
+			Expect(rule).To(Equal(&devices.Rule{
+				Type: devices.BlockDevice, Major: 482, Minor: 64, Permissions: "rwm", Allow: false,
+			}))
 		})
 
 		It("Should return error if deviceFile doesn' exist", func() {
@@ -553,6 +575,9 @@ var _ = Describe("HotplugVolume", func() {
 
 			targetPodPath, err = newDir(tempDir, "abcd/volumes/kubernetes.io~empty-dir/hotplug-disks")
 			Expect(err).ToNot(HaveOccurred())
+
+			cmdclient.SetPodsBaseDir(tempDir)
+			preparePodSocket(tempDir, "abcd")
 
 			record = &vmiMountTargetRecord{}
 
@@ -753,6 +778,9 @@ var _ = Describe("HotplugVolume", func() {
 			targetPodPath = filepath.Join(tempDir, "abcd/volumes/kubernetes.io~empty-dir/hotplug-disks")
 			err = os.MkdirAll(targetPodPath, 0755)
 			Expect(err).ToNot(HaveOccurred())
+
+			cmdclient.SetPodsBaseDir(tempDir)
+			preparePodSocket(tempDir, "abcd")
 
 			m = &volumeMounter{
 				mountRecords:       make(map[types.UID]*vmiMountTargetRecord),
@@ -1026,6 +1054,10 @@ var _ = Describe("HotplugVolume", func() {
 				},
 			})
 			vmi.Status.VolumeStatus = volumeStatuses
+			// mountFromPod only mounts volumes still present in the spec
+			for _, vs := range volumeStatuses {
+				vmi.Spec.Volumes = append(vmi.Spec.Volumes, v1.Volume{Name: vs.Name})
+			}
 			deviceBasePath = func(podUID types.UID, kubeletPodDir string) (*safepath.Path, error) {
 				return newDir(tempDir, string(podUID), "volumeDevices")
 			}

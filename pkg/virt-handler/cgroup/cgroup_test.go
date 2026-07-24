@@ -1,6 +1,8 @@
 package cgroup
 
 import (
+	"strings"
+
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	cgroups "github.com/opencontainers/cgroups"
@@ -174,4 +176,26 @@ var _ = Describe("cgroup manager", func() {
 			},
 		),
 	)
+
+	Describe("parseDevicesList", func() {
+		It("should parse devices.list content into allow rules", func() {
+			// allow-all ("a") lines carry no device numbers and are skipped.
+			rules, err := parseDevicesList(strings.NewReader("a *:* rwm\nb 8:0 rwm\nc 136:* rw\n"))
+			Expect(err).ToNot(HaveOccurred())
+			Expect(rules).To(Equal([]*devices.Rule{
+				{Type: devices.BlockDevice, Major: 8, Minor: 0, Permissions: "rwm", Allow: true},
+				{Type: devices.CharDevice, Major: 136, Minor: devices.Wildcard, Permissions: "rw", Allow: true},
+			}))
+		})
+
+		DescribeTable("should reject malformed lines", func(list string) {
+			_, err := parseDevicesList(strings.NewReader(list))
+			Expect(err).To(HaveOccurred())
+		},
+			Entry("bad type", "x 8:0 rwm"),
+			Entry("missing colon", "b 80 rwm"),
+			Entry("non-numeric major", "b foo:0 rwm"),
+			Entry("missing permissions", "b 8:0"),
+		)
+	})
 })

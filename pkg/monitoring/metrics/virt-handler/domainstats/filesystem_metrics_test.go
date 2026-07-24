@@ -70,7 +70,7 @@ var _ = Describe("filesystem metrics", func() {
 		})
 	})
 	Context("on Collect with dublicates", func() {
-		It("should be contains only one metric", func() {
+		It("should contain only one result per metric", func() {
 			vmi := &k6tv1.VirtualMachineInstance{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-vmi-1",
@@ -103,7 +103,8 @@ var _ = Describe("filesystem metrics", func() {
 
 			crs := filesystemMetrics{}.Collect(vmiReport)
 
-			Expect(crs).To(HaveLen(1))
+			// one capacity and one used result for the deduplicated filesystem
+			Expect(crs).To(HaveLen(2))
 		})
 	})
 })

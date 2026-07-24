@@ -1,4 +1,3 @@
-cmd/virtctl
 pkg/instancetype
 pkg/libvmi
 pkg/network/admitter
@@ -20,11 +19,6 @@ pkg/network/vmispec
 pkg/network/vmliveupdate
 pkg/storage/pod/annotations
 pkg/virt-launcher/virtwrap/agent-poller
-pkg/virtctl/adm
-pkg/virtctl/clientconfig
-pkg/virtctl/create/params
-pkg/virtctl/create/vm
-pkg/virtctl/credentials
 tests/conformance
 tests/console
 tests/decorators
@@ -45,4 +39,3 @@ tests/libvmops
 tests/libwait
 tests/numa
 tests/usb
-tests/virtctl

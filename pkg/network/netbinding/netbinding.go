@@ -48,7 +48,7 @@ func netBindingPluginSidecar(vmi *v1.VirtualMachineInstance, config *v1.KubeVirt
 	bindingByName := vmispec.MergeBindingPlugins(userProvided)
 
 	// Find bindings that are actually used by VMI interfaces
-	var usedBindings = make(map[string]v1.InterfaceBindingPlugin)
+	usedBindings := make(map[string]v1.InterfaceBindingPlugin)
 	for _, iface := range vmi.Spec.Domain.Devices.Interfaces {
 		if iface.Binding != nil && iface.Binding.Name != "" {
 			if binding, exists := bindingByName[iface.Binding.Name]; exists {

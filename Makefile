@@ -219,11 +219,116 @@ format:
 
 fmt: format
 
-lint:
-	hack/dockerized "hack/lint-test-cleanup-label.sh"
-	hack/dockerized "hack/golangci-lint.sh"
-	hack/dockerized "monitoringlinter ./pkg/..."
-	hack/dockerized "hack/license-header-check.sh"
+# --- DVP fork: containerized lint/test/vendor checks ------------------------
+# These targets run in a locally built image (hack/ci.Dockerfile) instead of
+# the upstream builder image, which still ships Go 1.23 and golangci-lint v1.
+# TODO: once the builder image is rebuilt with Go 1.25 and published, restore
+# the upstream dockerized recipes (lint-test-cleanup-label, monitoringlinter,
+# license-header-check) and drop the local image.
+# Single unified image for every containerized target. lint/test/vendor run a
+# plain docker-run in it; generate drives it through hack/dockerized (rsync +
+# bazel). Built from hack/builder/Dockerfile. Locally IMAGE defaults to a
+# content-hash tag (hack/image-tag.sh over the Dockerfile + its COPYed files):
+# the image target reuses it while the recipe is unchanged and rebuilds only
+# when it changes, so builds are cached across runs. CI overrides IMAGE with
+# the registry content-tag it builds/pulls (see .gitlab-ci.yml).
+IMAGE ?= 3p-kubevirt-builder:$(shell bash hack/image-tag.sh 2>/dev/null || echo local)
+GOLANGCI_LINT_VERSION ?= 2.12.2
+LINT_ARGS ?=
+
+CI_UIDGID := $(shell id -u):$(shell id -g)
+
+# Git stamp for LOCAL generate only. On the host git works natively but the
+# generate container can't resolve the version itself (ownership/discovery on
+# the rsynced tree, and the fork's tags), leaving bazel's workspace_status with
+# an unbound KUBEVIRT_GIT_VERSION. Compute it here and forward via
+# hack/dockerized so hack/version.sh uses it.
+#
+# Skipped under CI: there the in-container version.sh already resolves the
+# stamp, and SHELL=hack/timestamps.sh (set when CI=true) would inject
+# timestamps into these $(shell ...) values and corrupt the env assignments.
+ifneq (${CI},true)
+GEN_GIT_COMMIT := $(shell git rev-parse "HEAD^{commit}" 2>/dev/null)
+GEN_GIT_VERSION := $(shell git describe --tags --match 'v[0-9]*' --abbrev=14 "$(GEN_GIT_COMMIT)^{commit}" 2>/dev/null)
+GEN_GIT_TREE_STATE := $(shell test -z "$$(git status --porcelain 2>/dev/null)" && echo clean || echo dirty)
+GEN_GIT_ENV := KUBEVIRT_GIT_COMMIT=$(GEN_GIT_COMMIT) KUBEVIRT_GIT_VERSION=$(GEN_GIT_VERSION) KUBEVIRT_GIT_TREE_STATE=$(GEN_GIT_TREE_STATE)
+endif
+
+# Always build/run the builder image as amd64, matching CI. On arm64 macs the
+# amd64 container runs under Rosetta (uname -m = x86_64 inside), so bazel's
+# rules_go finds a host toolchain and generation matches CI exactly.
+# Generation is arch-independent, so amd64 is correct on every host.
+BUILDER_PLATFORM := linux/amd64
+BUILDER_ARCH := amd64
+BUILDER_BAZEL_ARCH := x86_64
+
+# Build the unified image locally. In CI the build:images job builds/pushes it
+# to the registry under a content tag and sets IMAGE, so this is skipped.
+image:
+	docker image inspect $(IMAGE) >/dev/null 2>&1 || \
+		{ echo "$(IMAGE)" | grep -q / && docker pull $(IMAGE) 2>/dev/null; } || \
+		docker build --platform=$(BUILDER_PLATFORM) -t $(IMAGE) \
+			--build-arg ARCH=$(BUILDER_ARCH) --build-arg BAZEL_ARCH=$(BUILDER_BAZEL_ARCH) \
+			-f hack/builder/Dockerfile hack/builder/
+
+# Run a command in the image as root (some suites need CAP_CHOWN), then chown
+# the bind-mounted checkout back to the runner uid so a later job can git-clean
+# it; the make exit code is preserved. --entrypoint bash bypasses the image's
+# rsync entrypoint (Go is already on PATH via the image ENV). Single wrapper
+# used by every non-generate containerized target.
+define run_in_ci_image
+	docker run --rm --entrypoint bash --platform=$(BUILDER_PLATFORM) \
+		-v $(CURDIR):/work -w /work \
+		-v 3p-kubevirt-gomod:/go/pkg/mod \
+		-v 3p-kubevirt-gocache:/root/.cache \
+		-e GOTOOLCHAIN=auto \
+		$(IMAGE) -c "$(1); rc=\$$?; find /work -path /work/.git -prune -o -exec chown $(CI_UIDGID) {} + 2>/dev/null || true; exit \$$rc"
+endef
+
+lint: image
+	$(call run_in_ci_image,bash hack/golangci-lint.sh $(LINT_ARGS))
+
+test-unit: image
+	$(call run_in_ci_image,bash hack/test-unit.sh)
+
+vendor-verify: image
+	$(call run_in_ci_image,bash hack/verify-vendor.sh)
+
+# Update Go deps and vendor/. Pass args through to go get, e.g.
+# `make update UPDATE_ARGS=-u` to upgrade.
+update: image
+	$(call run_in_ci_image,bash hack/update.sh $(UPDATE_ARGS))
+
+# Full kubevirt code generation in the image, pointing hack/dockerized at it
+# via KUBEVIRT_BUILDER_IMAGE instead of the upstream quay image. `task
+# generate` / `task check:generate` wrap these.
+#
+# generate runs through hack/dockerized as root. Its rsync --delete step
+# chokes on an _out left by another job (test-unit's junit/binaries), so
+# remove _out up front as root; afterwards chown the tree back to the runner
+# uid (preserving the make exit code) so a later job can git-clean it.
+define rm_out
+	docker run --rm --platform=$(BUILDER_PLATFORM) -v $(CURDIR):/work --entrypoint rm $(IMAGE) -rf /work/_out
+endef
+define chown_tree
+	docker run --rm --platform=$(BUILDER_PLATFORM) -v $(CURDIR):/work --entrypoint bash $(IMAGE) -c "find /work -path /work/.git -prune -o -exec chown $(CI_UIDGID) {} + 2>/dev/null || true"
+endef
+# A crashed generate leaves the hack/dockerized bazel-server up; it holds the
+# host network and blocks the next run's rsyncd. Remove it up front so a retry
+# starts clean without a manual `docker rm`.
+define clean_bazel_server
+	cids=$$(docker ps -aq --filter name=bazel-server 2>/dev/null); [ -z "$$cids" ] || docker rm -f $$cids >/dev/null 2>&1 || true
+endef
+
+generate-local: image
+	-$(call clean_bazel_server)
+	$(call rm_out)
+	rc=0; KUBEVIRT_BUILDER_IMAGE=$(IMAGE) $(GEN_GIT_ENV) $(MAKE) generate || rc=$$?; $(call chown_tree) || true; exit $$rc
+
+generate-verify-local: image
+	-$(call clean_bazel_server)
+	$(call rm_out)
+	rc=0; KUBEVIRT_BUILDER_IMAGE=$(IMAGE) $(GEN_GIT_ENV) $(MAKE) generate-verify || rc=$$?; $(call chown_tree) || true; exit $$rc
 
 lint-metrics:
 	hack/dockerized "./hack/prom-metric-linter/metrics_collector.sh > metrics.json"
@@ -272,6 +377,12 @@ update-generated-api-testdata:
 	format \
 	fmt \
 	lint \
+	image \
+	test-unit \
+	vendor-verify \
+	update \
+	generate-local \
+	generate-verify-local \
 	lint-metrics \
 	update-generated-api-testdata \
 	$(NULL)

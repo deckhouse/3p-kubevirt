@@ -30,7 +30,7 @@
     <channel type="unix">
       <target name="org.qemu.guest_agent.0" type="virtio"></target>
     </channel>
-    <controller type="usb" index="0" model="qemu-xhci" ports="16"></controller>
+    <controller type="usb" index="0" model="qemu-xhci" ports="15"></controller>
     <controller type="virtio-serial" index="0" model="virtio-non-transitional"></controller>
     <video>
       <model type="virtio" heads="1"></model>
@@ -42,7 +42,7 @@
     <disk device="disk" type="file" model="virtio-non-transitional">
       <source file="/var/run/kubevirt-private/vmi-disks/myvolume/disk.img"></source>
       <target bus="virtio" dev="vda"></target>
-      <driver error_policy="stop" name="qemu" type="raw" iothread="2" discard="unmap"></driver>
+      <driver error_policy="stop" name="qemu" type="qcow2" iothread="2" discard="unmap"></driver>
       <alias name="ua-myvolume"></alias>
     </disk>
     <disk device="disk" type="file" model="virtio-non-transitional">
@@ -60,14 +60,14 @@
     <disk device="cdrom" type="file">
       <source file="/var/run/kubevirt-private/vmi-disks/cdrom_tray_open/disk.img"></source>
       <target bus="virtio" dev="vdd" tray="open"></target>
-      <driver error_policy="stop" name="qemu" type="raw" iothread="1"></driver>
+      <driver error_policy="stop" name="qemu" type="qcow2" iothread="1"></driver>
       <readonly></readonly>
       <alias name="ua-cdrom_tray_open"></alias>
     </disk>
     <disk device="disk" type="file" model="virtio-non-transitional">
       <source file="/var/run/kubevirt-private/vmi-disks/should_default_to_disk/disk.img"></source>
       <target bus="virtio" dev="vde"></target>
-      <driver error_policy="stop" name="qemu" type="raw" iothread="1" discard="unmap"></driver>
+      <driver error_policy="stop" name="qemu" type="qcow2" iothread="1" discard="unmap"></driver>
       <alias name="ua-should_default_to_disk"></alias>
     </disk>
     <disk device="disk" type="file" model="virtio-non-transitional">
@@ -76,7 +76,7 @@
       <driver cache="none" error_policy="stop" name="qemu" type="qcow2" iothread="1" discard="unmap"></driver>
       <alias name="ua-ephemeral_pvc"></alias>
       <backingStore type="file">
-        <format type="raw"></format>
+        <format type="qcow2"></format>
         <source file="/var/run/kubevirt-private/vmi-disks/ephemeral_pvc/disk.img"></source>
       </backingStore>
     </disk>
@@ -147,6 +147,12 @@
     <timer name="hpet" tickpolicy="delay" present="no"></timer>
     <timer name="hypervclock" present="yes"></timer>
   </clock>
+  <qemu:commandline>
+    <qemu:arg value="-chardev"></qemu:arg>
+    <qemu:arg value="null,id=bootfailurelog"></qemu:arg>
+    <qemu:arg value="-device"></qemu:arg>
+    <qemu:arg value="isa-debugcon,iobase=0x403,chardev=bootfailurelog,watch-no-bootable=on"></qemu:arg>
+  </qemu:commandline>
   <metadata>
     <kubevirt xmlns="http://kubevirt.io">
       <uid></uid>

@@ -10,7 +10,10 @@ proto_library(
 
 go_proto_library(
     name = "kubevirt_hooks_v1alpha3_go_proto",
-    compilers = ["@io_bazel_rules_go//proto:go_grpc"],
+    compilers = [
+        "@io_bazel_rules_go//proto:go_proto",
+        "@io_bazel_rules_go//proto:go_grpc_v2",
+    ],
     importpath = "kubevirt.io/kubevirt/pkg/hooks/v1alpha3",
     proto = ":kubevirt_hooks_v1alpha3_proto",
     visibility = ["//visibility:public"],

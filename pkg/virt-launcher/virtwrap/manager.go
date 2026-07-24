@@ -1761,13 +1761,16 @@ func isHotPlugDiskOrEmpty(disk api.Disk) bool {
 }
 
 func getUpdatedDisks(oldDisks, newDisks []api.Disk) []api.Disk {
+	// A cd-rom media change swaps the source while the target stays put, so
+	// disks are matched by target device here: diskKey would key hotplug
+	// disks by their source basename and never pair the old and new disk.
 	oldDiskMap := make(map[string]api.Disk)
 	for _, disk := range oldDisks {
-		oldDiskMap[diskKey(disk)] = disk
+		oldDiskMap[disk.Target.Device] = disk
 	}
 	var res []api.Disk
 	for _, newDisk := range newDisks {
-		oldDisk, ok := oldDiskMap[diskKey(newDisk)]
+		oldDisk, ok := oldDiskMap[newDisk.Target.Device]
 		if !ok {
 			continue
 		}

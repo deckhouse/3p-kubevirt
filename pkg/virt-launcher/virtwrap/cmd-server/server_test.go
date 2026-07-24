@@ -235,8 +235,8 @@ var _ = Describe("Virt remote commands", func() {
 		})
 
 		It("should return block jobs status", func() {
-			expectedStatus := virtwrap.QueryBlockJobsResult{
-				Return: []virtwrap.BlockJobStatus{
+			expectedStatus := api.QueryBlockJobsResult{
+				Return: []api.BlockJobStatus{
 					{
 						Device: "vda",
 						Status: "running",
@@ -253,8 +253,8 @@ var _ = Describe("Virt remote commands", func() {
 		})
 
 		It("should return jobs status", func() {
-			expectedStatus := virtwrap.QueryJobsResult{
-				Return: []virtwrap.JobStatus{
+			expectedStatus := api.QueryJobsResult{
+				Return: []api.JobStatus{
 					{
 						ID:              "job-1",
 						Type:            "mirror",

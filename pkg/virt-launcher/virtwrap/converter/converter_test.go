@@ -1537,9 +1537,9 @@ var _ = Describe("Converter", func() {
 				Ports: expectedPorts,
 			}))
 		},
-			Entry("should be enabled on amd64 when number of USB client devices > 0", amd64, "qemu-xhci", pointer.P(uint(16))),
-			Entry("should be enabled on ppc64le ", ppc64le, "qemu-xhci", pointer.P(uint(16))),
-			Entry("should be enabled on arm64 ", arm64, "qemu-xhci", pointer.P(uint(16))),
+			Entry("should be enabled on amd64 when number of USB client devices > 0", amd64, "qemu-xhci", pointer.P(uint(15))),
+			Entry("should be enabled on ppc64le ", ppc64le, "qemu-xhci", pointer.P(uint(15))),
+			Entry("should be enabled on arm64 ", arm64, "qemu-xhci", pointer.P(uint(15))),
 			Entry("should be disabled on s390x", s390x, "none", nil),
 		)
 
@@ -1696,15 +1696,13 @@ var _ = Describe("Converter", func() {
 				if shouldEnableDebugLogs {
 					Expect(domain.Spec.QEMUCmd.QEMUArg).Should(ContainElements(
 						api.Arg{Value: "-chardev"},
-						api.Arg{Value: "file,id=firmwarelog,path=/tmp/qemu-firmware.log"},
+						api.Arg{Value: "null,id=bootfailurelog"},
 						api.Arg{Value: "-device"},
-						api.Arg{Value: "isa-debugcon,iobase=0x402,chardev=firmwarelog"},
+						api.Arg{Value: "isa-debugcon,iobase=0x403,chardev=bootfailurelog,watch-no-bootable=on"},
 					))
 				} else {
 					Expect(domain.Spec.QEMUCmd.QEMUArg).ShouldNot(Or(
-						ContainElements(api.Arg{Value: "-chardev"}),
 						ContainElements(api.Arg{Value: "file,id=firmwarelog,path=/tmp/qemu-firmware.log"}),
-						ContainElements(api.Arg{Value: "-device"}),
 						ContainElements(api.Arg{Value: "isa-debugcon,iobase=0x402,chardev=firmwarelog"}),
 					))
 				}
@@ -3274,12 +3272,13 @@ var _ = Describe("Converter", func() {
 				func(converterFunc ConverterFunc, volumeName string, isBlockMode bool, ignoreDiscard bool) {
 					expectedDisk := &api.Disk{}
 					expectedDisk.Driver = &api.DiskDriver{}
-					expectedDisk.Driver.Type = "raw"
 					expectedDisk.Driver.ErrorPolicy = "stop"
 					if isBlockMode {
+						expectedDisk.Driver.Type = "raw"
 						expectedDisk.Type = "block"
 						expectedDisk.Source.Dev = filepath.Join(v1.HotplugDiskDir, volumeName)
 					} else {
+						expectedDisk.Driver.Type = "qcow2"
 						expectedDisk.Type = "file"
 						expectedDisk.Source.File = fmt.Sprintf("%s.img", filepath.Join(v1.HotplugDiskDir, volumeName))
 					}

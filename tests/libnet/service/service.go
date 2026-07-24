@@ -49,6 +49,7 @@ func BuildSpec(serviceName string, exposedPort, portToExpose int, selectorKey, s
 				selectorKey: selectorValue,
 			},
 			Ports: []k8sv1.ServicePort{
+				// #nosec G115 port numbers fit in int32
 				{Protocol: k8sv1.ProtocolTCP, Port: int32(portToExpose), TargetPort: intstr.FromInt(exposedPort)},
 			},
 		},

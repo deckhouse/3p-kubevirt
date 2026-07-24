@@ -58,10 +58,12 @@ var _ = Describe(SIGSerial("changes to the kubernetes client", func() {
 			start := metav1.Time{}
 			stop := metav1.Time{}
 			for _, timestamp := range vmi.Status.PhaseTransitionTimestamps {
-				if timestamp.Phase == v1.Scheduled {
+				switch timestamp.Phase {
+				case v1.Scheduled:
 					start = timestamp.PhaseTransitionTimestamp
-				} else if timestamp.Phase == v1.Running {
+				case v1.Running:
 					stop = timestamp.PhaseTransitionTimestamp
+				default:
 				}
 			}
 			duration += stop.Sub(start.Time)

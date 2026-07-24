@@ -2,43 +2,157 @@
 #
 # Ported from .github/workflows/test.yml
 
+# Run only one pipeline per change: for a branch with an open merge request use
+# the MR pipeline and skip the redundant branch-push pipeline (both would match
+# the per-job rules and double the expensive generate/test jobs otherwise).
+workflow:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS'
+      when: never
+    - if: '$CI_PIPELINE_SOURCE == "push"'
+    - if: '$CI_PIPELINE_SOURCE == "web"'
+
 stages:
+  - prepare
+  - lint
   - test
 
 default:
   tags:
     - deckhouse
+  # Log in so jobs can pull/push the unified image from the project registry.
+  before_script:
+    - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
 
 variables:
   GO_VERSION: "1.25.10"
-  GINKGO_VERSION: "v2.22.1"
   KUBEVIRT_VERSION: "1.6.2"
   # The runner uses a shell executor, so the host Go may be older than the
   # version go.work requires. Let the go command download the matching
   # toolchain instead of failing on a pinned GOTOOLCHAIN.
   GOTOOLCHAIN: "go${GO_VERSION}"
+  # _out is the build-output dir (gitignored), managed by the jobs themselves
+  # and sometimes written by the root container before it chowns the tree
+  # back; keep git clean out of it so a leftover root-owned _out can't fail
+  # get_sources.
+  GIT_CLEAN_FLAGS: "-ffdx -e _out"
 
-# Run kubevirt tests
-kvtest:
-  stage: test
-  image: golang:${GO_VERSION}
+# Shared rules: run on MRs targeting a *virtualization* or dvp/* branch, on
+# pushes to such branches, and on manual (web) triggers.
+.dvp_rules: &dvp_rules
+  - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME =~ /virtualization/'
+  - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME =~ /^dvp\//'
+  - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH =~ /virtualization/'
+  - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH =~ /^dvp\//'
+  - if: '$CI_PIPELINE_SOURCE == "web"'
+
+# Build the unified lint/test/generate image once and push it to the project
+# registry under a content tag (hack/image-tag.sh: sha over the Dockerfile and
+# its COPYed files). Rebuild only on a tag miss, so unchanged recipes reuse the
+# published image instead of rebuilding the heavy centos+bazel image per run.
+# The resolved image ref is handed to downstream jobs via a dotenv artifact.
+build:images:
+  stage: prepare
+  timeout: 1h
   script:
-    # Prepare environment
-    - go mod edit -go=${GO_VERSION}
-    - go mod download
-    - go work vendor
-    - go install github.com/onsi/ginkgo/v2/ginkgo@${GINKGO_VERSION}
-    # go install drops the binary in $GOPATH/bin, which the shell runner does
-    # not put on PATH (GitHub's setup-go does this automatically).
-    - export PATH="$(go env GOPATH)/bin:$PATH"
-    # Run unit test virt-controller
-    - ginkgo -succinct pkg/virt-controller/...
-  rules:
-    # merge request targeting a *virtualization* or dvp/* branch
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME =~ /virtualization/'
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME =~ /^dvp\//'
-    # push to a *virtualization* or dvp/* branch
-    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH =~ /virtualization/'
-    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH =~ /^dvp\//'
-    # manual trigger (workflow_dispatch equivalent)
-    - if: '$CI_PIPELINE_SOURCE == "web"'
+    - export TAG="$(bash hack/image-tag.sh)"
+    - export REPO="$CI_REGISTRY_IMAGE/builder"
+    # Resolve the image to use. :latest carries the recipe hash it was built
+    # from (label recipe-hash), so if the current recipe matches it we reuse
+    # :latest and publish nothing (no tag churn). If the exact recipe was
+    # already published as :<hash>, reuse it. Otherwise the recipe changed on
+    # this branch, so build and push :<hash>.
+    - |
+      LATEST_HASH=""
+      if docker pull "$REPO:latest" >/dev/null 2>&1; then
+        LATEST_HASH=$(docker inspect --format '{{ index .Config.Labels "recipe-hash" }}' "$REPO:latest" 2>/dev/null || true)
+      fi
+      if [ "$TAG" = "$LATEST_HASH" ]; then
+        echo "recipe unchanged since latest -> using $REPO:latest"
+        IMAGE="$REPO:latest"
+      elif docker pull "$REPO:$TAG" >/dev/null 2>&1; then
+        echo "recipe already published -> using $REPO:$TAG"
+        IMAGE="$REPO:$TAG"
+      else
+        echo "recipe changed -> building $REPO:$TAG"
+        docker build --label recipe-hash="$TAG" \
+          --build-arg ARCH=amd64 --build-arg BAZEL_ARCH=x86_64 \
+          -t "$REPO:$TAG" -f hack/builder/Dockerfile hack/builder/
+        docker push "$REPO:$TAG"
+        IMAGE="$REPO:$TAG"
+      fi
+      echo "BUILDER_IMAGE=$IMAGE" > build.env
+    # On the default branch, move :latest to the current recipe (keeping the
+    # recipe-hash label) so later unchanged branches resolve to :latest above.
+    - |
+      if [ "$CI_COMMIT_BRANCH" = "$CI_DEFAULT_BRANCH" ] && [ "$IMAGE" != "$REPO:latest" ]; then
+        docker tag "$IMAGE" "$REPO:latest"
+        docker push "$REPO:latest"
+      fi
+  artifacts:
+    reports:
+      dotenv: build.env
+  rules: *dvp_rules
+
+# Lint, vendor and tests run inside the unified image ($BUILDER_IMAGE, built by
+# build:images): the shell runner host has neither libvirt headers (needed to
+# typecheck/compile pkg/virt-launcher) nor qemu-img (needed by pkg/host-disk
+# tests). Each job pulls the published image instead of building it.
+lint:go:
+  stage: lint
+  needs:
+    - job: build:images
+      artifacts: true
+  script:
+    - make lint IMAGE="$BUILDER_IMAGE"
+  rules: *dvp_rules
+
+# Fail if the committed vendor directory drifted from go.work.
+check:vendor:
+  stage: lint
+  needs:
+    - job: build:images
+      artifacts: true
+  script:
+    - make vendor-verify IMAGE="$BUILDER_IMAGE"
+  rules: *dvp_rules
+
+# Fail if generated code (CRDs, deepcopy, swagger, client, mocks) is stale.
+# Runs the upstream bazel/codegen flow (make generate-verify) inside the image.
+check:generate:
+  stage: lint
+  timeout: 1h
+  needs:
+    - job: build:images
+      artifacts: true
+  script:
+    - make generate-verify-local IMAGE="$BUILDER_IMAGE"
+  rules: *dvp_rules
+
+# Run kubevirt tests.
+# DVP ships nearly every component built from this fork (virt-controller,
+# virt-handler, virt-launcher, virt-operator, virt-api, virtctl, sidecars,
+# export proxy/server, virt-chroot), so `make test-unit` runs all unit tests
+# instead of an allowlist. tests/... (e2e, needs a cluster) is not run.
+test:
+  stage: test
+  timeout: 2h
+  needs:
+    - job: build:images
+      artifacts: true
+  script:
+    - make test-unit IMAGE="$BUILDER_IMAGE"
+  # JUnit reports let GitLab render each test case (and failures) in the job
+  # and MR UI; the ginkgo stdout and the (klog-noisy) stderr are kept as raw
+  # logs for grepping. All expire after 3 days.
+  artifacts:
+    when: always
+    expire_in: 3 days
+    paths:
+      - _out/junit/*.xml
+      - _out/test-output.log
+      - _out/test-stderr.log
+    reports:
+      junit: _out/junit/*.xml
+  rules: *dvp_rules

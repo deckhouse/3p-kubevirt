@@ -924,7 +924,7 @@ var _ = Describe("[sig-operator]Operator", Serial, decorators.SigOperator, func(
 						return err
 					}
 					return nil
-				}, 60*time.Second, 1*time.Second).Should(BeNil())
+				}, 60*time.Second, 1*time.Second).Should(Succeed())
 
 				By(fmt.Sprintf("Verifying firmware UUID for vm %s", vmYaml.vmName))
 				Eventually(func(g Gomega) {

@@ -39,7 +39,7 @@ SYNC_VENDOR=${SYNC_VENDOR:-false}
 
 TEMPFILE=".rsynctemp"
 
-CONTAINER_ENV="--env HTTP_PROXY=${HTTP_PROXY} --env HTTPS_PROXY=${HTTP_PROXY} --env NO_PROXY=${NO_PROXY} --env KUBEVIRT_NO_BAZEL=${KUBEVIRT_NO_BAZEL}"
+CONTAINER_ENV="--env HTTP_PROXY=${HTTP_PROXY} --env HTTPS_PROXY=${HTTP_PROXY} --env NO_PROXY=${NO_PROXY} --env KUBEVIRT_NO_BAZEL=${KUBEVIRT_NO_BAZEL} --env HOST_ARCHITECTURE=${HOST_ARCHITECTURE:-} --env KUBEVIRT_GIT_COMMIT=${KUBEVIRT_GIT_COMMIT:-} --env KUBEVIRT_GIT_VERSION=${KUBEVIRT_GIT_VERSION:-} --env KUBEVIRT_GIT_TREE_STATE=${KUBEVIRT_GIT_TREE_STATE:-}"
 
 # Create the persistent container volume
 if [ -z "$($KUBEVIRT_CRI volume list | grep ${BUILDER})" ]; then
@@ -138,14 +138,17 @@ if [ -n "$ARTIFACTS" ]; then
     fi
 fi
 
-# Ensure that a bazel server which is running is the correct one
-if [ -n "$($KUBEVIRT_CRI ps --format '{{.Names}}' | grep ${BUILDER}-bazel-server)" ]; then
-    # check if the image is correct
+# Ensure that any leftover bazel server is the correct, running one; otherwise
+# force-remove it. Checking `ps -a` (not just `ps`) catches an exited/created
+# container from a crashed run whose --rm never fired -- it would keep the
+# name and make the `run` below fail with a name conflict.
+if [ -n "$($KUBEVIRT_CRI ps -a --format '{{.Names}}' | grep ${BUILDER}-bazel-server)" ]; then
+    running=$($KUBEVIRT_CRI ps --format '{{.Names}}' | grep ${BUILDER}-bazel-server || true)
     builder_id=$($KUBEVIRT_CRI inspect --format='{{.Id}}' ${KUBEVIRT_BUILDER_IMAGE})
-    bazel_server_id=$($KUBEVIRT_CRI inspect --format='{{.Image}}' ${BUILDER}-bazel-server)
-    if [ "${builder_id}" != "${bazel_server_id}" ]; then
-        echo "Bazel server is outdated, restarting ..."
-        $KUBEVIRT_CRI stop ${BUILDER}-bazel-server
+    bazel_server_id=$($KUBEVIRT_CRI inspect --format='{{.Image}}' ${BUILDER}-bazel-server 2>/dev/null || echo none)
+    if [ -z "${running}" ] || [ "${builder_id}" != "${bazel_server_id}" ]; then
+        echo "Removing stale bazel server ..."
+        $KUBEVIRT_CRI rm -f ${BUILDER}-bazel-server >/dev/null 2>&1 || true
     fi
 fi
 

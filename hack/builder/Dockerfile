@@ -1,14 +1,11 @@
 FROM quay.io/centos/centos:stream9
 
 ARG ARCH
-ARG SONOBUOY_ARCH
 ARG BAZEL_ARCH
 
-ENV BAZEL_VERSION=5.4.1
-ENV GIMME_GO_VERSION=1.23.9
-ENV OPERATOR_COURIER_VERSION=2.1.11
-ENV SONOBUOY_VERSION=0.56.9
-ENV GOLANGCI_LINT_VERSION=v1.60.1
+ENV BAZEL_VERSION=6.5.0
+ENV GO_VERSION=1.25.10
+ENV GOLANGCI_LINT_VERSION=v2.12.2
 
 ENV KUBEVIRT_CREATE_BAZELRCS=false
 
@@ -16,8 +13,8 @@ ENV KUBEVIRT_CREATE_BAZELRCS=false
 RUN dnf install -y dnf-plugins-core && \
     dnf config-manager --enable crb && \
     dnf install -y --setopt=install_weak_deps=False \
-        java-11-openjdk-devel \
         libvirt-devel \
+        pkgconf-pkg-config \
         cpio \
         patch \
         make \
@@ -35,24 +32,13 @@ RUN dnf install -y dnf-plugins-core && \
         protobuf-compiler \
         python3 \
         python3-devel \
-        python3-pip \
-        python3-setuptools \
-        redhat-rpm-config \
         jq \
         wget \
-        rubygems \
-        diffutils \
-        skopeo && \
+        diffutils && \
     dnf clean -y all
 
 # Avoids the need to install sssd-client by disabling lookups
 COPY nsswitch.conf /etc/nsswitch.conf
-
-# Necessary for generation of HTML-formatted API docs (.adoc)
-RUN gem install asciidoctor
-
-# Generates Asciidoc files from swagger.json
-ADD https://storage.googleapis.com/builddeps/swagger2markup-cli-1.3.3.jar /opt/swagger2markup-cli/swagger2markup-cli-1.3.3.jar
 
 # Necessary for Bazel to find Python inside the container
 #
@@ -60,67 +46,40 @@ ADD https://storage.googleapis.com/builddeps/swagger2markup-cli-1.3.3.jar /opt/s
 # https://github.com/bazelbuild/bazel/issues/11554
 RUN ln -s /usr/bin/python3 /usr/bin/python
 
-ENV JAVA_HOME=/usr/lib/jvm/java-11
+# Install Go straight from go.dev. This replaces the upstream gimme setup,
+# which fetches a github script that then downloads Go -- two flaky network
+# hops that hang/fail under emulation.
+RUN curl -sL "https://go.dev/dl/go${GO_VERSION}.linux-${ARCH}.tar.gz" | tar -C /usr/local -xz
 
-# reference to master is for an external repo and can't yet be changed
-RUN mkdir -p /gimme && curl -sL \
-    https://raw.githubusercontent.com/travis-ci/gimme/master/gimme | \
-    HOME=/gimme bash >> /etc/profile.d/gimme.sh
+ENV GOPATH="/go" GOBIN="/usr/bin" GO111MODULE="on" PATH="/usr/local/go/bin:${PATH}"
 
-ENV GOPATH="/go" GOBIN="/usr/bin" GO111MODULE="on"
-
-# Install persistent go packages
+# Install the code generators invoked by hack/generate.sh + hack/gen-proto.sh
+# and goimports (used to format generated code).
 RUN set -x && \
     mkdir -p /go && \
-    source /etc/profile.d/gimme.sh && \
-    go install -v golang.org/x/tools/cmd/goimports@d5fe738 && \
-    go install -v mvdan.cc/sh/v3/cmd/shfmt@v3.1.1 && \
-    go install -v k8s.io/code-generator/cmd/conversion-gen@v0.31.1  && \
-    go install -v k8s.io/code-generator/cmd/deepcopy-gen@v0.31.1 && \
-    go install -v k8s.io/code-generator/cmd/defaulter-gen@v0.31.1  && \
-    go install -v k8s.io/kube-openapi/cmd/openapi-gen@f7e401e && \
+    go install -v golang.org/x/tools/cmd/goimports@latest && \
+    go install -v k8s.io/code-generator/cmd/conversion-gen@v0.32.5  && \
+    go install -v k8s.io/code-generator/cmd/deepcopy-gen@v0.32.5 && \
+    go install -v k8s.io/code-generator/cmd/defaulter-gen@v0.32.5  && \
+    go install -v k8s.io/kube-openapi/cmd/openapi-gen@v0.0.0-20260330154417-16be699c7b31 && \
     go install -v github.com/golang/protobuf/protoc-gen-go@1643683 && \
-    go install -v k8s.io/code-generator/cmd/client-gen@v0.31.1 && \
-    go install -v github.com/securego/gosec/v2/cmd/gosec@0ce48a5 && \
-    go install -v sigs.k8s.io/controller-tools/cmd/controller-gen@v0.16.3 && \
-    go install -v github.com/kubevirt/monitoring/monitoringlinter/cmd/monitoringlinter@e2be790 && \
+    go install -v k8s.io/code-generator/cmd/client-gen@v0.32.5 && \
+    go install -v sigs.k8s.io/controller-tools/cmd/controller-gen@v0.20.1 && \
     go clean -cache -modcache
 
+# mockgen v0.6.0 (v0.5.1 pulls an x/tools that fails to build on Go 1.25).
+# TODO: the vendored go.uber.org/mock is still v0.5.1; bump it and regenerate
+# the mocks so check:generate produces a zero diff.
 RUN set -x && \
-    source /etc/profile.d/gimme.sh && \
-    go install -v github.com/mattn/goveralls@21feffdfd && \
-    go install -v go.uber.org/mock/mockgen@v0.5.1 && \
+    go install -v go.uber.org/mock/mockgen@v0.6.0 && \
     go install -v github.com/rmohr/go-swagger-utils/swagger-doc@v0.0.0-20181110145135-878f7deb1d17 && \
     go clean -cache -modcache
 
+# Build golangci-lint from source: the prebuilt-binary install.sh fails its
+# checksum verification behind the CI proxy.
 RUN set -x && \
-    source /etc/profile.d/gimme.sh && \
-    git clone https://github.com/kubernetes/test-infra.git && \
-    cd /test-infra && \
-    git checkout f2693aba912dd40c974304caca999d45ee8dce33 && \
-    cd /test-infra/robots/pr-creator && \
-    go install && \
-    cd /test-infra/robots/issue-creator && \
-    go install && \
-    cd /test-infra/robots/pr-labeler && \
-    go install && \
-    go clean -cache -modcache -r && \
-    rm -rf /test-infra && \
-    rm -rf /go && mkdir /go
-
-RUN set -x && \
-    source /etc/profile.d/gimme.sh && \
-    go install -v mvdan.cc/gofumpt@v0.6.0 && \
-    curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b "$(go env GOROOT)"/bin $GOLANGCI_LINT_VERSION
-
-RUN pip3 install --upgrade operator-courier==${OPERATOR_COURIER_VERSION}
-
-RUN set -x && \
-    wget https://github.com/vmware-tanzu/sonobuoy/releases/download/v${SONOBUOY_VERSION}/sonobuoy_${SONOBUOY_VERSION}_linux_${SONOBUOY_ARCH}.tar.gz && \
-    tar xvf sonobuoy_${SONOBUOY_VERSION}_linux_${SONOBUOY_ARCH}.tar.gz && \
-    chmod +x sonobuoy && \
-    mv sonobuoy /usr/bin && \
-    rm sonobuoy_${SONOBUOY_VERSION}_linux_${SONOBUOY_ARCH}.tar.gz
+    go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${GOLANGCI_LINT_VERSION} && \
+    go clean -cache -modcache
 
 COPY rsyncd.conf /etc/rsyncd.conf
 

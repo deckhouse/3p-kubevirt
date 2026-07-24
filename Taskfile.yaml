@@ -1,0 +1,39 @@
+# https://taskfile.dev
+#
+# Thin aliases over the Makefile targets (see the "DVP fork" section there);
+# the recipes live in Makefile + hack/*.sh.
+version: "3"
+
+tasks:
+  lint:
+    desc: Run the golangci-lint suite in a container (pass linter args after --, e.g. task lint -- --fix)
+    cmds:
+      - make lint LINT_ARGS='{{.CLI_ARGS}}'
+
+  test:
+    desc: Run unit tests (pkg, cmd, staging) in a container
+    cmds:
+      - make test-unit
+
+  check:vendor:
+    desc: Verify the committed vendor directory is in sync with go.work
+    cmds:
+      - make vendor-verify
+
+  update:
+    desc: Update Go deps and vendor (pass go get args after --, e.g. task update -- -u)
+    cmds:
+      - make update UPDATE_ARGS='{{.CLI_ARGS}}'
+
+  generate:
+    desc: Regenerate all generated code (CRDs, deepcopy, swagger, client, mocks)
+    cmds:
+      # Builds the fork's builder image (hack/builder) and runs the full
+      # kubevirt codegen in it -- bazel + the k8s code-generators live there,
+      # not in the ci-image.
+      - make generate-local
+
+  check:generate:
+    desc: Fail if regenerated code differs from what is committed
+    cmds:
+      - make generate-verify-local

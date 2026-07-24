@@ -506,7 +506,7 @@ func convertToUsers(guestInfo *libvirt.DomainGuestInfo) []api.User {
 			users = append(users, api.User{
 				Name:      user.Name,
 				Domain:    user.Domain,
-				LoginTime: (time.Duration(user.LoginTime) * time.Millisecond).Seconds(),
+				LoginTime: (time.Duration(user.LoginTime) * time.Millisecond).Seconds(), // #nosec G115 login time in milliseconds fits in int64
 			})
 		}
 	}

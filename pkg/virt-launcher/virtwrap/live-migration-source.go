@@ -1068,7 +1068,11 @@ func configureLocalDiskToMigrate(dom *libvirtxml.Domain, vmi *v1.VirtualMachineI
 		// Configure the slice to enable to migrate the volume to a destination with different size
 		// See suggestion in: https://issues.redhat.com/browse/RHEL-4607
 		// Skip Slices configuration for qcow2 disks
-		if dom.Devices.Disks[i].Driver.Type != "qcow2" && dom.Devices.Disks[i].Source.Slices == nil {
+		driverType := ""
+		if dom.Devices.Disks[i].Driver != nil {
+			driverType = dom.Devices.Disks[i].Driver.Type
+		}
+		if driverType != "qcow2" && dom.Devices.Disks[i].Source.Slices == nil {
 			dom.Devices.Disks[i].Source.Slices = &libvirtxml.DomainDiskSlices{
 				Slices: []libvirtxml.DomainDiskSlice{
 					{

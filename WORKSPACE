@@ -21,6 +21,19 @@ http_archive(
     ],
 )
 
+# Pin rules_cc ahead of any dependency macro so io_bazel_rules_go v0.60 gets the
+# version it needs (@rules_cc//cc/common:cc_common.bzl); an older transitive
+# rules_cc from rules_proto would otherwise win by being declared first.
+http_archive(
+    name = "rules_cc",
+    sha256 = "b8b918a85f9144c01f6cfe0f45e4f2838c7413961a8ff23bc0c6cdf8bb07a3b6",
+    strip_prefix = "rules_cc-0.1.5",
+    urls = [
+        "https://github.com/bazelbuild/rules_cc/releases/download/0.1.5/rules_cc-0.1.5.tar.gz",
+        "https://storage.googleapis.com/builddeps/b8b918a85f9144c01f6cfe0f45e4f2838c7413961a8ff23bc0c6cdf8bb07a3b6",
+    ],
+)
+
 # Bazel buildtools prebuilt binaries
 http_archive(
     name = "buildifier_prebuilt",
@@ -55,11 +68,11 @@ rules_proto_toolchains()
 
 http_archive(
     name = "io_bazel_rules_go",
-    sha256 = "80a98277ad1311dacd837f9b16db62887702e9f1d1c4c9f796d0121a46c8e184",
+    sha256 = "86d3dc8f59d253524f933aaf2f3c05896cb0b605fc35b460c0b4b039996124c6",
     urls = [
-        "https://mirror.bazel.build/github.com/bazelbuild/rules_go/releases/download/v0.46.0/rules_go-v0.46.0.zip",
-        "https://github.com/bazelbuild/rules_go/releases/download/v0.46.0/rules_go-v0.46.0.zip",
-        "https://storage.googleapis.com/builddeps/80a98277ad1311dacd837f9b16db62887702e9f1d1c4c9f796d0121a46c8e184",
+        "https://mirror.bazel.build/github.com/bazel-contrib/rules_go/releases/download/v0.60.0/rules_go-v0.60.0.zip",
+        "https://github.com/bazel-contrib/rules_go/releases/download/v0.60.0/rules_go-v0.60.0.zip",
+        "https://storage.googleapis.com/builddeps/86d3dc8f59d253524f933aaf2f3c05896cb0b605fc35b460c0b4b039996124c6",
     ],
 )
 
@@ -101,16 +114,21 @@ buildifier_prebuilt_register_toolchains(
 
 http_archive(
     name = "bazel_gazelle",
-    sha256 = "d3fa66a39028e97d76f9e2db8f1b0c11c099e8e01bf363a923074784e451f809",
+    sha256 = "92329a7dbb26d0beacc43da669211546ea6627582793f4dd5f28837fde3a5c08",
     urls = [
-        "https://mirror.bazel.build/github.com/bazelbuild/bazel-gazelle/releases/download/v0.33.0/bazel-gazelle-v0.33.0.tar.gz",
-        "https://github.com/bazelbuild/bazel-gazelle/releases/download/v0.33.0/bazel-gazelle-v0.33.0.tar.gz",
-        "https://storage.googleapis.com/builddeps/d3fa66a39028e97d76f9e2db8f1b0c11c099e8e01bf363a923074784e451f809",
+        "https://github.com/bazel-contrib/bazel-gazelle/releases/download/v0.50.0/bazel-gazelle-v0.50.0.tar.gz",
+        "https://storage.googleapis.com/builddeps/92329a7dbb26d0beacc43da669211546ea6627582793f4dd5f28837fde3a5c08",
     ],
 )
 
 http_archive(
     name = "io_bazel_rules_docker",
+    # rules_docker 0.16 registers docker toolchains whose constraints reference
+    # @bazel_tools//platforms:{linux,windows,osx}, removed in Bazel 6; that
+    # breaks toolchain resolution for every target. Repoint them at @platforms.
+    patch_cmds = [
+        "sed -i 's|@bazel_tools//platforms:linux|@platforms//os:linux|g; s|@bazel_tools//platforms:windows|@platforms//os:windows|g; s|@bazel_tools//platforms:osx|@platforms//os:osx|g' toolchains/docker/BUILD",
+    ],
     sha256 = "95d39fd84ff4474babaf190450ee034d958202043e366b9fc38f438c9e6c3334",
     strip_prefix = "rules_docker-0.16.0",
     urls = [
@@ -203,8 +221,8 @@ load(
 go_rules_dependencies()
 
 go_register_toolchains(
-    go_version = "1.23.9",
     nogo = "@//:nogo_vet",
+    version = "1.25.12",
 )
 
 load("@com_github_ash2k_bazel_tools//goimports:deps.bzl", "goimports_dependencies")
@@ -233,7 +251,7 @@ go_repository(
     version = "v0.0.0-20230822172742-b8732ec3820d",
 )
 
-gazelle_dependencies()
+gazelle_dependencies(go_sdk = "go_sdk")
 
 bazeldnf_dependencies()
 

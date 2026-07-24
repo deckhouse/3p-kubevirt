@@ -12,6 +12,9 @@ import (
 
 func getDRAUSBHostDevices(vmi *v1.VirtualMachineInstance) ([]api.HostDevice, []api.HostDevice, error) {
 	if vmi.Status.DeviceStatus == nil {
+		if len(vmi.Spec.ResourceClaims) == 0 {
+			return nil, nil, nil
+		}
 		return nil, nil, fmt.Errorf("vmi has dra usb devices but no device status found")
 	}
 

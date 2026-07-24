@@ -116,5 +116,4 @@ var _ = Describe("Validating VMI network spec", func() {
 		Entry("up is not supported for sriov", v1.InterfaceStateLinkUp, MatchRegexp("up.+SR-IOV")),
 		Entry("absent is not supported when bridge-binding is not used", v1.InterfaceStateAbsent, MatchRegexp("absent.+bridge")),
 	)
-
 })

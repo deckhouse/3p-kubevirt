@@ -79,6 +79,7 @@ func getCert(pod *k8sv1.Pod, port string) []byte {
 	conf := &tls.Config{
 		//nolint:gosec
 		InsecureSkipVerify: true,
+		//nolint:gosec // the helper only captures the raw certificate, no session data is trusted
 		VerifyPeerCertificate: func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
 			mutex.Lock()
 			defer mutex.Unlock()
@@ -96,7 +97,8 @@ func getCert(pod *k8sv1.Pod, port string) []byte {
 		err := ForwardPorts(pod, []string{fmt.Sprintf("%s:%s", randPort, port)}, stopChan, timeout*time.Second)
 		ExpectWithOffset(offset, err).ToNot(HaveOccurred())
 
-		conn, err := tls.Dial("tcp4", fmt.Sprintf("localhost:%s", randPort), conf)
+		dialer := &tls.Dialer{Config: conf}
+		conn, err := dialer.DialContext(context.Background(), "tcp4", fmt.Sprintf("localhost:%s", randPort))
 		if err == nil {
 			defer conn.Close()
 		}

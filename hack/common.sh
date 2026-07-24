@@ -45,7 +45,9 @@ MANIFESTS_OUT_DIR=$OUT_DIR/manifests
 MANIFEST_TEMPLATES_OUT_DIR=$OUT_DIR/templates/manifests
 PYTHON_CLIENT_OUT_DIR=$OUT_DIR/client-python
 ARCHITECTURE="${ARCHITECTURE:-$(uname -m)}"
-HOST_ARCHITECTURE="$(uname -m)"
+# Allow overriding the detected arch: under amd64 emulation on Apple Silicon
+# uname reports aarch64, which would pick the wrong bazel config.
+HOST_ARCHITECTURE="${HOST_ARCHITECTURE:-$(uname -m)}"
 KUBEVIRT_NO_BAZEL=${KUBEVIRT_NO_BAZEL:-false}
 KUBEVIRT_RELEASE=${KUBEVIRT_RELEASE:-false}
 OPERATOR_MANIFEST_PATH=$MANIFESTS_OUT_DIR/release/kubevirt-operator.yaml

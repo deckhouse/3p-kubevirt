@@ -157,15 +157,15 @@ var _ = Describe("Apply", func() {
 			Expect(ok).To(BeTrue())
 			Expect(managedBy).To(Equal("virt-operator"))
 
-			version, ok := deployment.Annotations["kubevirt.io/install-strategy-version"]
+			version, ok := deployment.Annotations["install.internal.virtualization.deckhouse.io/install-strategy-version"]
 			Expect(ok).To(BeTrue())
 			Expect(version).To(Equal("fakeversion"))
 
-			registry, ok := deployment.Annotations["kubevirt.io/install-strategy-registry"]
+			registry, ok := deployment.Annotations["install.internal.virtualization.deckhouse.io/install-strategy-registry"]
 			Expect(ok).To(BeTrue())
 			Expect(registry).To(Equal("fakeregistry"))
 
-			id, ok := deployment.Annotations["kubevirt.io/install-strategy-identifier"]
+			id, ok := deployment.Annotations["install.internal.virtualization.deckhouse.io/install-strategy-identifier"]
 			Expect(ok).To(BeTrue())
 			Expect(id).To(Equal("fakeid"))
 		})

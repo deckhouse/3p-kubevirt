@@ -32,6 +32,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	. "github.com/onsi/gomega/gstruct"
 
 	k8sv1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -187,7 +188,9 @@ var _ = Describe("VirtualMachineInstance migration target", func() {
 		mockIsolationDetector.EXPECT().Detect(gomock.Any()).Return(mockIsolationResult, nil).AnyTimes()
 		mockIsolationDetector.EXPECT().AdjustResources(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
 
-		migrationProxy := migrationproxy.NewMigrationProxyManager("0.0.0.0", nil, tlsConfig, tlsConfig, config)
+		portRange, err := migrationproxy.NewPortRange(49152, 49215)
+		Expect(err).ToNot(HaveOccurred())
+		migrationProxy := migrationproxy.NewMigrationProxyManager(portRange, tlsConfig, tlsConfig, config)
 		launcherClientManager := &launcher_clients.MockLauncherClientManager{
 			Initialized: true,
 		}
