@@ -1302,6 +1302,7 @@ func (t *TemplateService) RenderHotplugAttachmentPodTemplate(volumes []*v1.Volum
 			TerminationGracePeriodSeconds: &zero,
 			HostNetwork:                   true,
 			DNSPolicy:                     k8sv1.DNSClusterFirstWithHostNet,
+			PriorityClassName:             ownerPod.Spec.PriorityClassName,
 		},
 	}
 
@@ -1519,6 +1520,7 @@ func (t *TemplateService) RenderHotplugAttachmentTriggerPodTemplate(volume *v1.V
 			TerminationGracePeriodSeconds: &zero,
 			HostNetwork:                   true,
 			DNSPolicy:                     k8sv1.DNSClusterFirstWithHostNet,
+			PriorityClassName:             ownerPod.Spec.PriorityClassName,
 		},
 	}
 
