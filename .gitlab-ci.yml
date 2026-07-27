@@ -99,12 +99,18 @@ build:images:
 # build:images): the shell runner host has neither libvirt headers (needed to
 # typecheck/compile pkg/virt-launcher) nor qemu-img (needed by pkg/host-disk
 # tests). Each job pulls the published image instead of building it.
+#
+# The explicit pull matters: shell runners keep a persistent docker cache, and
+# a stale local builder:latest (e.g. the old gimme-based recipe without Go on
+# PATH) shadows the published one — the Makefile `image` target uses any local
+# image without pulling.
 lint:go:
   stage: lint
   needs:
     - job: build:images
       artifacts: true
   script:
+    - docker pull "$BUILDER_IMAGE"
     - make lint IMAGE="$BUILDER_IMAGE"
   rules: *dvp_rules
 
@@ -115,6 +121,7 @@ check:vendor:
     - job: build:images
       artifacts: true
   script:
+    - docker pull "$BUILDER_IMAGE"
     - make vendor-verify IMAGE="$BUILDER_IMAGE"
   rules: *dvp_rules
 
@@ -127,6 +134,7 @@ check:generate:
     - job: build:images
       artifacts: true
   script:
+    - docker pull "$BUILDER_IMAGE"
     - make generate-verify-local IMAGE="$BUILDER_IMAGE"
   rules: *dvp_rules
 
@@ -142,6 +150,7 @@ test:
     - job: build:images
       artifacts: true
   script:
+    - docker pull "$BUILDER_IMAGE"
     - make test-unit IMAGE="$BUILDER_IMAGE"
   # JUnit reports let GitLab render each test case (and failures) in the job
   # and MR UI; the ginkgo stdout and the (klog-noisy) stderr are kept as raw

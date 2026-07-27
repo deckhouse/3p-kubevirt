@@ -4264,6 +4264,47 @@ var _ = Describe("Template", func() {
 			Expect(pod.Spec.Tolerations).To(BeEquivalentTo(vmi.Spec.Tolerations))
 		})
 
+		It("should inherit the priority class from the owner pod when rendering hotplug attachment pods", func() {
+			vmi := api.NewMinimalVMI("fake-vmi")
+			vmi.Spec.PriorityClassName = "vm-priority"
+			ownerPod, err := svc.RenderLaunchManifest(vmi)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(ownerPod.Spec.PriorityClassName).To(Equal("vm-priority"))
+
+			vmi.Status.SelinuxContext = "test_u:test_r:test_t:s0"
+			claimMap := map[string]*k8sv1.PersistentVolumeClaim{}
+			pod, err := svc.RenderHotplugAttachmentPodTemplate([]*v1.Volume{}, nil, ownerPod, vmi, claimMap)
+			Expect(err).ToNot(HaveOccurred())
+
+			Expect(pod.Spec.PriorityClassName).To(Equal("vm-priority"))
+		})
+
+		It("should inherit the priority class from the owner pod when rendering hotplug attachment trigger pods", func() {
+			vmi := api.NewMinimalVMI("fake-vmi")
+			vmi.Spec.PriorityClassName = "vm-priority"
+			ownerPod, err := svc.RenderLaunchManifest(vmi)
+			Expect(err).ToNot(HaveOccurred())
+
+			vmi.Status.SelinuxContext = "test_u:test_r:test_t:s0"
+			pod, err := svc.RenderHotplugAttachmentTriggerPodTemplate(&v1.Volume{}, ownerPod, vmi, "test", true, false)
+			Expect(err).ToNot(HaveOccurred())
+
+			Expect(pod.Spec.PriorityClassName).To(Equal("vm-priority"))
+		})
+
+		It("should leave the priority class empty when the owner pod has none", func() {
+			vmi := api.NewMinimalVMI("fake-vmi")
+			ownerPod, err := svc.RenderLaunchManifest(vmi)
+			Expect(err).ToNot(HaveOccurred())
+
+			vmi.Status.SelinuxContext = "test_u:test_r:test_t:s0"
+			claimMap := map[string]*k8sv1.PersistentVolumeClaim{}
+			pod, err := svc.RenderHotplugAttachmentPodTemplate([]*v1.Volume{}, nil, ownerPod, vmi, claimMap)
+			Expect(err).ToNot(HaveOccurred())
+
+			Expect(pod.Spec.PriorityClassName).To(BeEmpty())
+		})
+
 		It("should compute the correct volumeDevice context when rendering hotplug attachment pods with the FS PersistentVolumeClaim", func() {
 			vmi := api.NewMinimalVMI("fake-vmi")
 			ownerPod, err := svc.RenderLaunchManifest(vmi)
