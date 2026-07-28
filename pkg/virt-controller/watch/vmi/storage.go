@@ -174,7 +174,6 @@ func (c *Controller) processHotplugVolumeStatus(
 			// The attachment pod carries one container per hotplugged disk, so the
 			// readiness of this volume's own container is what counts. Container names
 			// are mapped to volume names through the pod annotations.
-			statusCopy.HotplugVolume.AttachPodUID = ""
 			for _, cs := range attachmentPod.Status.ContainerStatuses {
 				if volumeName == attachmentPod.GetAnnotations()[cs.Name] {
 					if cs.Ready {
@@ -183,6 +182,11 @@ func (c *Controller) processHotplugVolumeStatus(
 					break
 				}
 			}
+			// Otherwise latch the previous AttachPodUID. The container in the
+			// freshly (re)created attachment pod is not Ready yet, but the volume
+			// may still be served by the previous pod's bind mount. Zeroing the UID
+			// here would make virt-handler resolve an empty socket path and report a
+			// healthy volume as "container disk socket path not found".
 		} else if len(attachmentPod.Status.ContainerStatuses) == 1 && attachmentPod.Status.ContainerStatuses[0].Ready {
 			statusCopy.HotplugVolume.AttachPodUID = attachmentPod.UID
 		} else if isPVC {
