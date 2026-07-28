@@ -216,10 +216,12 @@ func (c *Controller) updateVolumeStatus(vmi *virtv1.VirtualMachineInstance, virt
 					}
 					if isReady {
 						status.HotplugVolume.AttachPodUID = uid
-					} else {
-						status.HotplugVolume.AttachPodUID = ""
-
 					}
+					// Otherwise latch the previous AttachPodUID. The container in the
+					// freshly (re)created attachment pod is not Ready yet, but the volume
+					// may still be served by the previous pod's bind mount. Zeroing the UID
+					// here would make virt-handler resolve an empty socket path and report a
+					// healthy volume as "container disk socket path not found".
 				} else if len(attachmentPod.Status.ContainerStatuses) == 1 && attachmentPod.Status.ContainerStatuses[0].Ready {
 					status.HotplugVolume.AttachPodUID = attachmentPod.UID
 				} else if volume.PersistentVolumeClaim != nil {

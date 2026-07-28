@@ -251,6 +251,14 @@ func (m *hotplugMounter) mountAndVerify(vmi *v1.VirtualMachineInstance, sourceUI
 		if volume.ContainerDisk != nil && volume.ContainerDisk.Hotpluggable {
 			entry, err := m.newMountTargetEntry(vmi, virtLauncherUID, sourceUID, volume.Name)
 			if err != nil {
+				if errors.Is(err, ErrDiskContainerGone) {
+					// Socket is not available yet: the attachment pod is being (re)created
+					// or its image is not pulled. Skip this volume instead of failing the
+					// whole sync, otherwise a single not-ready container disk holds every
+					// other hotplug volume hostage.
+					log.DefaultLogger().Object(vmi).Reason(err).V(4).Infof("hotplug container disk %s not ready yet, skipping", volume.Name)
+					continue
+				}
 				return nil, err
 			}
 			record.MountTargetEntries = append(record.MountTargetEntries, entry)
@@ -293,6 +301,10 @@ func (m *hotplugMounter) mountAndVerify(vmi *v1.VirtualMachineInstance, sourceUI
 
 				sourceFile, err := m.getContainerDiskPath(vmi, &volume, volume.Name, sourceUID)
 				if err != nil {
+					if errors.Is(err, ErrDiskContainerGone) {
+						log.DefaultLogger().Object(vmi).Reason(err).V(4).Infof("hotplug container disk %s not ready yet, skipping", volume.Name)
+						continue
+					}
 					return nil, fmt.Errorf("failed to find a sourceFile in containerDisk %v: %v", volume.Name, err)
 				}
 
@@ -377,7 +389,7 @@ func (m *hotplugMounter) newMountTargetEntry(
 
 	sock, err := m.hotplugPathGetter(vmi, volumeName, sourceUID)
 	if err != nil {
-		return vmiMountTargetEntry{}, err
+		return vmiMountTargetEntry{}, ErrDiskContainerGone
 	}
 	return vmiMountTargetEntry{
 		TargetFile: targetFile,
