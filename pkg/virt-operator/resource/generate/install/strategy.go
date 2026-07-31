@@ -608,6 +608,17 @@ func GenerateCurrentInstallStrategy(config *operatorutil.KubeVirtDeploymentConfi
 	return strategy, nil
 }
 
+// NewCertsOnlyStrategy returns a strategy containing only the non-CA
+// certificate secrets. They are generated locally, without the install
+// strategy config map, so this strategy is available even while the install
+// strategy is pending. It is used to keep certificates rotated when the full
+// sync cannot run.
+func NewCertsOnlyStrategy(installNamespace string, operatorNamespace string) *Strategy {
+	return &Strategy{
+		certificateSecrets: components.NewCertSecrets(installNamespace, operatorNamespace),
+	}
+}
+
 func getVirtHandlerServiceAccount(namespace string) string {
 	prefix := fmt.Sprintf("system:serviceaccount:%s", namespace)
 	return fmt.Sprintf("%s:%s", prefix, components.HandlerServiceAccountName)

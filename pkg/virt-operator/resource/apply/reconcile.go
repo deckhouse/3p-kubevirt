@@ -502,6 +502,18 @@ type Reconciler struct {
 	aggregatorclient install.APIServiceInterface
 	expectations     *util.Expectations
 	recorder         record.EventRecorder
+
+	// Set once Sync got as far as the certificates, so a caller that keeps them
+	// rotated on its own knows this Sync already did.
+	certificatesReached bool
+}
+
+// CertificatesReached reports whether Sync got as far as applying the
+// certificates. A caller must not rotate them itself when it did: the full sync
+// evaluates the secrets through the same informer cache, which cannot have
+// observed a write made earlier in the very same reconcile.
+func (r *Reconciler) CertificatesReached() bool {
+	return r.certificatesReached
 }
 
 func NewReconciler(kv *v1.KubeVirt, targetStrategy install.StrategyInterface, stores util.Stores, config util.OperatorConfig, clientset kubecli.KubevirtClient, aggregatorclient install.APIServiceInterface, expectations *util.Expectations, recorder record.EventRecorder) (*Reconciler, error) {
@@ -648,6 +660,7 @@ func (r *Reconciler) Sync(queue workqueue.TypedRateLimitingInterface[string]) (b
 		return false, err
 	}
 
+	r.certificatesReached = true
 	err = r.createOrUpdateComponentsWithCertificates(queue)
 	if err != nil {
 		return false, err

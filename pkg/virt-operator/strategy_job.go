@@ -6,6 +6,7 @@ import (
 
 	batchv1 "k8s.io/api/batch/v1"
 	k8sv1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/pointer"
 
@@ -16,6 +17,20 @@ import (
 	"kubevirt.io/kubevirt/pkg/virt-operator/resource/generate/components"
 	"kubevirt.io/kubevirt/pkg/virt-operator/util"
 	operatorutil "kubevirt.io/kubevirt/pkg/virt-operator/util"
+)
+
+const (
+	// Attempts of the job itself. The operator recreates the job and backs off
+	// between attempts, so there is no need for a long in-job backoff on top.
+	installStrategyJobBackoffLimit = 3
+	// Wall clock budget of the job, covering scheduling and every attempt. Kept
+	// generous because a cold node pulling the operator image over a slow
+	// registry must not be killed mid-pull; reaching a terminal state at all is
+	// what matters, and the retry cadence is set by the operator.
+	installStrategyJobDeadlineSeconds = 1800
+	// Backstop for a job the operator never gets to collect, for instance
+	// because it is not running. A job it does see is removed much earlier.
+	installStrategyJobTTLSeconds = 3600
 )
 
 func (c *KubeVirtController) generateInstallStrategyJob(infraPlacement *v1.ComponentConfig, config *operatorutil.KubeVirtDeploymentConfig) (*batchv1.Job, error) {
@@ -52,6 +67,17 @@ func (c *KubeVirtController) generateInstallStrategyJob(infraPlacement *v1.Compo
 			},
 		},
 		Spec: batchv1.JobSpec{
+			BackoffLimit: pointer.Int32(installStrategyJobBackoffLimit),
+			// The job's pod can stay Pending indefinitely (e.g. unschedulable
+			// or broken CNI), which backoffLimit never catches; the deadline
+			// forces a terminal JobFailed condition so the job gets recreated.
+			// Keep it generous: a cold node pulling the operator image over a
+			// slow registry must not be killed mid-pull, and the retry cadence
+			// is driven by the operator, not by this deadline.
+			ActiveDeadlineSeconds: pointer.Int64(installStrategyJobDeadlineSeconds),
+			// Backstop cleanup: if the operator misses the finished job, TTL
+			// removes it and a fresh one is created on the next sync.
+			TTLSecondsAfterFinished: pointer.Int32(installStrategyJobTTLSeconds),
 			Template: k8sv1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
@@ -122,6 +148,38 @@ func (c *KubeVirtController) generateInstallStrategyJob(infraPlacement *v1.Compo
 
 	return job, nil
 }
+
+// installStrategyJobFinishedAt returns the time the install strategy job
+// terminated, whether it completed or failed, or nil if it is still running.
+// A failed job never gets a CompletionTime, so the JobFailed condition has to
+// be consulted as well. The second return value describes the failure for
+// logging and events, and is empty for a job that completed.
+func installStrategyJobFinishedAt(job *batchv1.Job) (finishedAt *metav1.Time, failure string) {
+	if job.Status.CompletionTime != nil {
+		return job.Status.CompletionTime, ""
+	}
+	for i := range job.Status.Conditions {
+		condition := job.Status.Conditions[i]
+		if condition.Type == batchv1.JobFailed && condition.Status == k8sv1.ConditionTrue {
+			return &condition.LastTransitionTime, jobFailureDescription(condition)
+		}
+	}
+	return nil, ""
+}
+
+// jobFailureDescription renders the reason of a failed job for logs and events,
+// and stays empty when the condition carries nothing to say.
+func jobFailureDescription(condition batchv1.JobCondition) string {
+	switch {
+	case condition.Reason != "" && condition.Message != "":
+		return fmt.Sprintf("%s: %s", condition.Reason, condition.Message)
+	case condition.Reason != "":
+		return condition.Reason
+	default:
+		return condition.Message
+	}
+}
+
 func (c *KubeVirtController) getInstallStrategyJob(config *operatorutil.KubeVirtDeploymentConfig) (*batchv1.Job, bool) {
 	objs := c.stores.InstallStrategyJobCache.List()
 	for _, obj := range objs {
@@ -148,18 +206,22 @@ func (c *KubeVirtController) garbageCollectInstallStrategyJobs() error {
 		if !ok {
 			continue
 		}
-		if job.Status.CompletionTime == nil {
+		if finishedAt, _ := installStrategyJobFinishedAt(job); finishedAt == nil {
 			continue
 		}
 
-		propagationPolicy := metav1.DeletePropagationForeground
+		// Background propagation, so that a pod stuck terminating on an
+		// unreachable node does not keep the job around and make this run on
+		// every sync. The job may also be gone already: its own TTL and this
+		// collector race each other.
+		propagationPolicy := metav1.DeletePropagationBackground
 		err := batch.Jobs(job.Namespace).Delete(context.Background(), job.Name, metav1.DeleteOptions{
 			PropagationPolicy: &propagationPolicy,
 		})
-		if err != nil {
+		if err != nil && !errors.IsNotFound(err) {
 			return err
 		}
-		log.Log.Object(job).Infof("Garbage collected completed install strategy job")
+		log.Log.Object(job).Infof("Garbage collected finished install strategy job")
 	}
 
 	return nil

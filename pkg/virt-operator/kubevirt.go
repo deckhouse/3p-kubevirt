@@ -22,7 +22,9 @@ package virt_operator
 import (
 	"context"
 	"encoding/json"
+	goerrors "errors"
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -30,7 +32,9 @@ import (
 
 	"golang.org/x/time/rate"
 	appsv1 "k8s.io/api/apps/v1"
+	k8sv1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/tools/cache"
@@ -43,6 +47,7 @@ import (
 
 	"kubevirt.io/kubevirt/pkg/controller"
 	"kubevirt.io/kubevirt/pkg/virt-operator/resource/apply"
+	"kubevirt.io/kubevirt/pkg/virt-operator/resource/generate/components"
 	install "kubevirt.io/kubevirt/pkg/virt-operator/resource/generate/install"
 	"kubevirt.io/kubevirt/pkg/virt-operator/util"
 	operatorutil "kubevirt.io/kubevirt/pkg/virt-operator/util"
@@ -52,11 +57,26 @@ const (
 	virtOperatorJobAppLabel    = "virt-operator-strategy-dumper"
 	installStrategyKeyTemplate = "%s-%d"
 	defaultAddDelay            = 5 * time.Second
+
+	// Bounds for the delay between install strategy job attempts. The job is
+	// recreated until it manages to post the install strategy, so the delay
+	// grows to keep a permanently broken deployment from recreating it forever
+	// at full speed. The state is per process, so a restart starts over.
+	minInstallStrategyJobRetryDelay = 10 * time.Second
+	maxInstallStrategyJobRetryDelay = 10 * time.Minute
 )
 
 type strategyCacheEntry struct {
 	key   string
 	value *install.Strategy
+}
+
+// installStrategyJobRetries counts consecutive install strategy job failures of
+// a deployment, so their recreation can be backed off.
+type installStrategyJobRetries struct {
+	lock         sync.Mutex
+	deploymentID string
+	attempts     int
 }
 
 type KubeVirtController struct {
@@ -71,6 +91,52 @@ type KubeVirtController struct {
 	operatorNamespace    string
 	aggregatorClient     install.APIServiceInterface
 	hasSynced            func() bool
+	strategyJobRetries   installStrategyJobRetries
+}
+
+// installStrategyJobRetryDelay returns how long to wait after a failed install
+// strategy job of this deployment before recreating it.
+func (c *KubeVirtController) installStrategyJobRetryDelay(deploymentID string) time.Duration {
+	c.strategyJobRetries.lock.Lock()
+	defer c.strategyJobRetries.lock.Unlock()
+
+	if c.strategyJobRetries.deploymentID != deploymentID {
+		return minInstallStrategyJobRetryDelay
+	}
+
+	delay := minInstallStrategyJobRetryDelay << c.strategyJobRetries.attempts
+	if delay > maxInstallStrategyJobRetryDelay || delay <= 0 {
+		return maxInstallStrategyJobRetryDelay
+	}
+	return delay
+}
+
+// recordInstallStrategyJobRetry accounts for one more failed attempt of this
+// deployment, growing the delay of the next one.
+func (c *KubeVirtController) recordInstallStrategyJobRetry(deploymentID string) {
+	c.strategyJobRetries.lock.Lock()
+	defer c.strategyJobRetries.lock.Unlock()
+
+	if c.strategyJobRetries.deploymentID != deploymentID {
+		c.strategyJobRetries.deploymentID = deploymentID
+		c.strategyJobRetries.attempts = 0
+	}
+	// Stop counting once the delay is capped, so the shift cannot overflow.
+	if minInstallStrategyJobRetryDelay<<c.strategyJobRetries.attempts < maxInstallStrategyJobRetryDelay {
+		c.strategyJobRetries.attempts++
+	}
+}
+
+// forgetInstallStrategyJobRetries resets the backoff once the install strategy
+// of this deployment is available.
+func (c *KubeVirtController) forgetInstallStrategyJobRetries(deploymentID string) {
+	c.strategyJobRetries.lock.Lock()
+	defer c.strategyJobRetries.lock.Unlock()
+
+	if c.strategyJobRetries.deploymentID == deploymentID {
+		c.strategyJobRetries.deploymentID = ""
+		c.strategyJobRetries.attempts = 0
+	}
 }
 
 func NewKubeVirtController(
@@ -888,6 +954,7 @@ func (c *KubeVirtController) loadInstallStrategy(kv *v1.KubeVirt) (*install.Stra
 	strategy, err = install.LoadInstallStrategyFromCache(c.stores, config)
 	if err == nil {
 		c.cacheInstallStrategy(strategy, config, kv.Generation)
+		c.forgetInstallStrategyJobRetries(config.GetDeploymentID())
 		log.Log.Infof("Loaded install strategy for kubevirt version %s into cache", config.GetKubeVirtVersion())
 		return strategy, false, nil
 	}
@@ -898,27 +965,27 @@ func (c *KubeVirtController) loadInstallStrategy(kv *v1.KubeVirt) (*install.Stra
 	batch := c.clientset.BatchV1()
 	cachedJob, exists := c.getInstallStrategyJob(config)
 	if exists {
-		if cachedJob.Status.CompletionTime != nil {
-			// job completed but we don't have a install strategy still
-			// delete the job and we'll re-execute it once it is removed.
-
-			log.Log.Object(cachedJob).Errorf("Job failed to create install strategy for version %s for namespace %s", config.GetKubeVirtVersion(), config.GetNamespace())
+		// The job is done (completed without posting a strategy, or failed)
+		// so it will never produce the install strategy config map.
+		// Delete the job and we'll re-execute it once it is removed.
+		if finishedAt, failure := installStrategyJobFinishedAt(cachedJob); finishedAt != nil {
+			log.Log.Object(cachedJob).Errorf("Job failed to create install strategy for version %s for namespace %s. %s",
+				config.GetKubeVirtVersion(), config.GetNamespace(), failure)
 			if cachedJob.DeletionTimestamp == nil {
 
-				// Just in case there's an issue causing the job to fail
-				// immediately after being posted, lets perform a rudimentary
-				// for of rate-limiting for how quickly we'll re-attempt.
-				// TODO there's an alpha feature that lets us set a TTL on the job
-				// itself which will ensure it is automatically cleaned up for us
-				// after completion. That feature is feature-gated and isn't something
-				// we can depend on right now though.
-				now := time.Now().UTC().Unix()
-				secondsSinceCompletion := now - cachedJob.Status.CompletionTime.UTC().Unix()
-				if secondsSinceCompletion < 10 {
-					secondsLeft := int64(10)
-					if secondsSinceCompletion > 0 {
-						secondsLeft = secondsSinceCompletion
-					}
+				// A job that keeps failing must not be recreated in a tight
+				// loop, so back off exponentially between attempts. The delay
+				// is kept short for the first attempts to recover quickly from
+				// a transient failure.
+				retryDelay := int64(c.installStrategyJobRetryDelay(config.GetDeploymentID()).Seconds())
+				// The timestamp comes from another component's clock, so a
+				// negative difference is possible. Never wait longer than the
+				// delay itself because of it.
+				secondsSinceFinished := time.Now().UTC().Unix() - finishedAt.UTC().Unix()
+				if secondsSinceFinished < 0 {
+					secondsSinceFinished = 0
+				}
+				if secondsLeft := retryDelay - secondsSinceFinished; secondsLeft > 0 {
 					c.queue.AddAfter(kvkey, time.Duration(secondsLeft)*time.Second)
 
 				} else {
@@ -927,17 +994,26 @@ func (c *KubeVirtController) loadInstallStrategy(kv *v1.KubeVirt) (*install.Stra
 						return nil, true, err
 					}
 
+					// Surface why the job failed before its pod is collected
+					// along with the job, taking its logs with it.
+					if failure != "" {
+						c.recorder.Event(kv, k8sv1.EventTypeWarning, "FailedInstallStrategyJob",
+							fmt.Sprintf("Job %s failed to generate the install strategy for version %s. %s",
+								cachedJob.Name, config.GetKubeVirtVersion(), failure))
+					}
+
 					c.kubeVirtExpectations.InstallStrategyJob.AddExpectedDeletion(kvkey, key)
-					propagationPolicy := metav1.DeletePropagationForeground
+					propagationPolicy := metav1.DeletePropagationBackground
 					err = batch.Jobs(cachedJob.Namespace).Delete(context.Background(), cachedJob.Name, metav1.DeleteOptions{
 						PropagationPolicy: &propagationPolicy,
 					})
-					if err != nil {
+					if err != nil && !errors.IsNotFound(err) {
 						c.kubeVirtExpectations.InstallStrategyJob.DeletionObserved(kvkey, key)
 
 						log.Log.Object(cachedJob).Errorf("Failed to delete job. %v", err)
 						return nil, true, err
 					}
+					c.recordInstallStrategyJobRetry(config.GetDeploymentID())
 					log.Log.Object(cachedJob).Errorf("Deleting job for install strategy version %s because configmap was not generated", config.GetKubeVirtVersion())
 				}
 			}
@@ -996,6 +1072,56 @@ func isUpdating(kv *v1.KubeVirt) bool {
 	return false
 }
 
+// syncCertificatesBestEffort rotates the certificate secrets when the full sync
+// cannot do it: the install strategy is unavailable, or an apply step failed
+// before reaching the certificates. It only maintains certificates that a
+// previous deployment already bootstrapped (the CA secret exists); fresh
+// installs get them through the regular sync. Failures are reported as an event
+// and never fail the calling sync.
+//
+// It deliberately runs only on the degraded paths. Running it unconditionally
+// would rotate a secret that the full sync is about to evaluate from a not yet
+// updated informer cache, rotating the same certificate twice per cycle.
+func (c *KubeVirtController) syncCertificatesBestEffort(kv *v1.KubeVirt) {
+	obj, exists, err := c.stores.SecretCache.GetByKey(c.operatorNamespace + "/" + components.KubeVirtCASecretName)
+	if err != nil || !exists {
+		return
+	}
+	caSecret, ok := obj.(*k8sv1.Secret)
+	if !ok {
+		return
+	}
+
+	caCert, err := components.LoadCertificates(caSecret)
+	if err != nil {
+		log.Log.Object(kv).Reason(err).Error("Failed to load the CA certificate, skipping early certificate rotation")
+		return
+	}
+
+	certsOnlyStrategy := install.NewCertsOnlyStrategy(kv.Namespace, c.operatorNamespace)
+	reconciler, err := apply.NewReconciler(kv, certsOnlyStrategy, c.stores, c.config, c.clientset, c.aggregatorClient, &c.kubeVirtExpectations, c.recorder)
+	if err != nil {
+		log.Log.Object(kv).Reason(err).Error("Failed to create the certificate reconciler, skipping early certificate rotation")
+		return
+	}
+
+	err = reconciler.SyncCertificates(c.queue, caCert)
+	switch {
+	case err == nil:
+	case goerrors.Is(err, apply.ErrCANotUsableForRotation):
+		// The certificates cannot outlive the CA and only the full sync can
+		// replace it, so this is the state in which they do expire. Make it
+		// visible instead of logging it at a verbose level.
+		log.Log.Object(kv).Reason(err).Warning("Cannot keep the certificates rotated while the deployment is not reconciling")
+		c.recorder.Event(kv, k8sv1.EventTypeWarning, "CertificateRotationBlocked",
+			fmt.Sprintf("The certificates cannot be renewed until the deployment reconciles again: %v", err))
+	default:
+		log.Log.Object(kv).Reason(err).Error("Failed to rotate certificates while the full sync is unavailable")
+		c.recorder.Event(kv, k8sv1.EventTypeWarning, "FailedCertificateRotation",
+			fmt.Sprintf("Unable to rotate certificates while the deployment is not reconciling: %v", err))
+	}
+}
+
 func (c *KubeVirtController) syncInstallation(kv *v1.KubeVirt) error {
 	var targetStrategy *install.Strategy
 	var targetPending bool
@@ -1033,11 +1159,15 @@ func (c *KubeVirtController) syncInstallation(kv *v1.KubeVirt) error {
 
 	targetStrategy, targetPending, err = c.loadInstallStrategy(kv)
 	if err != nil {
+		// The certificates are short lived, so keep them rotated while the
+		// install strategy cannot be obtained.
+		c.syncCertificatesBestEffort(kv)
 		return err
 	}
 
 	// we're waiting on a job to finish and the config map to be created
 	if targetPending {
+		c.syncCertificatesBestEffort(kv)
 		return nil
 	}
 
@@ -1065,6 +1195,14 @@ func (c *KubeVirtController) syncInstallation(kv *v1.KubeVirt) error {
 		// deployment failed
 		util.UpdateConditionsFailedError(kv, err)
 		logger.Errorf("Failed to create all resources: %v", err)
+		// Sync applies the certificates near the end, so a step failing before
+		// that leaves them unrotated. Keep them alive on their own - but only
+		// when Sync really did not get there, otherwise the rotation would run
+		// twice in one reconcile against a cache that cannot have observed the
+		// first write yet.
+		if !reconciler.CertificatesReached() {
+			c.syncCertificatesBestEffort(kv)
+		}
 		return err
 	}
 
@@ -1086,6 +1224,12 @@ func (c *KubeVirtController) syncInstallation(kv *v1.KubeVirt) error {
 			kv.Status.ObservedGeneration = &kv.ObjectMeta.Generation
 			return nil
 		}
+	}
+
+	// Sync can also stop before the certificates without reporting an error,
+	// for instance while it waits for a service to be recreated.
+	if !reconciler.CertificatesReached() {
+		c.syncCertificatesBestEffort(kv)
 	}
 
 	logger.Info("Processed deployment for this round")

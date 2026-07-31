@@ -21,6 +21,7 @@ package virt_operator
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"strconv"
@@ -2331,6 +2332,28 @@ var _ = Describe("KubeVirt Operator", func() {
 			Expect(job.Spec.Template.ObjectMeta.Labels).Should(HaveKeyWithValue(v1.AppLabel, virtOperatorJobAppLabel))
 		})
 
+		It("should bound install strategy creation job lifetime", func() {
+			kvTestData := KubeVirtTestData{}
+			kvTestData.BeforeTest()
+			defer kvTestData.AfterTest()
+
+			kv := &v1.KubeVirt{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "test-install",
+					Namespace:  NAMESPACE,
+					Finalizers: []string{util.KubeVirtFinalizer},
+				},
+				Status: v1.KubeVirtStatus{},
+			}
+
+			job, err := kvTestData.controller.generateInstallStrategyJob(nil, util.GetTargetConfigFromKV(kv))
+			Expect(err).ToNot(HaveOccurred())
+
+			Expect(job.Spec.BackoffLimit).To(HaveValue(BeEquivalentTo(3)))
+			Expect(job.Spec.ActiveDeadlineSeconds).To(HaveValue(BeEquivalentTo(1800)))
+			Expect(job.Spec.TTLSecondsAfterFinished).To(HaveValue(BeEquivalentTo(3600)))
+		})
+
 		It("should delete install strategy creation job if job has failed", func() {
 			kvTestData := KubeVirtTestData{}
 			kvTestData.BeforeTest()
@@ -2396,6 +2419,292 @@ var _ = Describe("KubeVirt Operator", func() {
 
 			kvTestData.controller.Execute()
 
+		})
+
+		It("should delete install strategy creation job if job has terminally failed", func() {
+			kvTestData := KubeVirtTestData{}
+			kvTestData.BeforeTest()
+			defer kvTestData.AfterTest()
+
+			kv := &v1.KubeVirt{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "test-install",
+					Namespace:  NAMESPACE,
+					Finalizers: []string{util.KubeVirtFinalizer},
+				},
+				Status: v1.KubeVirtStatus{},
+			}
+
+			job, err := kvTestData.controller.generateInstallStrategyJob(&v1.ComponentConfig{}, util.GetTargetConfigFromKV(kv))
+			Expect(err).ToNot(HaveOccurred())
+
+			// a terminally failed job never gets a CompletionTime, only a
+			// JobFailed condition
+			failureTime := time.Now().Add(time.Duration(-10) * time.Second)
+			job.Status.Conditions = []batchv1.JobCondition{{
+				Type:               batchv1.JobFailed,
+				Status:             k8sv1.ConditionTrue,
+				Reason:             "DeadlineExceeded",
+				Message:            "Job was active longer than specified deadline",
+				LastTransitionTime: metav1.Time{Time: failureTime},
+			}}
+
+			// create all resources which should already exist
+			kubecontroller.SetLatestApiVersionAnnotation(kv)
+			kvTestData.addKubeVirt(kv)
+			kvTestData.addInstallStrategyJob(job)
+
+			kvTestData.shouldExpectJobDeletion()
+			kvTestData.shouldExpectKubeVirtUpdateStatus(1)
+
+			kvTestData.controller.Execute()
+
+			Expect(kvTestData.totalDeletions).To(Equal(1), "the terminally failed job should have been deleted")
+			Expect(kvTestData.recorder.Events).To(Receive(ContainSubstring("FailedInstallStrategyJob")))
+		})
+
+		It("should not delete install strategy creation job if job has terminally failed less that 10 seconds ago", func() {
+			defer GinkgoRecover()
+
+			kvTestData := KubeVirtTestData{}
+			kvTestData.BeforeTest()
+			defer kvTestData.AfterTest()
+
+			kv := &v1.KubeVirt{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "test-install",
+					Namespace:  NAMESPACE,
+					Finalizers: []string{util.KubeVirtFinalizer},
+				},
+				Status: v1.KubeVirtStatus{},
+			}
+
+			job, err := kvTestData.controller.generateInstallStrategyJob(kv.Spec.Infra, util.GetTargetConfigFromKV(kv))
+			Expect(err).ToNot(HaveOccurred())
+
+			job.Status.Conditions = []batchv1.JobCondition{{
+				Type:               batchv1.JobFailed,
+				Status:             k8sv1.ConditionTrue,
+				LastTransitionTime: *now(),
+			}}
+
+			// create all resources which should already exist
+			kubecontroller.SetLatestApiVersionAnnotation(kv)
+			kvTestData.addKubeVirt(kv)
+			kvTestData.addInstallStrategyJob(job)
+
+			kvTestData.shouldExpectKubeVirtUpdateStatus(1)
+
+			kvTestData.controller.Execute()
+
+			Expect(kvTestData.totalDeletions).To(BeZero(), "the job should be kept until the retry delay passed")
+		})
+
+		It("should garbage collect failed install strategy job once install strategy is loaded", func() {
+			kvTestData := KubeVirtTestData{}
+			kvTestData.BeforeTest()
+			defer kvTestData.AfterTest()
+
+			kv := &v1.KubeVirt{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-install",
+					Namespace: NAMESPACE,
+				},
+			}
+			kubecontroller.SetLatestApiVersionAnnotation(kv)
+			kvTestData.addKubeVirt(kv)
+			kvTestData.addInstallStrategy(kvTestData.defaultConfig)
+
+			job, err := kvTestData.controller.generateInstallStrategyJob(kv.Spec.Infra, util.GetTargetConfigFromKV(kv))
+			Expect(err).ToNot(HaveOccurred())
+
+			job.Status.Conditions = []batchv1.JobCondition{{
+				Type:               batchv1.JobFailed,
+				Status:             k8sv1.ConditionTrue,
+				LastTransitionTime: *now(),
+			}}
+			kvTestData.addInstallStrategyJob(job)
+
+			// ensure failed jobs are garbage collected once install strategy
+			// is loaded
+			kvTestData.deleteFromCache = false
+			kvTestData.shouldExpectJobDeletion()
+			kvTestData.shouldExpectKubeVirtFinalizersPatch(1)
+			kvTestData.shouldExpectKubeVirtUpdateStatus(1)
+			kvTestData.shouldExpectCreations()
+
+			kvTestData.controller.Execute()
+
+			Expect(kvTestData.totalDeletions).To(Equal(1), "the failed job should have been garbage collected")
+		})
+
+		It("should back off before recreating a repeatedly failing install strategy job", func() {
+			kvTestData := KubeVirtTestData{}
+			kvTestData.BeforeTest()
+			defer kvTestData.AfterTest()
+
+			kv := &v1.KubeVirt{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "test-install",
+					Namespace:  NAMESPACE,
+					Finalizers: []string{util.KubeVirtFinalizer},
+				},
+				Status: v1.KubeVirtStatus{},
+			}
+			config := util.GetTargetConfigFromKV(kv)
+
+			// the first attempt is only rate limited by the minimum delay
+			Expect(kvTestData.controller.installStrategyJobRetryDelay(config.GetDeploymentID())).To(Equal(minInstallStrategyJobRetryDelay))
+
+			// every recreation doubles the delay, up to the cap
+			delays := []time.Duration{}
+			for i := 0; i < 12; i++ {
+				kvTestData.controller.recordInstallStrategyJobRetry(config.GetDeploymentID())
+				delays = append(delays, kvTestData.controller.installStrategyJobRetryDelay(config.GetDeploymentID()))
+			}
+			Expect(delays[0]).To(Equal(2 * minInstallStrategyJobRetryDelay))
+			Expect(delays[1]).To(Equal(4 * minInstallStrategyJobRetryDelay))
+			Expect(delays[len(delays)-1]).To(Equal(maxInstallStrategyJobRetryDelay))
+			for _, delay := range delays {
+				Expect(delay).To(BeNumerically("<=", maxInstallStrategyJobRetryDelay))
+				Expect(delay).To(BeNumerically(">=", minInstallStrategyJobRetryDelay))
+			}
+
+			// a loaded install strategy clears the backoff
+			kvTestData.controller.forgetInstallStrategyJobRetries(config.GetDeploymentID())
+			Expect(kvTestData.controller.installStrategyJobRetryDelay(config.GetDeploymentID())).To(Equal(minInstallStrategyJobRetryDelay))
+		})
+
+		It("should honour the grown backoff before deleting a failed install strategy job", func() {
+			kvTestData := KubeVirtTestData{}
+			kvTestData.BeforeTest()
+			defer kvTestData.AfterTest()
+
+			kv := &v1.KubeVirt{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "test-install",
+					Namespace:  NAMESPACE,
+					Finalizers: []string{util.KubeVirtFinalizer},
+				},
+				Status: v1.KubeVirtStatus{},
+			}
+			config := util.GetTargetConfigFromKV(kv)
+
+			job, err := kvTestData.controller.generateInstallStrategyJob(kv.Spec.Infra, config)
+			Expect(err).ToNot(HaveOccurred())
+
+			// The job failed longer ago than the initial delay, so without the
+			// backoff being consulted it would be deleted right away.
+			job.Status.Conditions = []batchv1.JobCondition{{
+				Type:               batchv1.JobFailed,
+				Status:             k8sv1.ConditionTrue,
+				Reason:             "DeadlineExceeded",
+				LastTransitionTime: metav1.Time{Time: time.Now().Add(-15 * time.Second)},
+			}}
+
+			// Two attempts already failed, so the delay has grown to 40s.
+			kvTestData.controller.recordInstallStrategyJobRetry(config.GetDeploymentID())
+			kvTestData.controller.recordInstallStrategyJobRetry(config.GetDeploymentID())
+
+			kubecontroller.SetLatestApiVersionAnnotation(kv)
+			kvTestData.addKubeVirt(kv)
+			kvTestData.addInstallStrategyJob(job)
+
+			kvTestData.shouldExpectKubeVirtUpdateStatus(1)
+
+			kvTestData.controller.Execute()
+
+			Expect(kvTestData.totalDeletions).To(BeZero(), "the grown backoff has not elapsed yet")
+		})
+
+		It("should rotate existing certificate secrets while install strategy is pending", func() {
+			kvTestData := KubeVirtTestData{}
+			kvTestData.BeforeTest()
+			defer kvTestData.AfterTest()
+
+			kv := &v1.KubeVirt{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "test-install",
+					Namespace:  NAMESPACE,
+					Finalizers: []string{util.KubeVirtFinalizer},
+				},
+				Status: v1.KubeVirtStatus{},
+			}
+			kubecontroller.SetLatestApiVersionAnnotation(kv)
+			kvTestData.addKubeVirt(kv)
+
+			// a CA bootstrapped by an earlier deployment, trusted by the bundle
+			var caCert *tls.Certificate
+			for _, ca := range components.NewCACertSecrets(NAMESPACE) {
+				if ca.Name == components.KubeVirtCASecretName {
+					Expect(components.PopulateSecretWithCertificate(ca, nil, &metav1.Duration{Duration: apply.Duration7d})).To(Succeed())
+					caCert, _ = components.LoadCertificates(ca)
+					kvTestData.addSecret(ca)
+				}
+			}
+			for _, configMap := range components.NewCAConfigMaps(NAMESPACE) {
+				if configMap.Name == components.KubeVirtCASecretName {
+					configMap.Data = map[string]string{components.CABundleKey: string(cert.EncodeCertPEM(caCert.Leaf))}
+					kvTestData.addConfigMap(configMap)
+				}
+			}
+
+			// leaf certificates that need rotation (duration annotation
+			// differs from the configured default)
+			leafSecrets := components.NewCertSecrets(NAMESPACE, NAMESPACE)
+			for _, secret := range leafSecrets {
+				Expect(components.PopulateSecretWithCertificate(secret, caCert, &metav1.Duration{Duration: 12 * time.Hour})).To(Succeed())
+				kvTestData.addSecret(secret)
+			}
+
+			// the install strategy job is still pending: no config map was
+			// posted and the job has neither completed nor failed, so the
+			// full sync cannot run
+			job, err := kvTestData.controller.generateInstallStrategyJob(kv.Spec.Infra, util.GetTargetConfigFromKV(kv))
+			Expect(err).ToNot(HaveOccurred())
+			kvTestData.addInstallStrategyJob(job)
+
+			kvTestData.kubeClient.Fake.PrependReactor("patch", "secrets", kvTestData.genericPatchFunc())
+			kvTestData.shouldExpectKubeVirtUpdateStatus(1)
+
+			kvTestData.controller.Execute()
+
+			Expect(kvTestData.totalPatches).To(Equal(len(leafSecrets)))
+		})
+
+		It("should not touch certificate secrets before an install bootstrapped the CA", func() {
+			kvTestData := KubeVirtTestData{}
+			kvTestData.BeforeTest()
+			defer kvTestData.AfterTest()
+
+			kv := &v1.KubeVirt{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "test-install",
+					Namespace:  NAMESPACE,
+					Finalizers: []string{util.KubeVirtFinalizer},
+				},
+				Status: v1.KubeVirtStatus{},
+			}
+			kubecontroller.SetLatestApiVersionAnnotation(kv)
+			kvTestData.addKubeVirt(kv)
+
+			// leaf certificates exist but the CA secret does not, so the
+			// early rotation path must stay inactive; any secret write would
+			// fail the test through the catch-all reactor
+			for _, secret := range components.NewCertSecrets(NAMESPACE, NAMESPACE) {
+				secret.Data = map[string][]byte{"tls.crt": nil, "tls.key": nil}
+				kvTestData.addSecret(secret)
+			}
+
+			job, err := kvTestData.controller.generateInstallStrategyJob(kv.Spec.Infra, util.GetTargetConfigFromKV(kv))
+			Expect(err).ToNot(HaveOccurred())
+			kvTestData.addInstallStrategyJob(job)
+
+			kvTestData.shouldExpectKubeVirtUpdateStatus(1)
+
+			kvTestData.controller.Execute()
+
+			Expect(kvTestData.totalPatches).To(BeZero())
 		})
 
 		It("should add resources on create", func() {
