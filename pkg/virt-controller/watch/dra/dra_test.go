@@ -209,6 +209,75 @@ var _ = Describe("DRA Status Controller", func() {
 		})
 	})
 
+	Context("getGPUStatus", func() {
+		var gpuInfo DeviceInfo
+
+		BeforeEach(func() {
+			gpuInfo = DeviceInfo{
+				VMISpecClaimName:   "claim1",
+				VMISpecRequestName: "request1",
+				DeviceStatusInfo: &v1.DeviceStatusInfo{
+					Name: "gpu1",
+				},
+			}
+			pod.Spec.NodeName = "testnode"
+			pod.Spec.ResourceClaims = []k8sv1.PodResourceClaim{{
+				Name:              "claim1",
+				ResourceClaimName: ptr.To("claim1"),
+			}}
+			pod.Status.ResourceClaimStatuses = []k8sv1.PodResourceClaimStatus{{
+				Name:              "claim1",
+				ResourceClaimName: ptr.To("claim1"),
+			}}
+		})
+
+		It("should use Deckhouse GPU PCI address attribute and normalize it", func() {
+			resourceSlice := getTestResourceSliceWithAttributes("resourceslice1", "testnode", "device1", "driver1", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+				DeckhouseGPUPCIAddressAttributeKey: {StringValue: ptr.To("00000000:01:00.0")},
+				DeckhouseGPUDeviceTypeAttributeKey: {StringValue: ptr.To(DeckhouseGPUDeviceTypePhysical)},
+			}, false)
+			draController := testDRAStatusController(kubeClient, nil, pod,
+				getTestResourceClaim("claim1", "default", "request1", "device1", "driver1"),
+				resourceSlice)
+
+			status, err := draController.getGPUStatus(gpuInfo, pod)
+
+			Expect(err).ToNot(HaveOccurred())
+			Expect(status.DeviceResourceClaimStatus.Attributes.PCIAddress).To(Equal(ptr.To("0000:01:00.0")))
+		})
+
+		DescribeTable("should reject GPU resources that are not safe for passthrough",
+			func(attributes map[resourcev1.QualifiedName]resourcev1.DeviceAttribute, allowMultipleAllocations bool, expectedError string) {
+				resourceSlice := getTestResourceSliceWithAttributes("resourceslice1", "testnode", "device1", "driver1", attributes, allowMultipleAllocations)
+				draController := testDRAStatusController(kubeClient, nil, pod,
+					getTestResourceClaim("claim1", "default", "request1", "device1", "driver1"),
+					resourceSlice)
+
+				_, err := draController.getGPUStatus(gpuInfo, pod)
+
+				Expect(err).To(MatchError(ContainSubstring(expectedError)))
+			},
+			Entry("when sharing strategy is mps", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+				DeckhouseGPUPCIAddressAttributeKey:      {StringValue: ptr.To("0000:01:00.0")},
+				DeckhouseGPUDeviceTypeAttributeKey:      {StringValue: ptr.To(DeckhouseGPUDeviceTypePhysical)},
+				DeckhouseGPUSharingStrategyAttributeKey: {StringValue: ptr.To("mps")},
+			}, false, "uses sharing strategy"),
+			Entry("when sharing strategy is ts", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+				DeckhouseGPUPCIAddressAttributeKey:      {StringValue: ptr.To("0000:01:00.0")},
+				DeckhouseGPUDeviceTypeAttributeKey:      {StringValue: ptr.To(DeckhouseGPUDeviceTypePhysical)},
+				DeckhouseGPUSharingStrategyAttributeKey: {StringValue: ptr.To("ts")},
+			}, false, "uses sharing strategy"),
+			Entry("when multiple allocations are allowed", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+				DeckhouseGPUPCIAddressAttributeKey: {StringValue: ptr.To("0000:01:00.0")},
+				DeckhouseGPUDeviceTypeAttributeKey: {StringValue: ptr.To(DeckhouseGPUDeviceTypePhysical)},
+			}, true, "allows multiple allocations"),
+			Entry("when MIG has no mdevUUID", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+				DeckhouseGPUPCIAddressAttributeKey: {StringValue: ptr.To("0000:01:00.0")},
+				DeckhouseGPUDeviceTypeAttributeKey: {StringValue: ptr.To(DeckhouseGPUDeviceTypeMIG)},
+			}, false, "MIG device type without mdevUUID"),
+		)
+	})
+
 	Context("isAllDRAGPUsReconciled", func() {
 		var vmi *v1.VirtualMachineInstance
 
@@ -476,6 +545,17 @@ func getTestResourceSlice(name, nodeName, deviceName, driverName string) *resour
 	pciAddress := "0000:00:01.0"
 	mdevUUID := "mdev-uuid-123"
 
+	return getTestResourceSliceWithAttributes(name, nodeName, deviceName, driverName, map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+		PCIAddressDeviceAttributeKey: {
+			StringValue: ptr.To(pciAddress),
+		},
+		MDevUUIDDeviceAttributeKey: {
+			StringValue: ptr.To(mdevUUID),
+		},
+	}, false)
+}
+
+func getTestResourceSliceWithAttributes(name, nodeName, deviceName, driverName string, attributes map[resourcev1.QualifiedName]resourcev1.DeviceAttribute, allowMultipleAllocations bool) *resourcev1.ResourceSlice {
 	return &resourcev1.ResourceSlice{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: name,
@@ -490,15 +570,9 @@ func getTestResourceSlice(name, nodeName, deviceName, driverName string) *resour
 			},
 			Devices: []resourcev1.Device{
 				{
-					Name: deviceName,
-					Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
-						PCIAddressDeviceAttributeKey: {
-							StringValue: ptr.To(pciAddress),
-						},
-						MDevUUIDDeviceAttributeKey: {
-							StringValue: ptr.To(mdevUUID),
-						},
-					},
+					Name:                     deviceName,
+					Attributes:               attributes,
+					AllowMultipleAllocations: ptr.To(allowMultipleAllocations),
 				},
 			},
 		},

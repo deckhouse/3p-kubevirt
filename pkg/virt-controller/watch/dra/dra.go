@@ -60,9 +60,14 @@ const (
 	deleteNotifFailed        = "Failed to process delete notification"
 	tombstoneGetObjectErrFmt = "couldn't get object from tombstone %+v"
 
-	indexByNodeName              = "byNodeName"
-	PCIAddressDeviceAttributeKey = "resource.kubernetes.io/pcieRoot"
-	MDevUUIDDeviceAttributeKey   = "resource.kubernetes.io/mDevUUID"
+	indexByNodeName                         = "byNodeName"
+	PCIAddressDeviceAttributeKey            = "resource.kubernetes.io/pcieRoot"
+	MDevUUIDDeviceAttributeKey              = "resource.kubernetes.io/mDevUUID"
+	DeckhouseGPUPCIAddressAttributeKey      = "gpu.deckhouse.io/pciAddress"
+	DeckhouseGPUDeviceTypeAttributeKey      = "gpu.deckhouse.io/deviceType"
+	DeckhouseGPUSharingStrategyAttributeKey = "gpu.deckhouse.io/sharingStrategy"
+	DeckhouseGPUDeviceTypePhysical          = "physical"
+	DeckhouseGPUDeviceTypeMIG               = "mig"
 	// USBAddressAttributeKey = "usbAddress"
 	// No Kubernetes resource.kubernetes.io/ prefix is used because this is a
 	// driver-specific attribute.
@@ -568,8 +573,8 @@ func (c *DRAStatusController) getGPUStatus(gpuInfo DeviceInfo, pod *k8sv1.Pod) (
 	if err != nil {
 		return gpuStatus, err
 	}
-	if info.pciAddress == "" && info.mdevUUID == "" {
-		return gpuStatus, fmt.Errorf("failed to get pciAddress or mdevUUID for gpu %s", gpuInfo.VMISpecClaimName)
+	if err := validateGPUDeviceInfo(info, gpuInfo.VMISpecClaimName); err != nil {
+		return gpuStatus, err
 	}
 	attrs := v1.DeviceAttribute{}
 	if info.pciAddress != "" {
@@ -636,8 +641,38 @@ type deviceInfo struct {
 	pciAddress               string
 	mdevUUID                 string
 	usbAddress               *v1.USBAddress
+	deviceType               string
+	sharingStrategy          string
 	allowMultipleAllocations bool
 	bindsToNode              bool
+}
+
+func validateGPUDeviceInfo(info deviceInfo, claimName string) error {
+	if info.pciAddress == "" && info.mdevUUID == "" {
+		return fmt.Errorf("failed to get pciAddress or mdevUUID for gpu %s", claimName)
+	}
+	if info.allowMultipleAllocations {
+		return fmt.Errorf("gpu %s allows multiple allocations and cannot be used for VM passthrough", claimName)
+	}
+	if info.sharingStrategy != "" {
+		return fmt.Errorf("gpu %s uses sharing strategy %q and cannot be used for VM passthrough", claimName, info.sharingStrategy)
+	}
+	if info.deviceType == DeckhouseGPUDeviceTypeMIG && info.mdevUUID == "" {
+		return fmt.Errorf("gpu %s has MIG device type without mdevUUID", claimName)
+	}
+	if info.pciAddress != "" && info.deviceType != "" && info.deviceType != DeckhouseGPUDeviceTypePhysical {
+		return fmt.Errorf("gpu %s has device type %q and cannot be used for PCI passthrough", claimName, info.deviceType)
+	}
+	return nil
+}
+
+func normalizePCIAddress(address string) string {
+	parts := strings.Split(address, ":")
+	if len(parts) == 3 && len(parts[0]) == 8 {
+		parts[0] = parts[0][4:]
+		return strings.Join(parts, ":")
+	}
+	return address
 }
 
 // getDeviceInfo returns the pciAddress, mdevUUID, usbAddress of the device. It will return all if found, otherwise it will return empty strings or nil.
@@ -654,11 +689,21 @@ func (c *DRAStatusController) getDeviceInfo(nodeName string, deviceName, driverN
 					info := deviceInfo{}
 
 					for key, value := range device.Attributes {
-						if string(key) == PCIAddressDeviceAttributeKey && value.StringValue != nil {
-							info.pciAddress = *value.StringValue
-						} else if string(key) == MDevUUIDDeviceAttributeKey && value.StringValue != nil {
+						if value.StringValue == nil {
+							continue
+						}
+						switch string(key) {
+						case PCIAddressDeviceAttributeKey:
+							info.pciAddress = normalizePCIAddress(*value.StringValue)
+						case DeckhouseGPUPCIAddressAttributeKey:
+							info.pciAddress = normalizePCIAddress(*value.StringValue)
+						case MDevUUIDDeviceAttributeKey:
 							info.mdevUUID = *value.StringValue
-						} else if string(key) == USBAddressAttributeKey && value.StringValue != nil {
+						case DeckhouseGPUDeviceTypeAttributeKey:
+							info.deviceType = *value.StringValue
+						case DeckhouseGPUSharingStrategyAttributeKey:
+							info.sharingStrategy = *value.StringValue
+						case USBAddressAttributeKey:
 							info.usbAddress, err = resolveUSBAddress(*value.StringValue)
 							if err != nil {
 								return deviceInfo{}, err
