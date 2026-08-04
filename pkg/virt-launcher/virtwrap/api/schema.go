@@ -557,9 +557,11 @@ type TPMBackend struct {
 // RedirectedDevice describes a device to be redirected
 // See: https://libvirt.org/formatdomain.html#redirected-devices
 type RedirectedDevice struct {
-	Type   string                 `xml:"type,attr"`
-	Bus    string                 `xml:"bus,attr"`
-	Source RedirectedDeviceSource `xml:"source"`
+	Type string `xml:"type,attr"`
+	Bus  string `xml:"bus,attr"`
+	// Source is a pointer because spicevmc-backed redirdevs carry no source
+	// element at all, while unix-backed ones need mode and path.
+	Source *RedirectedDeviceSource `xml:"source,omitempty"`
 }
 
 type RedirectedDeviceSource struct {

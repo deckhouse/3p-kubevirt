@@ -974,12 +974,24 @@ func Convert_v1_Usbredir_To_api_Usbredir(vmi *v1.VirtualMachineInstance, domainD
 	// so we simply create the maximum allowed dictated by v1.UsbClientPassthroughMaxNumberOf
 	redirectDevices := make([]api.RedirectedDevice, v1.UsbClientPassthroughMaxNumberOf)
 
+	// With SPICE enabled the redirected devices are wired to the SPICE channels, so a
+	// SPICE client redirects USB on its own. Otherwise they stay on unix sockets, which
+	// is what `virtctl usbredir` connects to.
+	spiceEnabled := vmi.Annotations[SpiceAnnotation] == "true"
+
 	for i := 0; i < v1.UsbClientPassthroughMaxNumberOf; i++ {
+		if spiceEnabled {
+			redirectDevices[i] = api.RedirectedDevice{
+				Type: "spicevmc",
+				Bus:  "usb",
+			}
+			continue
+		}
 		path := fmt.Sprintf("/var/run/kubevirt-private/%s/virt-usbredir-%d", vmi.ObjectMeta.UID, i)
 		redirectDevices[i] = api.RedirectedDevice{
 			Type: "unix",
 			Bus:  "usb",
-			Source: api.RedirectedDeviceSource{
+			Source: &api.RedirectedDeviceSource{
 				Mode: "bind",
 				Path: path,
 			},
