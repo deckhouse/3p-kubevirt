@@ -236,6 +236,45 @@ func generateDeviceRulesForVMI(vmi *v1.VirtualMachineInstance, mountRoot *safepa
 	return vmiDeviceRules, nil
 }
 
+// generateDeviceRulesForAttachedHotplugDevices builds allow-rules for hotplug block disks that are ALREADY attached
+// to the virt-launcher pod, i.e. whose device node currently exists.
+//
+// This is required because a fresh cgroup manager is created on every reconcile and, in cgroup v2, every Set call
+// rewrites the whole device allowlist. generateDeviceRulesForVMI intentionally skips hotpluggable volumes, so
+// without seeding the manager with the currently attached hotplug disks, an early Set that runs before the
+// hotplug-disk mount (e.g. the USB host device attach) would transiently drop the disk from the allowlist and
+// briefly deny access to it. The seeded rules are merged with every subsequent Set via addCurrentRules; explicit
+// removal rules (allow=false) emitted by detach/unmount still override them. Hotplugged USB host devices are
+// covered by the /dev/bus/usb discovery in generateDeviceRulesForVMI.
+func generateDeviceRulesForAttachedHotplugDevices(vmi *v1.VirtualMachineInstance, mountRoot *safepath.Path) ([]*devices.Rule, error) {
+	var rules []*devices.Rule
+
+	// Filesystem hotplug volumes are files, not device nodes, so they are skipped.
+	for _, volumeStatus := range vmi.Status.VolumeStatus {
+		if volumeStatus.HotplugVolume == nil {
+			continue
+		}
+		if volumeStatus.PersistentVolumeClaimInfo == nil ||
+			!storagetypes.IsPVCBlock(volumeStatus.PersistentVolumeClaimInfo.VolumeMode) {
+			continue
+		}
+		// A missing node means the disk is not attached yet; the mount flow adds it later.
+		rule, err := newAllowedDeviceRule(mountRoot, filepath.Join("var/run/kubevirt/hotplug-disks", volumeStatus.Name), getDeviceRwmPermissions())
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			return nil, fmt.Errorf("failed to create device rule for hotplug volume %s: %v", volumeStatus.Name, err)
+		}
+		if rule != nil {
+			log.Log.V(loggingVerbosity).Infof("seeding cgroup with attached hotplug volume %s: %v", volumeStatus.Name, rule)
+			rules = append(rules, rule)
+		}
+	}
+
+	return rules, nil
+}
+
 // discoverDeviceRulesInDir recursively scans a directory under the
 // container's filesystem and creates allow rules for all device nodes
 // found. These devices are provisioned by device plugins or the container
