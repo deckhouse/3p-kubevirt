@@ -148,6 +148,10 @@ int main(int argc, char **argv) {
     }
     free(copy_path_tmp);
 
+    error_log("delaying container-disk socket creation by 30 seconds for reproduction\n");
+    sleep(30);
+
+
     struct sockaddr_un address;
     /*
     * For portability clear the whole structure, since some
