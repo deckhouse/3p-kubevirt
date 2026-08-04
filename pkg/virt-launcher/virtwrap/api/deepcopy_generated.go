@@ -1845,6 +1845,31 @@ func (in *Graphics) DeepCopyInto(out *Graphics) {
 		*out = new(GraphicsListen)
 		**out = **in
 	}
+	if in.Image != nil {
+		in, out := &in.Image, &out.Image
+		*out = new(GraphicsImage)
+		**out = **in
+	}
+	if in.JPEG != nil {
+		in, out := &in.JPEG, &out.JPEG
+		*out = new(GraphicsJPEG)
+		**out = **in
+	}
+	if in.Zlib != nil {
+		in, out := &in.Zlib, &out.Zlib
+		*out = new(GraphicsZlib)
+		**out = **in
+	}
+	if in.Playback != nil {
+		in, out := &in.Playback, &out.Playback
+		*out = new(GraphicsPlayback)
+		**out = **in
+	}
+	if in.Streaming != nil {
+		in, out := &in.Streaming, &out.Streaming
+		*out = new(GraphicsStreaming)
+		**out = **in
+	}
 	return
 }
 
