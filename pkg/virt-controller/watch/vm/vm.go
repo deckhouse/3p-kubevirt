@@ -3322,7 +3322,19 @@ func (c *Controller) addRestartRequiredIfNeeded(lastSeenVMSpec *virtv1.VirtualMa
 		}
 	}
 
-	if !netvmliveupdate.IsRestartRequired(currentVM, vmi) {
+	// NOTE: DVP connects bridge interfaces through the "bpfbridge" network binding plugin. Virtual machines
+	// started before that switch keep .Bridge set in their VMI and last-seen specs, so the first update of
+	// such a virtual machine would be reported as a non-live-updatable interface change and the virtual
+	// machine would be restarted only to end up with an equivalent binding. Treat both forms as equal.
+	desiredIfaces := currentVM.Spec.Template.Spec.Domain.Devices.Interfaces
+	alignBridgeWithBpfBridgeBinding(lastSeenVM.Spec.Template.Spec.Domain.Devices.Interfaces, desiredIfaces)
+	vmiToCompare := vmi
+	if vmi != nil {
+		vmiToCompare = vmi.DeepCopy()
+		alignBridgeWithBpfBridgeBinding(vmiToCompare.Spec.Domain.Devices.Interfaces, desiredIfaces)
+	}
+
+	if !netvmliveupdate.IsRestartRequired(currentVM, vmiToCompare) {
 		lastSeenVM.Spec.Template.Spec.Domain.Devices.Interfaces = currentVM.Spec.Template.Spec.Domain.Devices.Interfaces
 		lastSeenVM.Spec.Template.Spec.Networks = currentVM.Spec.Template.Spec.Networks
 	}
@@ -3342,6 +3354,30 @@ func (c *Controller) addRestartRequiredIfNeeded(lastSeenVMSpec *virtv1.VirtualMa
 	}
 
 	return false
+}
+
+// bpfBridgeBindingName is the network binding plugin DVP connects bridge interfaces through.
+const bpfBridgeBindingName = "bpfbridge"
+
+// alignBridgeWithBpfBridgeBinding rewrites .Bridge interfaces in ifaces to the bpfbridge binding, but only
+// for interfaces that desiredIfaces binds that way. Both forms describe the same bridge connection, so the
+// transition must not be seen as an interface change that requires a restart.
+func alignBridgeWithBpfBridgeBinding(ifaces, desiredIfaces []virtv1.Interface) {
+	desiredIfacesByName := netvmispec.IndexInterfaceSpecByName(desiredIfaces)
+
+	for i := range ifaces {
+		if ifaces[i].Bridge == nil {
+			continue
+		}
+
+		desiredIface, exists := desiredIfacesByName[ifaces[i].Name]
+		if !exists || desiredIface.Binding == nil || desiredIface.Binding.Name != bpfBridgeBindingName {
+			continue
+		}
+
+		ifaces[i].Bridge = nil
+		ifaces[i].Binding = &virtv1.PluginBinding{Name: bpfBridgeBindingName}
+	}
 }
 
 func (c *Controller) syncVMAnnotationsToVMI(vm *virtv1.VirtualMachine, vmi *virtv1.VirtualMachineInstance) (*virtv1.VirtualMachineInstance, error) {
