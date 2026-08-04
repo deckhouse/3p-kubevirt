@@ -1144,6 +1144,34 @@ type Graphics struct {
 	Port          int32           `xml:"port,attr,omitempty"`
 	TLSPort       int             `xml:"tlsPort,attr,omitempty"`
 	Type          string          `xml:"type,attr"`
+
+	// SPICE tuning. The defaults libvirt applies target a slow WAN; inside a
+	// cluster network the compression mostly costs CPU and latency.
+	Image     *GraphicsImage     `xml:"image,omitempty"`
+	JPEG      *GraphicsJPEG      `xml:"jpeg,omitempty"`
+	Zlib      *GraphicsZlib      `xml:"zlib,omitempty"`
+	Playback  *GraphicsPlayback  `xml:"playback,omitempty"`
+	Streaming *GraphicsStreaming `xml:"streaming,omitempty"`
+}
+
+type GraphicsImage struct {
+	Compression string `xml:"compression,attr"`
+}
+
+type GraphicsJPEG struct {
+	Compression string `xml:"compression,attr"`
+}
+
+type GraphicsZlib struct {
+	Compression string `xml:"compression,attr"`
+}
+
+type GraphicsPlayback struct {
+	Compression string `xml:"compression,attr"`
+}
+
+type GraphicsStreaming struct {
+	Mode string `xml:"mode,attr"`
 }
 
 type GraphicsListen struct {
