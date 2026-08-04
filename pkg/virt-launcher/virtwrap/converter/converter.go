@@ -81,9 +81,11 @@ const (
 	// существующие VNC-сессии продолжают работать без изменений.
 	SpiceAnnotation = "virtualization.deckhouse.io/spice"
 
-	// SpiceCompressionAnnotation sets the image compression of the SPICE display:
-	// off, auto_glz, auto_lz, quic, glz, lz, lz4. libvirt defaults target a slow WAN,
-	// so inside a cluster network "off" or "lz4" usually responds better.
+	// SpiceCompressionAnnotation sets the image compression of the SPICE display.
+	// Only the values libvirt accepts in <image compression="..."> are allowed —
+	// note that lz4, which the SPICE server itself supports, is NOT among them and
+	// makes libvirt refuse the whole domain. libvirt defaults target a slow WAN, so
+	// inside a cluster network "off" or "lz" usually responds better.
 	SpiceCompressionAnnotation = "virtualization.deckhouse.io/spice-compression"
 
 	// SpiceStreamingAnnotation sets video streaming detection: filter, all, off.
@@ -970,6 +972,19 @@ func Convert_v1_Rng_To_api_Rng(_ *v1.Rng, rng *api.Rng, c *ConverterContext) err
 	return nil
 }
 
+// Values libvirt accepts for the SPICE graphics element. An unknown value makes
+// libvirt reject the domain, which leaves the VM stuck in Starting, so anything
+// outside these sets is ignored and the libvirt default applies.
+var (
+	spiceCompressionValues = map[string]bool{
+		"off": true, "auto_glz": true, "auto_lz": true,
+		"quic": true, "glz": true, "lz": true,
+	}
+	spiceStreamingValues = map[string]bool{
+		"filter": true, "all": true, "off": true,
+	}
+)
+
 func Convert_v1_Usbredir_To_api_Usbredir(vmi *v1.VirtualMachineInstance, domainDevices *api.Devices, _ *ConverterContext) error {
 	clientDevices := vmi.Spec.Domain.Devices.ClientPassthrough
 
@@ -1585,6 +1600,20 @@ func Convert_v1_VirtualMachineInstance_To_api_Domain(vmi *v1.VirtualMachineInsta
 		domain.Spec.Devices.Channels = append(domain.Spec.Devices.Channels, convertDownwardMetricsChannel())
 	}
 
+	if vmi.Annotations[SpiceAnnotation] == "true" {
+		// spice-vdagent in the guest talks over this virtio-serial port. Without it the
+		// agent cannot run at all, and with it come client-side mouse (the pointer is
+		// drawn locally instead of making a round trip), automatic resize to the client
+		// window and clipboard sharing.
+		domain.Spec.Devices.Channels = append(domain.Spec.Devices.Channels, api.Channel{
+			Type: "spicevmc",
+			Target: &api.ChannelTarget{
+				Type: "virtio",
+				Name: "com.redhat.spice.0",
+			},
+		})
+	}
+
 	domain.Spec.SysInfo = &api.SysInfo{}
 
 	err = Convert_v1_Firmware_To_related_apis(vmi, domain, c)
@@ -2025,7 +2054,7 @@ func Convert_v1_VirtualMachineInstance_To_api_Domain(vmi *v1.VirtualMachineInsta
 				},
 				Type: "spice",
 			}
-			if c := vmi.Annotations[SpiceCompressionAnnotation]; c != "" {
+			if c := vmi.Annotations[SpiceCompressionAnnotation]; spiceCompressionValues[c] {
 				spice.Image = &api.GraphicsImage{Compression: c}
 				if c == "off" {
 					// The WAN-oriented codecs are separate knobs: leaving them on would
@@ -2035,7 +2064,7 @@ func Convert_v1_VirtualMachineInstance_To_api_Domain(vmi *v1.VirtualMachineInsta
 					spice.Playback = &api.GraphicsPlayback{Compression: "off"}
 				}
 			}
-			if m := vmi.Annotations[SpiceStreamingAnnotation]; m != "" {
+			if m := vmi.Annotations[SpiceStreamingAnnotation]; spiceStreamingValues[m] {
 				spice.Streaming = &api.GraphicsStreaming{Mode: m}
 			}
 			domain.Spec.Devices.Graphics = append(domain.Spec.Devices.Graphics, spice)
