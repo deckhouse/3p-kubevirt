@@ -159,6 +159,27 @@ func (t *ConsoleHandler) VNCHandler(request *restful.Request, response *restful.
 	t.stream(vmi, request, response, unixSocketDialer(vmi, unixSocketPath), stopChn)
 }
 
+func (t *ConsoleHandler) SPICEHandler(request *restful.Request, response *restful.Response) {
+	vmi, code, err := getVMI(request, t.vmiStore)
+	if err != nil || vmi == nil {
+		log.Log.Reason(err).Error(failedRetrieveVMI)
+		response.WriteError(code, err)
+		return
+	}
+	unixSocketPath, err := t.getUnixSocketPath(vmi, "virt-spice")
+	if err != nil {
+		log.Log.Object(vmi).Reason(err).Error("Failed finding unix socket for SPICE console")
+		response.WriteError(http.StatusBadRequest, err)
+		return
+	}
+	// В отличие от VNC, соединение намеренно не регистрируется в общей map: SPICE
+	// многоканальный и открывает 4-11 параллельных соединений к одному сокету (main,
+	// display, inputs, cursor, playback, record, usbredir x4). Вытеснение предыдущего
+	// соединения, как это делает newStopChan в VNCHandler, обрывало бы каналы одной и
+	// той же сессии и делало протокол неработоспособным.
+	t.stream(vmi, request, response, unixSocketDialer(vmi, unixSocketPath), make(chan struct{}))
+}
+
 func (t *ConsoleHandler) SerialHandler(request *restful.Request, response *restful.Response) {
 	vmi, code, err := getVMI(request, t.vmiStore)
 	if err != nil || vmi == nil {
