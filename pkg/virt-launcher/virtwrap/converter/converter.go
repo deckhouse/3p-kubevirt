@@ -80,6 +80,14 @@ const (
 	// а не вместо него: QEMU и libvirt допускают оба дисплея одновременно, поэтому
 	// существующие VNC-сессии продолжают работать без изменений.
 	SpiceAnnotation = "virtualization.deckhouse.io/spice"
+
+	// SpiceCompressionAnnotation sets the image compression of the SPICE display:
+	// off, auto_glz, auto_lz, quic, glz, lz, lz4. libvirt defaults target a slow WAN,
+	// so inside a cluster network "off" or "lz4" usually responds better.
+	SpiceCompressionAnnotation = "virtualization.deckhouse.io/spice-compression"
+
+	// SpiceStreamingAnnotation sets video streaming detection: filter, all, off.
+	SpiceStreamingAnnotation = "virtualization.deckhouse.io/spice-streaming"
 )
 
 type deviceNamer struct {
@@ -2010,13 +2018,27 @@ func Convert_v1_VirtualMachineInstance_To_api_Domain(vmi *v1.VirtualMachineInsta
 			},
 		}
 		if vmi.Annotations[SpiceAnnotation] == "true" {
-			domain.Spec.Devices.Graphics = append(domain.Spec.Devices.Graphics, api.Graphics{
+			spice := api.Graphics{
 				Listen: &api.GraphicsListen{
 					Type:   "socket",
 					Socket: fmt.Sprintf("/var/run/kubevirt-private/%s/virt-spice", vmi.ObjectMeta.UID),
 				},
 				Type: "spice",
-			})
+			}
+			if c := vmi.Annotations[SpiceCompressionAnnotation]; c != "" {
+				spice.Image = &api.GraphicsImage{Compression: c}
+				if c == "off" {
+					// The WAN-oriented codecs are separate knobs: leaving them on would
+					// keep compressing despite image compression being disabled.
+					spice.JPEG = &api.GraphicsJPEG{Compression: "never"}
+					spice.Zlib = &api.GraphicsZlib{Compression: "never"}
+					spice.Playback = &api.GraphicsPlayback{Compression: "off"}
+				}
+			}
+			if m := vmi.Annotations[SpiceStreamingAnnotation]; m != "" {
+				spice.Streaming = &api.GraphicsStreaming{Mode: m}
+			}
+			domain.Spec.Devices.Graphics = append(domain.Spec.Devices.Graphics, spice)
 		}
 	}
 
