@@ -75,6 +75,11 @@ const (
 	bootMenuTimeoutMS          = uint(10000)
 	multiQueueMaxQueues        = uint32(256)
 	QEMUSeaBiosDebugPipe       = "/var/run/kubevirt-private/QEMUSeaBiosDebugPipe"
+
+	// SpiceAnnotation включает SPICE-дисплей на ВМ. SPICE добавляется рядом с VNC,
+	// а не вместо него: QEMU и libvirt допускают оба дисплея одновременно, поэтому
+	// существующие VNC-сессии продолжают работать без изменений.
+	SpiceAnnotation = "virtualization.deckhouse.io/spice"
 )
 
 type deviceNamer struct {
@@ -1991,6 +1996,15 @@ func Convert_v1_VirtualMachineInstance_To_api_Domain(vmi *v1.VirtualMachineInsta
 				},
 				Type: "vnc",
 			},
+		}
+		if vmi.Annotations[SpiceAnnotation] == "true" {
+			domain.Spec.Devices.Graphics = append(domain.Spec.Devices.Graphics, api.Graphics{
+				Listen: &api.GraphicsListen{
+					Type:   "socket",
+					Socket: fmt.Sprintf("/var/run/kubevirt-private/%s/virt-spice", vmi.ObjectMeta.UID),
+				},
+				Type: "spice",
+			})
 		}
 	}
 
