@@ -2050,12 +2050,17 @@ func validateBusSupport(field *k8sfield.Path, idx int, disk v1.Disk) []metav1.St
 		return causes
 	}
 	switch bus {
-	case "ide":
-		causes = append(causes, metav1.StatusCause{
-			Type:    metav1.CauseTypeFieldValueInvalid,
-			Message: "IDE bus is not supported",
-			Field:   field.Index(idx).Child(diskType, "bus").String(),
-		})
+	case v1.DiskBusIDE:
+		// IDE is kept for legacy guests (Windows NT 5.x, DOS-era systems, pre-2.6.19
+		// kernels) that have no in-box AHCI or virtio driver. It requires an i440fx
+		// machine type, is limited to 4 devices and does not support hotplug.
+		if disk.LUN != nil {
+			causes = append(causes, metav1.StatusCause{
+				Type:    metav1.CauseTypeFieldValueInvalid,
+				Message: fmt.Sprintf("Bus type %s is invalid for LUN device", bus),
+				Field:   field.Index(idx).Child("lun", "bus").String(),
+			})
+		}
 	case v1.DiskBusVirtio:
 		// special case. virtio is incompatible with CD-ROM for q35 machine types
 		if diskType == "cdrom" {
@@ -2077,7 +2082,7 @@ func validateBusSupport(field *k8sfield.Path, idx int, disk v1.Disk) []metav1.St
 	case v1.DiskBusSCSI, v1.DiskBusUSB:
 		break
 	default:
-		supportedBuses := []v1.DiskBus{v1.DiskBusVirtio, v1.DiskBusSCSI, v1.DiskBusSATA, v1.DiskBusUSB}
+		supportedBuses := []v1.DiskBus{v1.DiskBusVirtio, v1.DiskBusSCSI, v1.DiskBusSATA, v1.DiskBusUSB, v1.DiskBusIDE}
 		causes = append(causes, metav1.StatusCause{
 			Type:    metav1.CauseTypeFieldValueInvalid,
 			Message: fmt.Sprintf("%s is set with an unrecognized bus %s, must be one of: %v", field.Index(idx).String(), bus, supportedBuses),

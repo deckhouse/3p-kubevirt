@@ -2133,9 +2133,9 @@ var _ = Describe("Validating VMICreate Admitter", func() {
 			gstruct.Fields{"Message": Equal("Bus type virtio is invalid for CD-ROM device")},
 		)
 
-		ideUnsupportedMatcher := gstruct.MatchFields(
+		arm64UnsupportedMatcher := gstruct.MatchFields(
 			gstruct.IgnoreExtras,
-			gstruct.Fields{"Message": Equal("IDE bus is not supported")},
+			gstruct.Fields{"Message": Equal("Arm64 not support this disk bus type, please use virtio or scsi")},
 		)
 
 		DescribeTable("should reject cd-roms using", func(bus, arch string, matcher types.GomegaMatcher) {
@@ -2166,11 +2166,11 @@ var _ = Describe("Validating VMICreate Admitter", func() {
 
 		},
 			Entry("virtio bus on amd64", "virtio", "amd64", virtioUnsupportedMatcher),
-			Entry("ide bus on amd64", "ide", "amd64", ideUnsupportedMatcher),
 			Entry("virtio bus on s390x", "virtio", "s390x", virtioUnsupportedMatcher),
-			Entry("ide bus on s390x", "ide", "s390x", ideUnsupportedMatcher),
 			Entry("virtio bus on arm64", "virtio", "arm64", virtioUnsupportedMatcher),
-			Entry("ide bus on arm64", "ide", "arm64", ideUnsupportedMatcher),
+			// ide is allowed on amd64 for legacy guests; arm64 keeps rejecting it
+			// through its own arch validation.
+			Entry("ide bus on arm64", "ide", "arm64", arm64UnsupportedMatcher),
 			// FIXME(lyarwood): Align with the above errors
 			Entry("sata bus on arm64", "sata", "arm64",
 				gstruct.MatchFields(
@@ -2206,6 +2206,7 @@ var _ = Describe("Validating VMICreate Admitter", func() {
 		},
 			Entry("sata bus on amd64", "sata", "amd64"),
 			Entry("scsi bus on amd64", "scsi", "amd64"),
+			Entry("ide bus on amd64", "ide", "amd64"),
 			Entry("sata bus on s390x", "sata", "s390x"),
 			Entry("scsi bus on s390x", "scsi", "s390x"),
 			Entry("scsi bus on arm64", "scsi", "arm64"),
@@ -2291,7 +2292,7 @@ var _ = Describe("Validating VMICreate Admitter", func() {
 				Name: "testdisk1",
 				DiskDevice: v1.DiskDevice{
 					Disk: &v1.DiskTarget{
-						Bus: "ide",
+						Bus: "floppy",
 					},
 				},
 			})

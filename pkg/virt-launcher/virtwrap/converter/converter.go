@@ -1802,8 +1802,11 @@ func Convert_v1_VirtualMachineInstance_To_api_Domain(vmi *v1.VirtualMachineInsta
 		Model: "none",
 	}
 	if c.Architecture.IsUSBNeeded(vmi) {
-		usbController.Model = "qemu-xhci"
-		usbController.Ports = pointer.P(uint(15))
+		usbController.Model = usbControllerModel(vmi)
+		// UHCI provides two ports and rejects a port count; xHCI takes 15.
+		if usbController.Model != usbControllerUHCI {
+			usbController.Ports = pointer.P(uint(15))
+		}
 	}
 	domain.Spec.Devices.Controllers = append(domain.Spec.Devices.Controllers, usbController)
 
@@ -2123,6 +2126,26 @@ func GetImageInfo(imagePath string) (*disk.DiskInfo, error) {
 	return info, err
 }
 
+const (
+	usbControllerXHCI = "qemu-xhci"
+	usbControllerUHCI = "piix3-uhci"
+)
+
+// usbControllerModel picks a USB controller the guest can actually drive. xHCI has
+// no in-box driver in guests older than Windows 8, while the i440fx machine carries
+// the PIIX3 UHCI controller, which Windows NT 5.x and contemporary Linux support.
+// Other machines keep xHCI: q35 has no PIIX3, and arm64 "virt" has no UHCI at all.
+func usbControllerModel(vmi *v1.VirtualMachineInstance) string {
+	machine := vmi.Spec.Domain.Machine
+	if machine == nil {
+		return usbControllerXHCI
+	}
+	if machine.Type == "pc" || strings.HasPrefix(machine.Type, "pc-i440fx") {
+		return usbControllerUHCI
+	}
+	return usbControllerXHCI
+}
+
 func needsSCSIController(vmi *v1.VirtualMachineInstance) bool {
 	for _, disk := range vmi.Spec.Domain.Devices.Disks {
 		if getBusFromDisk(disk) == v1.DiskBusSCSI {
@@ -2158,6 +2181,8 @@ func getPrefixFromBus(bus v1.DiskBus) string {
 		return "vd"
 	case v1.DiskBusSATA, v1.DiskBusSCSI, v1.DiskBusUSB:
 		return "sd"
+	case v1.DiskBusIDE:
+		return "hd"
 	default:
 		log.Log.Errorf("Unrecognized bus '%s'", bus)
 		return ""

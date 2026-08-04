@@ -1543,6 +1543,35 @@ var _ = Describe("Converter", func() {
 			Entry("should be disabled on s390x", s390x, "none", nil),
 		)
 
+		// The i440fx machine carries a PIIX3 UHCI controller, which guests older than
+		// Windows 8 can drive; xHCI has no in-box driver there. UHCI also rejects a
+		// port count, so the 15 ports may only be set for xHCI. Every machine other
+		// than i440fx must keep the xHCI it had before.
+		DescribeTable("usb controller model by machine type", func(machineType string, expectedModel string, expectedPorts *uint) {
+			v1.SetObjectDefaults_VirtualMachineInstance(vmi)
+			vmi.Spec.Domain.Devices.ClientPassthrough = &v1.ClientPassthroughDevices{}
+			if machineType != "" {
+				vmi.Spec.Domain.Machine = &v1.Machine{Type: machineType}
+			} else {
+				vmi.Spec.Domain.Machine = nil
+			}
+			c.Architecture = archconverter.NewConverter(amd64)
+
+			domain := vmiToDomain(vmi, c)
+
+			Expect(domain.Spec.Devices.Controllers).To(ContainElement(api.Controller{
+				Type:  "usb",
+				Index: "0",
+				Model: expectedModel,
+				Ports: expectedPorts,
+			}))
+		},
+			Entry("pc is the i440fx alias and gets UHCI", "pc", "piix3-uhci", nil),
+			Entry("a versioned i440fx machine gets UHCI", "pc-i440fx-8.2", "piix3-uhci", nil),
+			Entry("q35 keeps xHCI", "q35", "qemu-xhci", pointer.P(uint(15))),
+			Entry("an unset machine keeps xHCI", "", "qemu-xhci", pointer.P(uint(15))),
+		)
+
 		It("should not enable usb redirection when numberOfDevices == 0", func() {
 			v1.SetObjectDefaults_VirtualMachineInstance(vmi)
 			vmi.Spec.Domain.Devices.ClientPassthrough = nil
@@ -3797,6 +3826,18 @@ var _ = Describe("disk device naming", func() {
 		res = FormatDeviceName("sd", 26*26-1)
 		Expect(res).To(Equal("sdyz"))
 	})
+
+	// A bus with no prefix makes the device namer return an empty target, so a disk
+	// on a bus missing from this switch silently ends up without a device name.
+	DescribeTable("getPrefixFromBus should return the device prefix of the bus", func(bus v1.DiskBus, expected string) {
+		Expect(getPrefixFromBus(bus)).To(Equal(expected))
+	},
+		Entry("virtio", v1.DiskBusVirtio, "vd"),
+		Entry("sata", v1.DiskBusSATA, "sd"),
+		Entry("scsi", v1.DiskBusSCSI, "sd"),
+		Entry("usb", v1.DiskBusUSB, "sd"),
+		Entry("ide", v1.DiskBusIDE, "hd"),
+	)
 
 	It("makeDeviceName should generate proper name", func() {
 		prefixMap := make(map[string]deviceNamer)

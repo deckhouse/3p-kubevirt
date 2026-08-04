@@ -758,11 +758,12 @@ const (
 	DiskBusSATA   DiskBus = "sata"
 	DiskBusVirtio DiskBus = VirtIO
 	DiskBusUSB    DiskBus = "usb"
+	DiskBusIDE    DiskBus = "ide"
 )
 
 type DiskTarget struct {
 	// Bus indicates the type of disk device to emulate.
-	// supported values: virtio, sata, scsi, usb.
+	// supported values: virtio, sata, scsi, usb, ide.
 	Bus DiskBus `json:"bus,omitempty"`
 	// ReadOnly.
 	// Defaults to false.
@@ -823,7 +824,7 @@ const (
 
 type CDRomTarget struct {
 	// Bus indicates the type of disk device to emulate.
-	// supported values: virtio, sata, scsi.
+	// supported values: virtio, sata, scsi, ide.
 	Bus DiskBus `json:"bus,omitempty"`
 	// ReadOnly.
 	// Defaults to true.
