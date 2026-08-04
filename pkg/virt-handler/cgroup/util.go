@@ -158,6 +158,83 @@ func generateDeviceRulesForVMI(vmi *v1.VirtualMachineInstance, isolationRes isol
 	return vmiDeviceRules, nil
 }
 
+// generateDeviceRulesForAttachedHotplugDevices builds allow-rules for hotplug devices (block disks and USB host
+// devices) that are ALREADY attached to the virt-launcher pod, i.e. whose device node currently exists.
+//
+// This is required because a fresh cgroup manager is created on every reconcile and, in cgroup v2, every Set call
+// rewrites the whole device allowlist. generateDeviceRulesForVMI intentionally skips hotpluggable volumes, so
+// without seeding the manager with the currently attached hotplug devices, an early Set that runs before the
+// hotplug-disk mount (e.g. the USB host device attach) would transiently drop the disk from the allowlist and
+// briefly deny access to it. The seeded rules are merged with every subsequent Set via addCurrentRules; explicit
+// removal rules (allow=false) emitted by detach/unmount still override them.
+func generateDeviceRulesForAttachedHotplugDevices(vmi *v1.VirtualMachineInstance, isolationRes isolation.IsolationResult) ([]*devices.Rule, error) {
+	mountRoot, err := isolationRes.MountRoot()
+	if err != nil {
+		return nil, err
+	}
+
+	// resolveRule returns an allow-rule for the device node at relPath (relative to the pod mount root), or nil if
+	// the node is not present yet (device not attached) - in that case the corresponding mount/attach flow will add
+	// it later, so there is nothing to seed.
+	resolveRule := func(relPath string) (*devices.Rule, error) {
+		devicePath, err := safepath.JoinNoFollow(mountRoot, relPath)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return nil, nil
+			}
+			return nil, err
+		}
+		return newAllowedDeviceRule(devicePath)
+	}
+
+	var rules []*devices.Rule
+
+	// Already attached hotplug block volumes. Filesystem hotplug volumes are files, not device nodes, so they are
+	// skipped (newAllowedDeviceRule would return nil for them anyway).
+	for _, volumeStatus := range vmi.Status.VolumeStatus {
+		if volumeStatus.HotplugVolume == nil {
+			continue
+		}
+		if volumeStatus.PersistentVolumeClaimInfo == nil ||
+			!storagetypes.IsPVCBlock(volumeStatus.PersistentVolumeClaimInfo.VolumeMode) {
+			continue
+		}
+		rule, err := resolveRule(filepath.Join("var/run/kubevirt/hotplug-disks", volumeStatus.Name))
+		if err != nil {
+			return nil, fmt.Errorf("failed to create device rule for hotplug volume %s: %v", volumeStatus.Name, err)
+		}
+		if rule != nil {
+			log.Log.V(loggingVerbosity).Infof("seeding cgroup with attached hotplug volume %s: %v", volumeStatus.Name, rule)
+			rules = append(rules, rule)
+		}
+	}
+
+	// Already attached hotplug USB host devices.
+	if vmi.Status.DeviceStatus != nil {
+		for _, hostDeviceStatus := range vmi.Status.DeviceStatus.HostDeviceStatuses {
+			if hostDeviceStatus.Hotplug == nil {
+				continue
+			}
+			if hostDeviceStatus.DeviceResourceClaimStatus == nil ||
+				hostDeviceStatus.DeviceResourceClaimStatus.Attributes == nil ||
+				hostDeviceStatus.DeviceResourceClaimStatus.Attributes.USBAddress == nil {
+				continue
+			}
+			usbAddr := hostDeviceStatus.DeviceResourceClaimStatus.Attributes.USBAddress
+			rule, err := resolveRule(fmt.Sprintf("dev/bus/usb/%03d/%03d", usbAddr.Bus, usbAddr.DeviceNumber))
+			if err != nil {
+				return nil, fmt.Errorf("failed to create device rule for hotplug host device %s: %v", hostDeviceStatus.Name, err)
+			}
+			if rule != nil {
+				log.Log.V(loggingVerbosity).Infof("seeding cgroup with attached hotplug host device %s: %v", hostDeviceStatus.Name, rule)
+				rules = append(rules, rule)
+			}
+		}
+	}
+
+	return rules, nil
+}
+
 func newAllowedDeviceRule(devicePath *safepath.Path) (*devices.Rule, error) {
 	fileInfo, err := safepath.StatAtNoFollow(devicePath)
 	if err != nil {

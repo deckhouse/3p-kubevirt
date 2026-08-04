@@ -148,6 +148,15 @@ func NewManagerFromVM(vmi *v1.VirtualMachineInstance, host string) (Manager, err
 		return nil, err
 	}
 
+	// Seed the manager with hotplug devices that are already attached. Otherwise the first Set of a reconcile
+	// (which rewrites the whole cgroup v2 device allowlist) could transiently drop them - see
+	// generateDeviceRulesForAttachedHotplugDevices for details.
+	hotplugDeviceRules, err := generateDeviceRulesForAttachedHotplugDevices(vmi, isolationRes)
+	if err != nil {
+		return nil, err
+	}
+	vmiDeviceRules = append(vmiDeviceRules, hotplugDeviceRules...)
+
 	return newManagerFromPid(isolationRes.Pid(), vmiDeviceRules)
 }
 
