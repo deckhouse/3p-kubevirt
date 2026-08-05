@@ -3045,6 +3045,10 @@ type netConfStub struct {
 	SetupError error
 }
 
+func (nc *netConfStub) HasOrphanedNetworks(_ *v1.VirtualMachineInstance) bool {
+	return false
+}
+
 func (nc *netConfStub) Setup(vmi *v1.VirtualMachineInstance, _ []v1.Network, launcherPid int) error {
 	if nc.SetupError != nil {
 		return nc.SetupError

@@ -26,12 +26,14 @@ import (
 
 	"kubevirt.io/kubevirt/pkg/network/cache"
 	neterrors "kubevirt.io/kubevirt/pkg/network/errors"
+	"kubevirt.io/kubevirt/pkg/network/namescheme"
 )
 
 type stateCacheReaderWriterDeleter interface {
 	Read(networkName string) (cache.PodIfaceState, error)
 	Write(networkName string, state cache.PodIfaceState) error
 	Delete(networkName string) error
+	Keys() ([]string, error)
 }
 
 type State struct {
@@ -90,6 +92,35 @@ func (s *State) SetFinished(nets []v1.Network) error {
 		}
 	}
 	return nil
+}
+
+// OrphanedNetworks returns cached network names that are no longer part of the
+// VMI spec. This happens when an interface is hot-unplugged by removing it from
+// the spec outright (without the Absent phase): the spec no longer mentions the
+// network, but the state cache and the pod netns still hold its leftovers.
+func (s *State) OrphanedNetworks(specNets []v1.Network) ([]string, error) {
+	cachedNames, err := s.cache.Keys()
+	if err != nil {
+		return nil, err
+	}
+	specNames := map[string]struct{}{}
+	for _, net := range specNets {
+		specNames[net.Name] = struct{}{}
+	}
+	var orphaned []string
+	for _, name := range cachedNames {
+		if _, inSpec := specNames[name]; inSpec {
+			continue
+		}
+		// Legacy cache keys of the ordinal/primary pod-interface naming are not
+		// network names; they are migrated by upgradeConfigStateCache and must
+		// not be destroyed as orphans before that happens.
+		if name == namescheme.PrimaryPodInterfaceName || namescheme.OrdinalSecondaryInterfaceName(name) {
+			continue
+		}
+		orphaned = append(orphaned, name)
+	}
+	return orphaned, nil
 }
 
 func (s *State) Delete(nets []v1.Network) error {

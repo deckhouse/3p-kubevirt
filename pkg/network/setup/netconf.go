@@ -119,6 +119,29 @@ func NewNetConfWithCustomFactoryAndConfigState(nsFactory nsFactory, cacheCreator
 	}
 }
 
+// HasOrphanedNetworks reports whether the VMI has state-cache entries for
+// networks that are no longer part of its spec (hot-unplugged by removing them
+// from the spec outright). Lets callers invoke Setup for cleanup even when no
+// network needs configuration.
+func (c *NetConf) HasOrphanedNetworks(vmi *v1.VirtualMachineInstance) bool {
+	stateCache := NewConfigStateCache(string(vmi.UID), c.cacheCreator)
+	cachedNames, err := stateCache.Keys()
+	if err != nil {
+		log.Log.Object(vmi).Reason(err).Warning("failed to list cached networks")
+		return false
+	}
+	specNames := map[string]struct{}{}
+	for _, net := range vmi.Spec.Networks {
+		specNames[net.Name] = struct{}{}
+	}
+	for _, name := range cachedNames {
+		if _, inSpec := specNames[name]; !inSpec {
+			return true
+		}
+	}
+	return false
+}
+
 // Setup applies (privilege) network related changes for an existing virt-launcher pod.
 func (c *NetConf) Setup(vmi *v1.VirtualMachineInstance, networks []v1.Network, launcherPid int) error {
 	c.configStateMutex.RLock()
@@ -159,6 +182,14 @@ func (c *NetConf) Setup(vmi *v1.VirtualMachineInstance, networks []v1.Network, l
 		c.configStateMutex.Unlock()
 	}
 
+	// Orphaned networks are derived against the FULL VMI spec: the networks
+	// argument is a filtered subset and a network absent from it is not
+	// necessarily unplugged.
+	orphanedNets, err := state.OrphanedNetworks(vmi.Spec.Networks)
+	if err != nil {
+		return err
+	}
+
 	ownerID, _ := strconv.Atoi(netdriver.LibvirtUserAndGroupId)
 	if util.IsNonRootVMI(vmi) {
 		ownerID = util.NonRootUID
@@ -178,6 +209,7 @@ func (c *NetConf) Setup(vmi *v1.VirtualMachineInstance, networks []v1.Network, l
 		netpod.WithExternalTapProvisioning(c.externalTapProvisioning),
 		netpod.WithLogger(log.Log.Object(vmi)),
 		netpod.WithVMIIfaceStatuses(vmi.Status.Interfaces),
+		netpod.WithOrphanedNetworks(orphanedNets),
 	)
 
 	if err := netPod.Setup(); err != nil {

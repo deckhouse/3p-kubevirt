@@ -95,6 +95,7 @@ const (
 
 type netconf interface {
 	Setup(vmi *v1.VirtualMachineInstance, networks []v1.Network, launcherPid int) error
+	HasOrphanedNetworks(vmi *v1.VirtualMachineInstance) bool
 	Teardown(vmi *v1.VirtualMachineInstance) error
 }
 
@@ -276,7 +277,9 @@ func (c *BaseController) setupDevicesOwnerships(vmi *v1.VirtualMachineInstance, 
 }
 
 func (c *BaseController) setupNetwork(vmi *v1.VirtualMachineInstance, networks []v1.Network, netConf netconf) error {
-	if len(networks) == 0 {
+	// Even with nothing to configure, Setup must run when leftovers of networks
+	// removed from the spec are still around (see NetConf.HasOrphanedNetworks).
+	if len(networks) == 0 && !netConf.HasOrphanedNetworks(vmi) {
 		return nil
 	}
 

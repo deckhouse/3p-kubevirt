@@ -58,7 +58,8 @@ const (
 )
 
 var (
-	ipDisabled = nmstate.IP{Enabled: pointer.P(false)}
+	ipDisabled     = nmstate.IP{Enabled: pointer.P(false)}
+	errDeleteState = fmt.Errorf("delete state failed")
 )
 
 var _ = Describe("netpod", func() {
@@ -2161,6 +2162,668 @@ var _ = Describe("netpod", func() {
 			}
 		})
 
+		It("resolves the secondary pod interface from the SDN-reported name, not the first candidate veth", func() {
+			const secondaryNetworkName = "veth_n5340036e"
+			// A veth left over from a previously unplugged network. It comes first
+			// in the current status, so the heuristic fallback would pick it.
+			const staleVeth = "d8staleaaaaai"
+			const sdnReportedVeth = "d8b58e7c29f4i"
+
+			nmstatestub := nmstateStub{status: nmstate.Status{
+				Interfaces: []nmstate.Interface{
+					{
+						Name:       "eth0",
+						Index:      1,
+						TypeName:   nmstate.TypeVETH,
+						State:      nmstate.IfaceStateUp,
+						MacAddress: "12:34:56:78:90:ab",
+						MTU:        1500,
+					},
+					{
+						Name:       staleVeth,
+						Index:      3,
+						TypeName:   nmstate.TypeVETH,
+						State:      nmstate.IfaceStateUp,
+						MacAddress: "22:34:56:78:90:ab",
+						MTU:        1400,
+						AltNames:   []string{"d8-sdn-veth-in-dp-old-veth_ndeadbeef"},
+					},
+					{
+						Name:       sdnReportedVeth,
+						Index:      7,
+						TypeName:   nmstate.TypeVETH,
+						State:      nmstate.IfaceStateUp,
+						MacAddress: "32:34:56:78:90:ab",
+						MTU:        1400,
+						AltNames:   []string{"d8-sdn-veth-in-dp-n01-" + secondaryNetworkName},
+					},
+				},
+			}}
+
+			bpfStub := &bpfBridgeStub{}
+			netPod := netpod.NewNetPod(
+				[]v1.Network{
+					*v1.DefaultPodNetwork(),
+					{Name: secondaryNetworkName, NetworkSource: v1.NetworkSource{Pod: &v1.PodNetwork{}}},
+				},
+				[]v1.Interface{
+					{Name: defaultPodNetworkName, Binding: &v1.PluginBinding{Name: "bpfbridge"}},
+					{Name: secondaryNetworkName, Binding: &v1.PluginBinding{Name: "bpfbridge"}},
+				},
+				vmiUID, 0, 0, 0, state,
+				netpod.WithNMStateAdapter(&nmstatestub),
+				netpod.WithCacheCreator(&baseCacheCreator),
+				netpod.WithBindingPlugins(map[string]v1.InterfaceBindingPlugin{
+					"bpfbridge": {DomainAttachmentType: v1.Tap},
+				}),
+				netpod.WithBpfBridgeAdapter(bpfStub),
+				netpod.WithExternalTapProvisioning(true),
+			)
+			Expect(netPod.Setup()).To(Succeed())
+
+			Expect(bpfStub.attachCalls).To(ContainElement(attachCall{
+				objPath:      "/usr/share/network-bpf-bridge-binding/bpf_bridge.o",
+				tapName:      secondaryNetworkName,
+				podIfaceName: sdnReportedVeth,
+			}))
+			for _, c := range bpfStub.attachCalls {
+				Expect(c.podIfaceName).ToNot(Equal(staleVeth))
+			}
+		})
+
+		It("fails setup when the SDN interface for the network is not present yet instead of falling back", func() {
+			const secondaryNetworkName = "veth_n5340036e"
+			const strayVeth = "d8straybbbbbi"
+
+			nmstatestub := nmstateStub{status: nmstate.Status{
+				Interfaces: []nmstate.Interface{
+					{
+						Name:       "eth0",
+						Index:      1,
+						TypeName:   nmstate.TypeVETH,
+						State:      nmstate.IfaceStateUp,
+						MacAddress: "12:34:56:78:90:ab",
+						MTU:        1500,
+					},
+					// A candidate the heuristic would happily pick. Its SDN altname
+					// marks the netns as SDN-managed and names ANOTHER network, so
+					// the resolution must wait rather than bind to it.
+					{
+						Name:       strayVeth,
+						Index:      3,
+						TypeName:   nmstate.TypeVETH,
+						State:      nmstate.IfaceStateUp,
+						MacAddress: "22:34:56:78:90:ab",
+						MTU:        1400,
+						AltNames:   []string{"d8-sdn-veth-in-dp-other-veth_nfeedface"},
+					},
+				},
+			}}
+
+			bpfStub := &bpfBridgeStub{}
+			netPod := netpod.NewNetPod(
+				[]v1.Network{
+					*v1.DefaultPodNetwork(),
+					{Name: secondaryNetworkName, NetworkSource: v1.NetworkSource{Pod: &v1.PodNetwork{}}},
+				},
+				[]v1.Interface{
+					{Name: defaultPodNetworkName, Binding: &v1.PluginBinding{Name: "bpfbridge"}},
+					{Name: secondaryNetworkName, Binding: &v1.PluginBinding{Name: "bpfbridge"}},
+				},
+				vmiUID, 0, 0, 0, state,
+				netpod.WithNMStateAdapter(&nmstatestub),
+				netpod.WithCacheCreator(&baseCacheCreator),
+				netpod.WithBindingPlugins(map[string]v1.InterfaceBindingPlugin{
+					"bpfbridge": {DomainAttachmentType: v1.Tap},
+				}),
+				netpod.WithBpfBridgeAdapter(bpfStub),
+				netpod.WithExternalTapProvisioning(true),
+			)
+			err := netPod.Setup()
+			Expect(err).To(MatchError(ContainSubstring("SDN pod interface for network " + secondaryNetworkName + " is not present yet")))
+			Expect(bpfStub.attachCalls).To(BeEmpty())
+		})
+
+		It("skips an interface marked for removal even when its SDN report and pod link are gone", func() {
+			const secondaryNetworkName = "veth_n5340036e"
+			const otherNetworkName = "veth_cnbbbbbbbb"
+			const otherVeth = "d8bbbbbbbbbbi"
+
+			nmstatestub := nmstateStub{status: nmstate.Status{
+				Interfaces: []nmstate.Interface{
+					{
+						Name:       "eth0",
+						Index:      1,
+						TypeName:   nmstate.TypeVETH,
+						State:      nmstate.IfaceStateUp,
+						MacAddress: "12:34:56:78:90:ab",
+						MTU:        1500,
+					},
+					// The other (kept) network's veth: the unplugged interface must
+					// not steal it via the candidate fallback and must not attach.
+					{
+						Name:       otherVeth,
+						Index:      3,
+						TypeName:   nmstate.TypeVETH,
+						State:      nmstate.IfaceStateUp,
+						MacAddress: "22:34:56:78:90:ab",
+						MTU:        1400,
+						AltNames:   []string{"d8-sdn-veth-in-cn-corp-" + otherNetworkName},
+					},
+				},
+			}}
+
+			bpfStub := &bpfBridgeStub{}
+			netPod := netpod.NewNetPod(
+				[]v1.Network{
+					*v1.DefaultPodNetwork(),
+					{Name: otherNetworkName, NetworkSource: v1.NetworkSource{Pod: &v1.PodNetwork{}}},
+					{Name: secondaryNetworkName, NetworkSource: v1.NetworkSource{Pod: &v1.PodNetwork{}}},
+				},
+				[]v1.Interface{
+					{Name: defaultPodNetworkName, Binding: &v1.PluginBinding{Name: "bpfbridge"}},
+					{Name: otherNetworkName, Binding: &v1.PluginBinding{Name: "bpfbridge"}},
+					{Name: secondaryNetworkName, Binding: &v1.PluginBinding{Name: "bpfbridge"}, State: v1.InterfaceStateAbsent},
+				},
+				vmiUID, 0, 0, 0, state,
+				netpod.WithNMStateAdapter(&nmstatestub),
+				netpod.WithCacheCreator(&baseCacheCreator),
+				netpod.WithBindingPlugins(map[string]v1.InterfaceBindingPlugin{
+					"bpfbridge": {DomainAttachmentType: v1.Tap},
+				}),
+				netpod.WithBpfBridgeAdapter(bpfStub),
+				netpod.WithExternalTapProvisioning(true),
+			)
+			Expect(netPod.Setup()).To(Succeed())
+
+			Expect(bpfStub.attachCalls).To(ContainElement(attachCall{
+				objPath:      "/usr/share/network-bpf-bridge-binding/bpf_bridge.o",
+				tapName:      otherNetworkName,
+				podIfaceName: otherVeth,
+			}))
+			for _, c := range bpfStub.attachCalls {
+				Expect(c.tapName).ToNot(Equal(secondaryNetworkName))
+			}
+		})
+
+		It("deletes the leftover TAP of a network removed from the spec outright", func() {
+			const removedNetworkName = "veth_n5e374cdb"
+			const keptNetworkName = "veth_cne5e53dde"
+			const keptVeth = "d899a50e8c1di"
+
+			// The DVP hot-unplug flow removes the interface and its network from
+			// the VMI spec entirely (no Absent phase). The network survives only
+			// as a state-cache entry and a leftover TAP in the pod netns.
+			Expect(state.SetFinished([]v1.Network{{Name: removedNetworkName}})).To(Succeed())
+
+			nmstatestub := nmstateStub{status: nmstate.Status{
+				Interfaces: []nmstate.Interface{
+					{
+						Name:       "eth0",
+						Index:      1,
+						TypeName:   nmstate.TypeVETH,
+						State:      nmstate.IfaceStateUp,
+						MacAddress: "12:34:56:78:90:ab",
+						MTU:        1500,
+					},
+					{
+						Name:       keptVeth,
+						Index:      3,
+						TypeName:   nmstate.TypeVETH,
+						State:      nmstate.IfaceStateUp,
+						MacAddress: "22:34:56:78:90:ab",
+						MTU:        1400,
+					},
+					{
+						Name:       removedNetworkName,
+						Index:      8,
+						TypeName:   nmstate.TypeTap,
+						State:      nmstate.IfaceStateDown,
+						MacAddress: "32:34:56:78:90:ab",
+						MTU:        1400,
+					},
+				},
+			}}
+
+			bpfStub := &bpfBridgeStub{}
+			netPod := netpod.NewNetPod(
+				[]v1.Network{
+					*v1.DefaultPodNetwork(),
+					{Name: keptNetworkName, NetworkSource: v1.NetworkSource{Pod: &v1.PodNetwork{}}},
+				},
+				[]v1.Interface{
+					{Name: defaultPodNetworkName, Binding: &v1.PluginBinding{Name: "bpfbridge"}},
+					{Name: keptNetworkName, Binding: &v1.PluginBinding{Name: "bpfbridge"}},
+				},
+				vmiUID, 0, 0, 0, state,
+				netpod.WithNMStateAdapter(&nmstatestub),
+				netpod.WithCacheCreator(&baseCacheCreator),
+				netpod.WithBindingPlugins(map[string]v1.InterfaceBindingPlugin{
+					"bpfbridge": {DomainAttachmentType: v1.Tap},
+				}),
+				netpod.WithBpfBridgeAdapter(bpfStub),
+				netpod.WithExternalTapProvisioning(true),
+				netpod.WithOrphanedNetworks([]string{removedNetworkName}),
+			)
+			Expect(netPod.Setup()).To(Succeed())
+
+			Expect(nmstatestub.spec.Interfaces).To(ContainElement(
+				nmstate.Interface{
+					Name:     removedNetworkName,
+					TypeName: nmstate.TypeTap,
+					State:    nmstate.IfaceStateAbsent,
+					Metadata: &nmstate.IfaceMetadata{NetworkName: removedNetworkName},
+				},
+			))
+			orphans, err := state.OrphanedNetworks([]v1.Network{*v1.DefaultPodNetwork(), {Name: keptNetworkName}})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(orphans).To(BeEmpty())
+			for _, c := range bpfStub.attachCalls {
+				Expect(c.tapName).ToNot(Equal(removedNetworkName))
+			}
+		})
+
+		It("finishes the network setup even when the leftover cleanup fails", func() {
+			const configuredNetworkName = "veth_cnaaaaaaaa"
+			const configuredVeth = "d8aaaaaaaaaai"
+			const removedNetworkName = "veth_n5e374cdb"
+
+			// Уборка мусора не должна ронять setup: иначе настроенная сеть осталась бы
+			// в состоянии "started", и следующий реконсайл счёл бы её неперезапускаемой
+			// (critical network error -> VMI Failed -> рестарт живой ВМ).
+			failingCache := configStateCacheStub{map[string]cache.PodIfaceState{}, nil, nil, errDeleteState}
+			failingState := netpod.NewState(failingCache, netnsStub{})
+
+			nmstatestub := nmstateStub{status: nmstate.Status{
+				Interfaces: []nmstate.Interface{
+					{
+						Name:       "eth0",
+						Index:      1,
+						TypeName:   nmstate.TypeVETH,
+						State:      nmstate.IfaceStateUp,
+						MacAddress: "12:34:56:78:90:ab",
+						MTU:        1500,
+					},
+					{
+						Name:       configuredVeth,
+						Index:      3,
+						TypeName:   nmstate.TypeVETH,
+						State:      nmstate.IfaceStateUp,
+						MacAddress: "22:34:56:78:90:ab",
+						MTU:        1400,
+						AltNames:   []string{"d8-sdn-veth-in-cn-corp-" + configuredNetworkName},
+					},
+					{
+						Name:       removedNetworkName,
+						Index:      8,
+						TypeName:   nmstate.TypeTap,
+						State:      nmstate.IfaceStateDown,
+						MacAddress: "32:34:56:78:90:ab",
+						MTU:        1400,
+					},
+				},
+			}}
+
+			netPod := netpod.NewNetPod(
+				[]v1.Network{
+					*v1.DefaultPodNetwork(),
+					{Name: configuredNetworkName, NetworkSource: v1.NetworkSource{Pod: &v1.PodNetwork{}}},
+				},
+				[]v1.Interface{
+					{Name: defaultPodNetworkName, Binding: &v1.PluginBinding{Name: "bpfbridge"}},
+					{Name: configuredNetworkName, Binding: &v1.PluginBinding{Name: "bpfbridge"}},
+				},
+				vmiUID, 0, 0, 0, failingState,
+				netpod.WithNMStateAdapter(&nmstatestub),
+				netpod.WithCacheCreator(&baseCacheCreator),
+				netpod.WithBindingPlugins(map[string]v1.InterfaceBindingPlugin{
+					"bpfbridge": {DomainAttachmentType: v1.Tap},
+				}),
+				netpod.WithBpfBridgeAdapter(&bpfBridgeStub{}),
+				netpod.WithExternalTapProvisioning(true),
+				netpod.WithOrphanedNetworks([]string{removedNetworkName}),
+			)
+			Expect(netPod.Setup()).To(Succeed())
+
+			// Сети доведены до finished, несмотря на провал уборки.
+			Expect(failingCache.stateCache).To(HaveKeyWithValue(defaultPodNetworkName, cache.PodIfaceNetworkPreparationFinished))
+			Expect(failingCache.stateCache).To(HaveKeyWithValue(configuredNetworkName, cache.PodIfaceNetworkPreparationFinished))
+		})
+
+		It("postpones the leftover TAP removal while the guest is still attached", func() {
+			const removedNetworkName = "veth_n5e374cdb"
+
+			Expect(state.SetFinished([]v1.Network{
+				{Name: defaultPodNetworkName},
+				{Name: removedNetworkName},
+			})).To(Succeed())
+
+			nmstatestub := nmstateStub{status: nmstate.Status{
+				Interfaces: []nmstate.Interface{
+					{
+						Name:       "eth0",
+						Index:      1,
+						TypeName:   nmstate.TypeVETH,
+						State:      nmstate.IfaceStateUp,
+						MacAddress: "12:34:56:78:90:ab",
+						MTU:        1500,
+					},
+					// Operationally up: the domain hot-unplug has not detached the
+					// guest yet, so the TAP must survive this reconcile.
+					{
+						Name:       removedNetworkName,
+						Index:      8,
+						TypeName:   nmstate.TypeTap,
+						State:      nmstate.IfaceStateUp,
+						MacAddress: "32:34:56:78:90:ab",
+						MTU:        1400,
+					},
+				},
+			}}
+
+			netPod := netpod.NewNetPod(
+				[]v1.Network{*v1.DefaultPodNetwork()},
+				[]v1.Interface{
+					{Name: defaultPodNetworkName, Binding: &v1.PluginBinding{Name: "bpfbridge"}},
+				},
+				vmiUID, 0, 0, 0, state,
+				netpod.WithNMStateAdapter(&nmstatestub),
+				netpod.WithCacheCreator(&baseCacheCreator),
+				netpod.WithBindingPlugins(map[string]v1.InterfaceBindingPlugin{
+					"bpfbridge": {DomainAttachmentType: v1.Tap},
+				}),
+				netpod.WithBpfBridgeAdapter(&bpfBridgeStub{}),
+				netpod.WithExternalTapProvisioning(true),
+				netpod.WithOrphanedNetworks([]string{removedNetworkName}),
+			)
+			Expect(netPod.Setup()).To(Succeed())
+
+			Expect(nmstatestub.spec.Interfaces).To(BeEmpty())
+			orphans, err := state.OrphanedNetworks([]v1.Network{*v1.DefaultPodNetwork()})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(orphans).To(ConsistOf(removedNetworkName))
+		})
+
+		It("removes only the leftover TAP when nothing else is pending", func() {
+			const removedNetworkName = "veth_n5e374cdb"
+
+			Expect(state.SetFinished([]v1.Network{
+				{Name: defaultPodNetworkName},
+				{Name: removedNetworkName},
+			})).To(Succeed())
+
+			nmstatestub := nmstateStub{status: nmstate.Status{
+				Interfaces: []nmstate.Interface{
+					{
+						Name:       "eth0",
+						Index:      1,
+						TypeName:   nmstate.TypeVETH,
+						State:      nmstate.IfaceStateUp,
+						MacAddress: "12:34:56:78:90:ab",
+						MTU:        1500,
+					},
+					{
+						Name:       removedNetworkName,
+						Index:      8,
+						TypeName:   nmstate.TypeTap,
+						State:      nmstate.IfaceStateDown,
+						MacAddress: "32:34:56:78:90:ab",
+						MTU:        1400,
+					},
+				},
+			}}
+
+			bpfStub := &bpfBridgeStub{}
+			netPod := netpod.NewNetPod(
+				[]v1.Network{*v1.DefaultPodNetwork()},
+				[]v1.Interface{
+					{Name: defaultPodNetworkName, Binding: &v1.PluginBinding{Name: "bpfbridge"}},
+				},
+				vmiUID, 0, 0, 0, state,
+				netpod.WithNMStateAdapter(&nmstatestub),
+				netpod.WithCacheCreator(&baseCacheCreator),
+				netpod.WithBindingPlugins(map[string]v1.InterfaceBindingPlugin{
+					"bpfbridge": {DomainAttachmentType: v1.Tap},
+				}),
+				netpod.WithBpfBridgeAdapter(bpfStub),
+				netpod.WithExternalTapProvisioning(true),
+				netpod.WithOrphanedNetworks([]string{removedNetworkName}),
+			)
+			Expect(netPod.Setup()).To(Succeed())
+
+			// The default network is already configured, so only the reduced
+			// cleanup path runs: the leftover TAP is removed and nothing is
+			// attached or re-created.
+			Expect(nmstatestub.spec.Interfaces).To(ConsistOf(
+				nmstate.Interface{
+					Name:     removedNetworkName,
+					TypeName: nmstate.TypeTap,
+					State:    nmstate.IfaceStateAbsent,
+					Metadata: &nmstate.IfaceMetadata{NetworkName: removedNetworkName},
+				},
+			))
+			Expect(bpfStub.attachCalls).To(BeEmpty())
+		})
+
+		It("deletes the leftover TAP of an unplugged interface", func() {
+			const removedNetworkName = "veth_n5340036e"
+			const keptNetworkName = "veth_cnbbbbbbbb"
+			const keptVeth = "d8bbbbbbbbbbi"
+
+			nmstatestub := nmstateStub{status: nmstate.Status{
+				Interfaces: []nmstate.Interface{
+					{
+						Name:       "eth0",
+						Index:      1,
+						TypeName:   nmstate.TypeVETH,
+						State:      nmstate.IfaceStateUp,
+						MacAddress: "12:34:56:78:90:ab",
+						MTU:        1500,
+					},
+					{
+						Name:       keptVeth,
+						Index:      3,
+						TypeName:   nmstate.TypeVETH,
+						State:      nmstate.IfaceStateUp,
+						MacAddress: "22:34:56:78:90:ab",
+						MTU:        1400,
+						AltNames:   []string{"d8-sdn-veth-in-cn-corp-" + keptNetworkName},
+					},
+					// The TAP of the removed interface: SDN already deleted its veth,
+					// the TAP is KubeVirt's leftover and must be marked for removal.
+					{
+						Name:       removedNetworkName,
+						Index:      8,
+						TypeName:   nmstate.TypeTap,
+						State:      nmstate.IfaceStateUp,
+						MacAddress: "32:34:56:78:90:ab",
+						MTU:        1400,
+					},
+				},
+			}}
+
+			bpfStub := &bpfBridgeStub{}
+			netPod := netpod.NewNetPod(
+				[]v1.Network{
+					*v1.DefaultPodNetwork(),
+					{Name: keptNetworkName, NetworkSource: v1.NetworkSource{Pod: &v1.PodNetwork{}}},
+					{Name: removedNetworkName, NetworkSource: v1.NetworkSource{Pod: &v1.PodNetwork{}}},
+				},
+				[]v1.Interface{
+					{Name: defaultPodNetworkName, Binding: &v1.PluginBinding{Name: "bpfbridge"}},
+					{Name: keptNetworkName, Binding: &v1.PluginBinding{Name: "bpfbridge"}},
+					{Name: removedNetworkName, Binding: &v1.PluginBinding{Name: "bpfbridge"}, State: v1.InterfaceStateAbsent},
+				},
+				vmiUID, 0, 0, 0, state,
+				netpod.WithNMStateAdapter(&nmstatestub),
+				netpod.WithCacheCreator(&baseCacheCreator),
+				netpod.WithBindingPlugins(map[string]v1.InterfaceBindingPlugin{
+					"bpfbridge": {DomainAttachmentType: v1.Tap},
+				}),
+				netpod.WithBpfBridgeAdapter(bpfStub),
+				netpod.WithExternalTapProvisioning(true),
+			)
+			Expect(netPod.Setup()).To(Succeed())
+
+			Expect(nmstatestub.spec.Interfaces).To(ContainElement(
+				nmstate.Interface{
+					Name:     removedNetworkName,
+					TypeName: nmstate.TypeTap,
+					State:    nmstate.IfaceStateAbsent,
+					Metadata: &nmstate.IfaceMetadata{NetworkName: removedNetworkName},
+				},
+			))
+			for _, c := range bpfStub.attachCalls {
+				Expect(c.tapName).ToNot(Equal(removedNetworkName))
+			}
+		})
+
+		It("prefers the SDN-reported pod interface over a leftover ordinal multus interface", func() {
+			const secondaryNetworkName = "veth_n5340036e"
+			const sdnReportedVeth = "d8b58e7c29f4i"
+
+			// An ordinal-named interface (net1) switches the base name scheme to the
+			// ordinal variant and, being a non-KubeVirt-owned veth, is a candidate
+			// the heuristic could steal for the pod network.
+			nmstatestub := nmstateStub{status: nmstate.Status{
+				Interfaces: []nmstate.Interface{
+					{
+						Name:       "eth0",
+						Index:      1,
+						TypeName:   nmstate.TypeVETH,
+						State:      nmstate.IfaceStateUp,
+						MacAddress: "12:34:56:78:90:ab",
+						MTU:        1500,
+					},
+					{
+						Name:       "net1",
+						Index:      2,
+						TypeName:   nmstate.TypeVETH,
+						State:      nmstate.IfaceStateUp,
+						MacAddress: "22:34:56:78:90:ab",
+						MTU:        1400,
+					},
+					{
+						Name:       sdnReportedVeth,
+						Index:      7,
+						TypeName:   nmstate.TypeVETH,
+						State:      nmstate.IfaceStateUp,
+						MacAddress: "32:34:56:78:90:ab",
+						MTU:        1400,
+						AltNames:   []string{"d8-sdn-veth-in-dp-n01-" + secondaryNetworkName},
+					},
+				},
+			}}
+
+			bpfStub := &bpfBridgeStub{}
+			netPod := netpod.NewNetPod(
+				[]v1.Network{
+					*v1.DefaultPodNetwork(),
+					{Name: secondaryNetworkName, NetworkSource: v1.NetworkSource{Pod: &v1.PodNetwork{}}},
+				},
+				[]v1.Interface{
+					{Name: defaultPodNetworkName, Binding: &v1.PluginBinding{Name: "bpfbridge"}},
+					{Name: secondaryNetworkName, Binding: &v1.PluginBinding{Name: "bpfbridge"}},
+				},
+				vmiUID, 0, 0, 0, state,
+				netpod.WithNMStateAdapter(&nmstatestub),
+				netpod.WithCacheCreator(&baseCacheCreator),
+				netpod.WithBindingPlugins(map[string]v1.InterfaceBindingPlugin{
+					"bpfbridge": {DomainAttachmentType: v1.Tap},
+				}),
+				netpod.WithBpfBridgeAdapter(bpfStub),
+				netpod.WithExternalTapProvisioning(true),
+			)
+			Expect(netPod.Setup()).To(Succeed())
+
+			Expect(bpfStub.attachCalls).To(ContainElement(attachCall{
+				objPath:      "/usr/share/network-bpf-bridge-binding/bpf_bridge.o",
+				tapName:      secondaryNetworkName,
+				podIfaceName: sdnReportedVeth,
+			}))
+			for _, c := range bpfStub.attachCalls {
+				Expect(c.podIfaceName).ToNot(Equal("net1"))
+			}
+		})
+
+		It("wires each of two secondary networks to its own SDN-reported pod interface", func() {
+			const (
+				networkA = "veth_naaaaaaaa"
+				networkB = "veth_cnbbbbbbbb"
+				vethA    = "d8aaaaaaaaaai"
+				vethB    = "d8bbbbbbbbbbi"
+			)
+
+			nmstatestub := nmstateStub{status: nmstate.Status{
+				Interfaces: []nmstate.Interface{
+					{
+						Name:       "eth0",
+						Index:      1,
+						TypeName:   nmstate.TypeVETH,
+						State:      nmstate.IfaceStateUp,
+						MacAddress: "12:34:56:78:90:ab",
+						MTU:        1500,
+					},
+					// Reverse creation order relative to the VMI network order: the
+					// positional heuristic would cross-wire A to vethB and B to vethA.
+					{
+						Name:       vethB,
+						Index:      3,
+						TypeName:   nmstate.TypeVETH,
+						State:      nmstate.IfaceStateUp,
+						MacAddress: "22:34:56:78:90:ab",
+						MTU:        1400,
+						AltNames:   []string{"d8-sdn-veth-in-dp-nb-" + networkB},
+					},
+					{
+						Name:       vethA,
+						Index:      7,
+						TypeName:   nmstate.TypeVETH,
+						State:      nmstate.IfaceStateUp,
+						MacAddress: "32:34:56:78:90:ab",
+						MTU:        1400,
+						AltNames:   []string{"d8-sdn-veth-in-dp-na-" + networkA},
+					},
+				},
+			}}
+
+			bpfStub := &bpfBridgeStub{}
+			netPod := netpod.NewNetPod(
+				[]v1.Network{
+					*v1.DefaultPodNetwork(),
+					{Name: networkA, NetworkSource: v1.NetworkSource{Pod: &v1.PodNetwork{}}},
+					{Name: networkB, NetworkSource: v1.NetworkSource{Pod: &v1.PodNetwork{}}},
+				},
+				[]v1.Interface{
+					{Name: defaultPodNetworkName, Binding: &v1.PluginBinding{Name: "bpfbridge"}},
+					{Name: networkA, Binding: &v1.PluginBinding{Name: "bpfbridge"}},
+					{Name: networkB, Binding: &v1.PluginBinding{Name: "bpfbridge"}},
+				},
+				vmiUID, 0, 0, 0, state,
+				netpod.WithNMStateAdapter(&nmstatestub),
+				netpod.WithCacheCreator(&baseCacheCreator),
+				netpod.WithBindingPlugins(map[string]v1.InterfaceBindingPlugin{
+					"bpfbridge": {DomainAttachmentType: v1.Tap},
+				}),
+				netpod.WithBpfBridgeAdapter(bpfStub),
+				netpod.WithExternalTapProvisioning(true),
+			)
+			Expect(netPod.Setup()).To(Succeed())
+
+			Expect(bpfStub.attachCalls).To(ContainElements(
+				attachCall{
+					objPath:      "/usr/share/network-bpf-bridge-binding/bpf_bridge.o",
+					tapName:      networkA,
+					podIfaceName: vethA,
+				},
+				attachCall{
+					objPath:      "/usr/share/network-bpf-bridge-binding/bpf_bridge.o",
+					tapName:      networkB,
+					podIfaceName: vethB,
+				},
+			))
+		})
+
 	})
 
 	When("binding plugin with managedTap domainAttachmentType", func() {
@@ -2432,6 +3095,14 @@ func (c configStateCacheStub) Write(key string, state cache.PodIfaceState) error
 	}
 	c.stateCache[key] = state
 	return nil
+}
+
+func (c configStateCacheStub) Keys() ([]string, error) {
+	var keys []string
+	for k := range c.stateCache {
+		keys = append(keys, k)
+	}
+	return keys, nil
 }
 
 func (c configStateCacheStub) Delete(key string) error {

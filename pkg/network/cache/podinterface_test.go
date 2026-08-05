@@ -75,4 +75,15 @@ var _ = Describe("Pod Interface", func() {
 		_, err := podIfaceCache.Read()
 		Expect(err).To(MatchError(os.ErrNotExist))
 	})
+
+	It("should list interface entries but not internal dot-files sharing the directory", func() {
+		Expect(netcache.WritePodInterfaceCache(&cacheCreator, UID, "veth_n5340036e", &cacheData)).To(Succeed())
+		Expect(netcache.WritePodInterfaceCache(&cacheCreator, UID, "default", &cacheData)).To(Succeed())
+		// The launcher-pid cache lives in the SAME per-UID directory; listing it
+		// as an interface would make every VMI look like it has an orphaned
+		// network and would let cleanup destroy the pid file.
+		Expect(netcache.NewLauncherPidCache(&cacheCreator, UID).Write(1234)).To(Succeed())
+
+		Expect(netcache.ListPodInterfaceCache(&cacheCreator, UID)).To(ConsistOf("veth_n5340036e", "default"))
+	})
 })

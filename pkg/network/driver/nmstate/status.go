@@ -60,6 +60,7 @@ func (n NMState) readInterfaces(links []vishnetlink.Link) ([]Interface, error) {
 			TypeName:   normalizeLinkTypeName(link),
 			State:      link.Attrs().OperState.String(),
 			MacAddress: link.Attrs().HardwareAddr.String(),
+			AltNames:   link.Attrs().AltNames,
 			MTU:        link.Attrs().MTU,
 			IPv4: IP{
 				Enabled: pointer.P(false),

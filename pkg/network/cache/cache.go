@@ -42,6 +42,7 @@ type cacheFS interface {
 	RemoveAll(path string) error
 	ReadFile(filename string) ([]byte, error)
 	WriteFile(filename string, data []byte, perm fs.FileMode) error
+	Walk(root string, walkFn filepath.WalkFunc) error
 }
 
 type CacheCreator struct{}
@@ -81,6 +82,34 @@ func (c Cache) Write(data interface{}) error {
 
 func (c Cache) Delete() error {
 	return c.fs.RemoveAll(c.path)
+}
+
+// Entries returns the names of the immediate children stored under the cache
+// path. A missing path yields no entries rather than an error.
+func (c Cache) Entries() ([]string, error) {
+	var names []string
+	visitedRoot := false
+	err := c.fs.Walk(c.path, func(_ string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			if errors.Is(walkErr, os.ErrNotExist) {
+				return nil
+			}
+			return walkErr
+		}
+		if !visitedRoot {
+			visitedRoot = true
+			return nil
+		}
+		names = append(names, info.Name())
+		if info.IsDir() {
+			return filepath.SkipDir
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return names, nil
 }
 
 type cacheCreator interface {

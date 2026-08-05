@@ -42,15 +42,19 @@ type Status struct {
 }
 
 type Interface struct {
-	Name        string  `json:"name"`
-	Index       int     `json:"index,omitempty"`
-	TypeName    string  `json:"type,omitempty"`
-	State       string  `json:"state,omitempty"`
-	MacAddress  string  `json:"mac-address,omitempty"`
-	CopyMacFrom string  `json:"copy-mac-from,omitempty"`
-	MTU         int     `json:"mtu,omitempty"`
-	Controller  string  `json:"controller,omitempty"`
-	Ethtool     Ethtool `json:"ethtool,omitempty"`
+	Name       string `json:"name"`
+	Index      int    `json:"index,omitempty"`
+	TypeName   string `json:"type,omitempty"`
+	State      string `json:"state,omitempty"`
+	MacAddress string `json:"mac-address,omitempty"`
+	// AltNames carries the link's alternative names (IFLA_PROP_LIST). Not part
+	// of the nmstate schema; used to consume in-netns contracts such as the SDN
+	// pod-interface altname.
+	AltNames    []string `json:"alt-names,omitempty"`
+	CopyMacFrom string   `json:"copy-mac-from,omitempty"`
+	MTU         int      `json:"mtu,omitempty"`
+	Controller  string   `json:"controller,omitempty"`
+	Ethtool     Ethtool  `json:"ethtool,omitempty"`
 
 	Tap *TapDevice `json:"tap,omitempty"`
 
