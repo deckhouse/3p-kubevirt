@@ -63,6 +63,7 @@ import (
 	virtcache "kubevirt.io/kubevirt/pkg/virt-handler/cache"
 	checksum_controller "kubevirt.io/kubevirt/pkg/virt-handler/checksum-controller"
 	cmdclient "kubevirt.io/kubevirt/pkg/virt-handler/cmd-client"
+	container_disk "kubevirt.io/kubevirt/pkg/virt-handler/container-disk"
 	hotplugvolume "kubevirt.io/kubevirt/pkg/virt-handler/hotplug-disk"
 	"kubevirt.io/kubevirt/pkg/virt-handler/isolation"
 	launcherclients "kubevirt.io/kubevirt/pkg/virt-handler/launcher-clients"
@@ -117,6 +118,7 @@ var _ = Describe("VirtualMachineInstance migration target", func() {
 
 		networkBindingPluginMemoryCalculator *stubNetBindingPluginMemoryCalculator
 		migrationTargetPasstRepairHandler    *stubTargetPasstRepairHandler
+		mockHotplugCDMounter                 *container_disk.MockHotplugMounter
 	)
 
 	const host = "master"
@@ -248,6 +250,8 @@ var _ = Describe("VirtualMachineInstance migration target", func() {
 		)
 
 		controller.hotplugVolumeMounter = mockHotplugVolumeMounter
+		mockHotplugCDMounter = container_disk.NewMockHotplugMounter(ctrl)
+		controller.hotplugContainerDiskMounter = mockHotplugCDMounter
 
 		vmiTestUUID = uuid.NewUUID()
 		podTestUUID = uuid.NewUUID()
@@ -1247,6 +1251,75 @@ var _ = Describe("VirtualMachineInstance migration target", func() {
 			}
 			Expect(migrationProxyKey(vmi)).To(Equal("local-uid"))
 		})
+	})
+
+	Context("cleanup of a terminating VMI on the migration target", func() {
+		terminatingTargetVMI := func() *v1.VirtualMachineInstance {
+			vmi := api2.NewMinimalVMI("testvmi")
+			vmi.UID = vmiTestUUID
+			vmi.ObjectMeta.ResourceVersion = "1"
+			vmi.ObjectMeta.DeletionTimestamp = pointer.P(metav1.Now())
+			vmi.Status.Phase = v1.Running
+			vmi.Status.NodeName = "othernode"
+			vmi.Labels = map[string]string{v1.MigrationTargetNodeNameLabel: host}
+			return addActivePods(vmi, podTestUUID, host)
+		}
+
+		It("should unmount hotplug container disks", func() {
+			vmi := terminatingTargetVMI()
+			Expect(virtcache.GhostRecordGlobalStore.Add(vmi.Namespace, vmi.Name, sockFile, vmi.UID)).To(Succeed())
+			mockHotplugVolumeMounter.EXPECT().UnmountAll(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
+			// gomock fails the spec if this is never called: the target must release the
+			// hotplug container disks it mounted.
+			mockHotplugCDMounter.EXPECT().UmountAll(vmi).Return(nil)
+			createVMI(vmi)
+
+			sanityExecute()
+
+			// Cleanup succeeded, so tearing the launcher client (and ghost record) down is fine.
+			Expect(virtcache.GhostRecordGlobalStore.Exists(vmi.Namespace, vmi.Name)).To(BeFalse())
+		})
+
+		It("should keep the ghost record and retry when the hotplug container disk unmount fails", func() {
+			vmi := terminatingTargetVMI()
+			Expect(virtcache.GhostRecordGlobalStore.Add(vmi.Namespace, vmi.Name, sockFile, vmi.UID)).To(Succeed())
+			mockHotplugCDMounter.EXPECT().UmountAll(vmi).Return(fmt.Errorf("device or resource busy"))
+			mockHotplugVolumeMounter.EXPECT().UnmountAll(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
+			createVMI(vmi)
+
+			Expect(controller.execute(vmi.Namespace+"/"+vmi.Name)).To(MatchError(ContainSubstring("device or resource busy")),
+				"the error must propagate so the key is re-enqueued")
+			Expect(virtcache.GhostRecordGlobalStore.Exists(vmi.Namespace, vmi.Name)).To(BeTrue(),
+				"ghost record must survive so a later reconcile can still resolve the UID and unmount")
+		})
+	})
+
+	It("should unmount target volumes on failed migration even without a launcher client", func() {
+		vmi := api2.NewMinimalVMI("testvmi")
+		vmi.UID = vmiTestUUID
+		vmi.ObjectMeta.ResourceVersion = "1"
+		vmi.Status.Phase = v1.Running
+		vmi.Status.NodeName = "othernode"
+		vmi.Labels = map[string]string{v1.MigrationTargetNodeNameLabel: host}
+		vmi.Status.MigrationState = &v1.VirtualMachineInstanceMigrationState{
+			TargetNode:   host,
+			SourceNode:   "othernode",
+			MigrationUID: "123",
+			Failed:       true,
+			EndTimestamp: pointer.P(metav1.Now()),
+		}
+		vmi = addActivePods(vmi, podTestUUID, host)
+
+		createVMI(vmi)
+
+		// Client == nil makes MockLauncherClientManager.GetLauncherClient return an error.
+		controller.launcherClients.(*launcherclients.MockLauncherClientManager).Client = nil
+		mockHotplugVolumeMounter.EXPECT().UnmountAll(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
+		// gomock fails the spec if this is never called: the unmount must still run without
+		// a launcher client.
+		mockHotplugCDMounter.EXPECT().UmountAll(vmi).Return(nil)
+
+		Expect(controller.finalCleanup(vmi, &vmi.Spec, &vmi.Status, vmi.Labels, nil)).To(Succeed())
 	})
 })
 

@@ -594,20 +594,22 @@ func (c *MigrationTargetController) finalCleanup(vmi *v1.VirtualMachineInstance,
 		defer c.conntrackSync.Cleanup(vmi.UID)
 	}
 	client, err := c.launcherClients.GetLauncherClient(vmi)
-	if err != nil {
+	if err != nil && !vmi.Status.MigrationState.Failed {
 		return err
 	}
 
 	if vmi.Status.MigrationState.Failed {
-		err = client.SignalTargetPodCleanup(vmi)
 		if err != nil {
+			c.logger.Object(vmi).Warningf("No launcher client, skipping target pod cleanup signal: %v", err)
+		} else if err := client.SignalTargetPodCleanup(vmi); err != nil {
 			c.logger.Object(vmi).Warningf("Failed to signal target pod cleanup: %v, ignoring.", err)
+		} else {
+			c.logger.Object(vmi).Infof("Signaled target pod for failed migration to clean up")
 		}
-		err = c.unmountVolumes(vmi)
-		if err != nil {
+
+		if err = c.unmountVolumes(vmi); err != nil {
 			return err
 		}
-		c.logger.Object(vmi).Infof("Signaled target pod for failed migration to clean up")
 
 		// tear down network cache
 		if err = c.netConf.Teardown(vmi); err != nil {
@@ -722,7 +724,8 @@ func (c *MigrationTargetController) execute(key string) error {
 	if vmi.IsFinal() || vmi.DeletionTimestamp != nil {
 		c.logger.V(4).Infof("vmi for key %v is terminating or final, doing only a best-effort cleanup", key)
 		if err := c.unmountVolumes(vmi); err != nil {
-			c.logger.Object(vmi).Reason(err).Error("target pod cleanup: unmount volumes failed")
+			// Retry on failed unmount to prevent mount leaks
+			return fmt.Errorf("target pod cleanup: failed to unmount volumes: %w", err)
 		}
 		if err := c.netConf.Teardown(vmi); err != nil {
 			c.logger.Object(vmi).Reason(err).Error("target pod cleanup: teardown network failed")
@@ -964,6 +967,10 @@ func (c *MigrationTargetController) unmountVolumes(originalVMI *v1.VirtualMachin
 
 	if err = c.containerDiskMounter.Unmount(vmiCopy); err != nil {
 		return err
+	}
+
+	if err = c.hotplugContainerDiskMounter.UmountAll(vmiCopy); err != nil {
+		return fmt.Errorf("failed to unmount hotplug container disks: %w", err)
 	}
 
 	// Unmount all hotplug volumes, even if the attachment pod is already gone.
