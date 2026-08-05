@@ -90,6 +90,14 @@ const (
 
 	// SpiceStreamingAnnotation sets video streaming detection: filter, all, off.
 	SpiceStreamingAnnotation = "virtualization.deckhouse.io/spice-streaming"
+
+	// SpiceJPEGAnnotation overrides lossy JPEG compression of photo-like areas:
+	// always, auto, never. The default is "always", because every image compression
+	// mode SPICE offers (glz, lz, quic, auto_*) is LOSSLESS, and "auto" only applies
+	// to connections the server treats as WAN — which a unix socket behind a proxy
+	// never is. Measured on win11, 800x600, one framebuffer, the same moment:
+	// VNC+JPEG 4.9 Mbps at 16.5 FPS against SPICE 12-17 Mbps and a slideshow.
+	SpiceJPEGAnnotation = "virtualization.deckhouse.io/spice-jpeg"
 )
 
 type deviceNamer struct {
@@ -982,6 +990,9 @@ var (
 	}
 	spiceStreamingValues = map[string]bool{
 		"filter": true, "all": true, "off": true,
+	}
+	spiceJPEGValues = map[string]bool{
+		"always": true, "auto": true, "never": true,
 	}
 )
 
@@ -2066,6 +2077,14 @@ func Convert_v1_VirtualMachineInstance_To_api_Domain(vmi *v1.VirtualMachineInsta
 			}
 			if m := vmi.Annotations[SpiceStreamingAnnotation]; spiceStreamingValues[m] {
 				spice.Streaming = &api.GraphicsStreaming{Mode: m}
+			}
+			// An explicit annotation wins, including over the "off" case above; otherwise
+			// lossy JPEG is on by default — without it SPICE is not competitive with VNC
+			// at any image-compression setting.
+			if j := vmi.Annotations[SpiceJPEGAnnotation]; spiceJPEGValues[j] {
+				spice.JPEG = &api.GraphicsJPEG{Compression: j}
+			} else if spice.JPEG == nil {
+				spice.JPEG = &api.GraphicsJPEG{Compression: "always"}
 			}
 			domain.Spec.Devices.Graphics = append(domain.Spec.Devices.Graphics, spice)
 		}
