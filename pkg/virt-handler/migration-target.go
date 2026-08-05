@@ -457,20 +457,22 @@ func (c *MigrationTargetController) finalCleanup(vmi *v1.VirtualMachineInstance,
 		defer c.conntrackSync.Cleanup(vmi.UID)
 	}
 	client, err := c.launcherClients.GetLauncherClient(vmi)
-	if err != nil {
+	if err != nil && !vmi.Status.MigrationState.Failed {
 		return err
 	}
 
 	if vmi.Status.MigrationState.Failed {
-		err = client.SignalTargetPodCleanup(vmi)
 		if err != nil {
+			log.Log.Object(vmi).Warningf("No launcher client, skipping target pod cleanup signal: %v", err)
+		} else if err := client.SignalTargetPodCleanup(vmi); err != nil {
 			log.Log.Object(vmi).Warningf("Failed to signal target pod cleanup: %v, ignoring.", err)
+		} else {
+			log.Log.Object(vmi).Infof("Signaled target pod for failed migration to clean up")
 		}
-		err = c.unmountVolumes(vmi)
-		if err != nil {
+
+		if err = c.unmountVolumes(vmi); err != nil {
 			return err
 		}
-		log.Log.Object(vmi).Infof("Signaled target pod for failed migration to clean up")
 
 		// tear down network cache
 		if err = c.netConf.Teardown(vmi); err != nil {
@@ -557,7 +559,8 @@ func (c *MigrationTargetController) execute(key string) error {
 	if vmi.IsFinal() || vmi.DeletionTimestamp != nil {
 		log.Log.V(4).Infof("vmi for key %v is terminating or final, doing only a best-effort cleanup", key)
 		if err := c.unmountVolumes(vmi); err != nil {
-			log.Log.Object(vmi).Reason(err).Error("target pod cleanup: unmount volumes failed")
+			// Retry on failed unmount to prevent mount leaks
+			return fmt.Errorf("target pod cleanup: failed to unmount volumes: %w", err)
 		}
 		if err := c.netConf.Teardown(vmi); err != nil {
 			log.Log.Object(vmi).Reason(err).Error("target pod cleanup: teardown network failed")
@@ -781,6 +784,10 @@ func (c *MigrationTargetController) unmountVolumes(vmi *v1.VirtualMachineInstanc
 
 	if err = c.containerDiskMounter.Unmount(vmi); err != nil {
 		return err
+	}
+
+	if err = c.hotplugContainerDiskMounter.UmountAll(vmi); err != nil {
+		return fmt.Errorf("failed to unmount hotplug container disks: %w", err)
 	}
 
 	cgroupManager, err := getCgroupManager(vmi, c.host)

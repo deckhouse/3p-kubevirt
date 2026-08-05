@@ -34,6 +34,8 @@ import (
 	"kubevirt.io/kubevirt/pkg/util"
 )
 
+//go:generate mockgen -source $GOFILE -package=$GOPACKAGE -destination=generated_mock_$GOFILE
+
 type HotplugMounter interface {
 	ContainerDisksReady(vmi *v1.VirtualMachineInstance, notInitializedSince time.Time, sourceUID types.UID) (bool, error)
 	MountAndVerify(vmi *v1.VirtualMachineInstance) (map[string]*disk.DiskInfo, error)
