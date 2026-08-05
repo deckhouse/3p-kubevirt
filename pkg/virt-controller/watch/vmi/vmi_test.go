@@ -1029,6 +1029,152 @@ var _ = Describe("VirtualMachineInstance watcher", func() {
 			expectPodDoesNotExist(finalizedPod.Namespace, finalizedPod.Name)
 		})
 
+		Context("succeeded virt-launcher pods cleanup", func() {
+			It("should delete a succeeded pod left behind by a live migration on another node", func() {
+				vmi := newPendingVirtualMachine("testvmi")
+				vmi.Status.Phase = virtv1.Running
+				vmi.Status.NodeName = "node-01"
+				setReadyCondition(vmi, k8sv1.ConditionTrue, "")
+
+				currentPod := newPodForVirtualMachine(vmi, k8sv1.PodRunning)
+				sourcePod := newPodForVirtualMachine(vmi, k8sv1.PodSucceeded)
+				sourcePod.Name = "source-pod"
+				sourcePod.UID = "source-123"
+				sourcePod.Spec.NodeName = "node-00"
+
+				addVirtualMachine(vmi)
+				addPod(currentPod)
+				addPod(sourcePod)
+				addActivePods(vmi, currentPod.UID, "node-01")
+
+				sanityExecute()
+
+				testutils.ExpectEvent(recorder, kvcontroller.SuccessfulDeletePodReason)
+				expectPodDoesNotExist(sourcePod.Namespace, sourcePod.Name)
+				expectPodExists(currentPod.Namespace, currentPod.Name)
+			})
+
+			It("should not delete a succeeded pod on the VMI's node", func() {
+				vmi := newPendingVirtualMachine("testvmi")
+				vmi.Status.Phase = virtv1.Running
+				vmi.Status.NodeName = "node-01"
+
+				pod := newPodForVirtualMachine(vmi, k8sv1.PodSucceeded)
+
+				addPod(pod)
+
+				Expect(controller.deleteSucceededPods(vmi)).To(Succeed())
+
+				expectPodExists(pod.Namespace, pod.Name)
+			})
+
+			It("should not delete a succeeded pod while the VMI is not running", func() {
+				vmi := newPendingVirtualMachine("testvmi")
+				vmi.Status.Phase = virtv1.Scheduled
+				vmi.Status.NodeName = "node-01"
+
+				pod := newPodForVirtualMachine(vmi, k8sv1.PodSucceeded)
+				pod.Spec.NodeName = "node-00"
+
+				addPod(pod)
+
+				Expect(controller.deleteSucceededPods(vmi)).To(Succeed())
+
+				expectPodExists(pod.Namespace, pod.Name)
+			})
+
+			It("should not delete a succeeded pod while a migration is running", func() {
+				vmi := newPendingVirtualMachine("testvmi")
+				vmi.Status.Phase = virtv1.Running
+				vmi.Status.NodeName = "node-01"
+
+				targetPod := newPodForVirtualMachine(vmi, k8sv1.PodSucceeded)
+				targetPod.Spec.NodeName = "node-00"
+
+				addPod(targetPod)
+				Expect(controller.migrationIndexer.Add(&virtv1.VirtualMachineInstanceMigration{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "testmigration",
+						Namespace: vmi.Namespace,
+					},
+					Spec: virtv1.VirtualMachineInstanceMigrationSpec{
+						VMIName: vmi.Name,
+					},
+					Status: virtv1.VirtualMachineInstanceMigrationStatus{
+						Phase: virtv1.MigrationRunning,
+					},
+				})).To(Succeed())
+
+				Expect(controller.deleteSucceededPods(vmi)).To(Succeed())
+
+				expectPodExists(targetPod.Namespace, targetPod.Name)
+			})
+
+			It("should not delete a succeeded pod controlled by another VMI", func() {
+				vmi := newPendingVirtualMachine("testvmi")
+				vmi.Status.Phase = virtv1.Running
+				vmi.Status.NodeName = "node-01"
+
+				foreignPod := newPodForVirtualMachine(vmi, k8sv1.PodSucceeded)
+				foreignPod.Spec.NodeName = "node-00"
+				foreignPod.Annotations[virtv1.DomainAnnotation] = "another-vmi"
+				foreignPod.Labels[virtv1.CreatedByLabel] = "another-vmi-uid"
+
+				addPod(foreignPod)
+
+				Expect(controller.deleteSucceededPods(vmi)).To(Succeed())
+
+				expectPodExists(foreignPod.Namespace, foreignPod.Name)
+			})
+		})
+
+		Context("failed virt-launcher pods cleanup", func() {
+			It("should keep the newest failed pods and delete the rest", func() {
+				vmi := newPendingVirtualMachine("testvmi")
+				vmi.Status.Phase = virtv1.Running
+				vmi.Status.NodeName = "node-01"
+
+				for i := range 5 {
+					pod := newPodForVirtualMachine(vmi, k8sv1.PodFailed)
+					pod.Name = fmt.Sprintf("failed-pod-%d", i)
+					pod.UID = types.UID(fmt.Sprintf("failed-%d", i))
+					pod.CreationTimestamp = metav1.Time{Time: time.Now().Add(-time.Duration(5-i) * time.Hour)}
+					addPod(pod)
+				}
+
+				Expect(controller.deleteErrorPods(context.Background(), vmi, 3)).To(Succeed())
+
+				expectPodDoesNotExist(vmi.Namespace, "failed-pod-0")
+				expectPodDoesNotExist(vmi.Namespace, "failed-pod-1")
+				expectPodExists(vmi.Namespace, "failed-pod-2")
+				expectPodExists(vmi.Namespace, "failed-pod-3")
+				expectPodExists(vmi.Namespace, "failed-pod-4")
+			})
+
+			It("should ignore failed pods that are already being deleted", func() {
+				vmi := newPendingVirtualMachine("testvmi")
+				vmi.Status.Phase = virtv1.Running
+				vmi.Status.NodeName = "node-01"
+
+				for i := range 4 {
+					pod := newPodForVirtualMachine(vmi, k8sv1.PodFailed)
+					pod.Name = fmt.Sprintf("failed-pod-%d", i)
+					pod.UID = types.UID(fmt.Sprintf("failed-%d", i))
+					pod.CreationTimestamp = metav1.Time{Time: time.Now().Add(-time.Duration(4-i) * time.Hour)}
+					if i == 0 {
+						pod.DeletionTimestamp = pointer.P(metav1.Now())
+					}
+					addPod(pod)
+				}
+
+				Expect(controller.deleteErrorPods(context.Background(), vmi, 3)).To(Succeed())
+
+				for i := range 4 {
+					expectPodExists(vmi.Namespace, fmt.Sprintf("failed-pod-%d", i))
+				}
+			})
+		})
+
 		PIt("should not try to delete a pod again, which is already marked for deletion and go to failed state, when in scheduling state", func() {
 			vmi := newPendingVirtualMachine("testvmi")
 			setReadyCondition(vmi, k8sv1.ConditionFalse, virtv1.GuestNotRunningReason)

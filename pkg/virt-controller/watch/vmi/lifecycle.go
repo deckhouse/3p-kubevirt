@@ -91,6 +91,9 @@ func (c *Controller) sync(vmi *virtv1.VirtualMachineInstance, pod *k8sv1.Pod, da
 	if err := c.deleteErrorPods(context.Background(), vmi, 3); err != nil {
 		return common.NewSyncError(fmt.Errorf("failed to delete error pods: %v", err), controller.FailedDeletePodReason), pod
 	}
+	if err := c.deleteSucceededPods(vmi); err != nil {
+		return common.NewSyncError(fmt.Errorf("failed to delete succeeded pods: %v", err), controller.FailedDeletePodReason), pod
+	}
 
 	dataVolumesReady, isWaitForFirstConsumer, syncErr := c.areDataVolumesReady(vmi, dataVolumes)
 	if syncErr != nil {
@@ -251,10 +254,10 @@ func (c *Controller) deleteErrorPods(ctx context.Context, vmi *virtv1.VirtualMac
 		if !controller.IsControlledBy(pod, vmi) {
 			continue
 		}
-		if pod.Status.Phase != k8sv1.PodFailed {
+		if pod.Status.Phase != k8sv1.PodFailed || pod.DeletionTimestamp != nil {
 			continue
 		}
-		if !strings.Contains(pod.GetName(), "virt-launcher") {
+		if !isVirtLauncherPod(pod) {
 			continue
 		}
 		errorPods = append(errorPods, pod)
@@ -273,6 +276,51 @@ func (c *Controller) deleteErrorPods(ctx context.Context, vmi *virtv1.VirtualMac
 		}
 	}
 	return nil
+}
+
+// deleteSucceededPods removes source pods left behind by completed live migrations:
+// pvc-protection releases a PVC only when every referencing pod object is deleted
+// (a terminal phase is not enough), so a leftover pod pins the old backend-storage
+// PVC in Terminating.
+func (c *Controller) deleteSucceededPods(vmi *virtv1.VirtualMachineInstance) error {
+	// During scheduling/handoff phases a succeeded pod belongs to virt-handler's
+	// normal VMI finalization and must not be touched.
+	if !vmi.IsRunning() || vmi.Status.NodeName == "" {
+		return nil
+	}
+	// A failing migration may leave a succeeded target pod on another node while
+	// the migration object still needs it to conclude the abort.
+	activeMigration, err := migrations.ActiveMigrationExistsForVMI(c.migrationIndexer, vmi)
+	if err != nil || activeMigration {
+		return err
+	}
+	pods, err := c.listPodsFromNamespace(vmi.GetNamespace())
+	if err != nil {
+		return fmt.Errorf("failed to list pods from namespace %s: %v", vmi.GetNamespace(), err)
+	}
+	vmiKey := controller.VirtualMachineInstanceKey(vmi)
+	for _, pod := range pods {
+		if !controller.IsControlledBy(pod, vmi) || !isVirtLauncherPod(pod) {
+			continue
+		}
+		if pod.Status.Phase != k8sv1.PodSucceeded || pod.DeletionTimestamp != nil {
+			continue
+		}
+		// A succeeded pod on the VMI's node is the VMI shutting down, not a leftover.
+		if pod.Spec.NodeName == "" || pod.Spec.NodeName == vmi.Status.NodeName {
+			continue
+		}
+		if err = c.deletePod(vmiKey, pod, v1.DeleteOptions{}); err != nil {
+			c.recorder.Eventf(vmi, k8sv1.EventTypeWarning, controller.FailedDeletePodReason, "Failed to delete finished virtual machine pod %s", pod.Name)
+			return err
+		}
+		c.recorder.Eventf(vmi, k8sv1.EventTypeNormal, controller.SuccessfulDeletePodReason, "Deleted finished virtual machine pod %s", pod.Name)
+	}
+	return nil
+}
+
+func isVirtLauncherPod(pod *k8sv1.Pod) bool {
+	return pod.Labels[virtv1.AppLabel] == "virt-launcher"
 }
 
 // updateStatus handles the VMI's lifecycle status updates.
