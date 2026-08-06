@@ -20,12 +20,14 @@
 package network
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"sync"
 
-	k8sv1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8serrors "k8s.io/apimachinery/pkg/util/errors"
+	"k8s.io/client-go/kubernetes"
 
 	"kubevirt.io/client-go/log"
 
@@ -50,23 +52,56 @@ type cacheCreator interface {
 	New(filePath string) *cache.Cache
 }
 
-// TapProvisionByDVPAnnotation is a node annotation that signals virt-handler
-// to provision bpfbridge TAP devices natively (via nmstate), as it did before
-// the external-provisioning support. When the annotation is ABSENT, virt-handler
-// skips native TAP creation for secondary bpfbridge interfaces, expecting an
-// external service (SDN) to provision them.
+// TapProvisionByDVPAnnotation marks a launcher pod whose bpfbridge TAP devices are
+// provisioned natively by virt-handler. SDN keys on the mere presence of the key and
+// then provides only a veth; when the key is absent, the SDN creates the TAP itself.
+// The DVP vm-controller manages the annotation and freezes it once the SDN has
+// configured the pod (NetworksStatusAnnotation present), so reading it after that
+// point yields exactly the value the SDN acted on.
 const TapProvisionByDVPAnnotation = "network.deckhouse.io/tap-provision-by-dvp-supported"
 
-// IsExternalTapProvisioning reports whether secondary bpfbridge TAP creation should
-// be delegated to an external service (SDN). This is the case when the node does NOT
-// carry TapProvisionByDVPAnnotation. When the annotation is present, virt-handler
-// provisions the TAP devices itself (native provisioning).
-func IsExternalTapProvisioning(node *k8sv1.Node) bool {
-	if node == nil {
-		return false
+// NetworksStatusAnnotation is written by the SDN once it has configured the pod's
+// secondary networks.
+const NetworksStatusAnnotation = "network.deckhouse.io/networks-status"
+
+// PodTapProvisioningResolver resolves the tap provisioning mode from the launcher pod
+// annotation — the same one the SDN follows. The pod is read only after the SDN has
+// configured it: from that point the annotation is frozen, so both TAP-provisioning
+// actors are guaranteed to act on the same value. Until then the setup is retried.
+func PodTapProvisioningResolver(client kubernetes.Interface, nodeName string) TapProvisioningResolver {
+	return func(vmi *v1.VirtualMachineInstance) (bool, error) {
+		podList, err := client.CoreV1().Pods(vmi.Namespace).List(context.Background(), metav1.ListOptions{
+			LabelSelector: v1.CreatedByLabel + "=" + string(vmi.UID),
+			FieldSelector: "spec.nodeName=" + nodeName,
+		})
+		if err != nil {
+			return false, fmt.Errorf("failed to list launcher pods of the VMI: %w", err)
+		}
+		natives := map[bool]struct{}{}
+		for i := range podList.Items {
+			pod := &podList.Items[i]
+			if vmi.Status.ActivePods[pod.UID] != nodeName {
+				continue
+			}
+			if _, configured := pod.Annotations[NetworksStatusAnnotation]; !configured {
+				return false, fmt.Errorf("SDN has not configured launcher pod %s yet", pod.Name)
+			}
+			_, native := pod.Annotations[TapProvisionByDVPAnnotation]
+			natives[native] = struct{}{}
+		}
+		if len(natives) == 0 {
+			return false, fmt.Errorf("no active launcher pod of the VMI found on node %q", nodeName)
+		}
+		// More than one active launcher pod on the node with disagreeing annotations:
+		// wait until the stale one goes away rather than guess which pod is ours.
+		if len(natives) > 1 {
+			return false, fmt.Errorf("launcher pods on node %q disagree on the tap provisioning mode", nodeName)
+		}
+		for native := range natives {
+			return !native, nil
+		}
+		return false, nil
 	}
-	_, exists := node.Annotations[TapProvisionByDVPAnnotation]
-	return !exists
 }
 
 type clusterConfigurer interface {
@@ -80,12 +115,14 @@ type NetConf struct {
 	statePid         map[string]int
 	configStateMutex *sync.RWMutex
 
-	clusterConfigurer clusterConfigurer
-	// externalTapProvisioning, when set, defers secondary bpfbridge TAP creation to an
-	// external service (SDN). When false (default), bpfbridge provisions TAP devices
-	// natively via nmstate (the pre-external-provisioning behaviour).
-	externalTapProvisioning bool
+	clusterConfigurer       clusterConfigurer
+	externalTapProvisioning TapProvisioningResolver
 }
+
+// TapProvisioningResolver reports whether secondary bpfbridge TAP creation for the
+// VMI's launcher pod is delegated to an external service (SDN). An error makes the
+// VM's network setup fail and retry instead of silently picking a mode.
+type TapProvisioningResolver func(vmi *v1.VirtualMachineInstance) (bool, error)
 
 type nsFactory func(int) NSExecutor
 
@@ -94,20 +131,32 @@ type NSExecutor interface {
 }
 
 func NewNetConf(clusterConfigurer clusterConfigurer) *NetConf {
-	return NewNetConfExtended(clusterConfigurer, false)
+	return NewNetConfExtended(clusterConfigurer, NativeTapProvisioningResolver)
 }
 
-// NewNetConfExtended creates a NetConf. When externalTapProvisioning is true,
-// secondary bpfbridge TAP creation is delegated to an external service (SDN); when
-// false, bpfbridge provisions TAP devices natively via nmstate.
-func NewNetConfExtended(clusterConfigurer clusterConfigurer, externalTapProvisioning bool) *NetConf {
+// NativeTapProvisioningResolver always picks native TAP provisioning (the
+// pre-external-provisioning behavior).
+func NativeTapProvisioningResolver(_ *v1.VirtualMachineInstance) (bool, error) {
+	return false, nil
+}
+
+func NewNetConfExtended(clusterConfigurer clusterConfigurer, tapProvisioningResolver TapProvisioningResolver) *NetConf {
 	var cacheFactory cache.CacheCreator
 	return NewNetConfWithCustomFactoryAndConfigState(func(pid int) NSExecutor {
 		return netns.New(pid)
-	}, cacheFactory, map[string]*netpod.State{}, clusterConfigurer, externalTapProvisioning)
+	}, cacheFactory, map[string]*netpod.State{}, clusterConfigurer, tapProvisioningResolver)
 }
 
-func NewNetConfWithCustomFactoryAndConfigState(nsFactory nsFactory, cacheCreator cacheCreator, state map[string]*netpod.State, clusterConfigurer clusterConfigurer, externalTapProvisioning bool) *NetConf {
+func NewNetConfWithCustomFactoryAndConfigState(
+	nsFactory nsFactory,
+	cacheCreator cacheCreator,
+	state map[string]*netpod.State,
+	clusterConfigurer clusterConfigurer,
+	tapProvisioningResolver TapProvisioningResolver,
+) *NetConf {
+	if tapProvisioningResolver == nil {
+		tapProvisioningResolver = NativeTapProvisioningResolver
+	}
 	return &NetConf{
 		state:                   state,
 		statePid:                map[string]int{},
@@ -115,7 +164,7 @@ func NewNetConfWithCustomFactoryAndConfigState(nsFactory nsFactory, cacheCreator
 		cacheCreator:            cacheCreator,
 		nsFactory:               nsFactory,
 		clusterConfigurer:       clusterConfigurer,
-		externalTapProvisioning: externalTapProvisioning,
+		externalTapProvisioning: tapProvisioningResolver,
 	}
 }
 
@@ -190,6 +239,11 @@ func (c *NetConf) Setup(vmi *v1.VirtualMachineInstance, networks []v1.Network, l
 		return err
 	}
 
+	externalTapProvisioning, err := c.resolveTapProvisioning(vmi)
+	if err != nil {
+		return err
+	}
+
 	ownerID, _ := strconv.Atoi(netdriver.LibvirtUserAndGroupId)
 	if util.IsNonRootVMI(vmi) {
 		ownerID = util.NonRootUID
@@ -206,7 +260,7 @@ func (c *NetConf) Setup(vmi *v1.VirtualMachineInstance, networks []v1.Network, l
 		netpod.WithMasqueradeAdapter(newMasqueradeAdapter(vmi)),
 		netpod.WithCacheCreator(c.cacheCreator),
 		netpod.WithBindingPlugins(c.clusterConfigurer.GetNetworkBindings()),
-		netpod.WithExternalTapProvisioning(c.externalTapProvisioning),
+		netpod.WithExternalTapProvisioning(externalTapProvisioning),
 		netpod.WithLogger(log.Log.Object(vmi)),
 		netpod.WithVMIIfaceStatuses(vmi.Status.Interfaces),
 		netpod.WithOrphanedNetworks(orphanedNets),
@@ -216,6 +270,45 @@ func (c *NetConf) Setup(vmi *v1.VirtualMachineInstance, networks []v1.Network, l
 		return fmt.Errorf("setup failed, err: %w", err)
 	}
 	return nil
+}
+
+// resolveTapProvisioning returns the tap provisioning mode for the VMI's current
+// launcher pod. Only secondary bpfbridge interfaces need it — other VMIs never consult
+// the resolver, keeping their setup independent of API availability. The first
+// resolution is persisted per pod (cleared on Teardown) and reused by later Setups,
+// keeping NIC hotplug and virt-handler restarts free of API reads.
+func (c *NetConf) resolveTapProvisioning(vmi *v1.VirtualMachineInstance) (bool, error) {
+	if !hasSecondaryBPFBridgeNetwork(vmi) {
+		return false, nil
+	}
+
+	modeCache := cache.NewTapProvisionModeCache(c.cacheCreator, string(vmi.UID))
+	if external, exists := modeCache.Read(); exists {
+		return external, nil
+	}
+
+	external, err := c.externalTapProvisioning(vmi)
+	if err != nil {
+		return false, fmt.Errorf("failed to resolve tap provisioning mode: %w", err)
+	}
+	if err := modeCache.Write(external); err != nil {
+		return false, fmt.Errorf("failed to persist tap provisioning mode: %w", err)
+	}
+	log.Log.Object(vmi).Infof("tap provisioning mode for the launcher pod: external=%t", external)
+	return external, nil
+}
+
+func hasSecondaryBPFBridgeNetwork(vmi *v1.VirtualMachineInstance) bool {
+	for _, iface := range vmi.Spec.Domain.Devices.Interfaces {
+		if !vmispec.IsBPFBridgeBinding(iface) {
+			continue
+		}
+		network := vmispec.LookupNetworkByName(vmi.Spec.Networks, iface.Name)
+		if network != nil && vmispec.IsSecondaryPodNetwork(*network) {
+			return true
+		}
+	}
+	return false
 }
 
 func upgradeConfigStateCache(stateCache *ConfigStateCache, networks []v1.Network, cacheCreator cacheCreator, vmiUID string) (*ConfigStateCache, error) {
@@ -262,6 +355,11 @@ func (c *NetConf) Teardown(vmi *v1.VirtualMachineInstance) error {
 	podCache := cache.NewPodInterfaceCache(c.cacheCreator, string(vmi.UID))
 	if err := podCache.Remove(); err != nil {
 		errs = append(errs, fmt.Errorf("pod cache teardown failed: %w", err))
+	}
+
+	modeCache := cache.NewTapProvisionModeCache(c.cacheCreator, string(vmi.UID))
+	if err := modeCache.Remove(); err != nil {
+		errs = append(errs, fmt.Errorf("tap provisioning mode cache teardown failed: %w", err))
 	}
 
 	if err := k8serrors.NewAggregate(errs); err != nil {

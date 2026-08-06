@@ -8,6 +8,7 @@ go_library(
         "domaininterface.go",
         "launcherpid.go",
         "podinterface.go",
+        "tapprovision.go",
     ],
     importpath = "kubevirt.io/kubevirt/pkg/network/cache",
     visibility = ["//visibility:public"],
