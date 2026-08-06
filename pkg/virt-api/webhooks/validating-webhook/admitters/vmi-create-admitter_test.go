@@ -4110,6 +4110,7 @@ var _ = Describe("Validating VMICreate Admitter", func() {
 			Entry("amd64 allows virtio", "amd64", "virtio"),
 			Entry("amd64 allows ramfb", "amd64", "ramfb"),
 			Entry("amd64 allows bochs", "amd64", "bochs"),
+			Entry("amd64 allows qxl", "amd64", "qxl"),
 
 			Entry("arm64 allows virtio", "arm64", "virtio"),
 			Entry("arm64 allows bochs", "arm64", "ramfb"),
@@ -4129,7 +4130,6 @@ var _ = Describe("Validating VMICreate Admitter", func() {
 			Expect(causes).ToNot(BeEmpty(), fmt.Sprintf("expected video type %s to be invalid on arch %s", videoType, arch))
 			Expect(causes[0].Field).To(Equal("fake.domain.devices.video.type"))
 		},
-			Entry("amd64 rejects qxl", "amd64", "qxl"),
 			Entry("amd64 rejects vmvga", "amd64", "vmvga"),
 			Entry("amd64 rejects xenfb", "amd64", "xenfb"),
 			Entry("amd64 rejects none", "amd64", "none"),
