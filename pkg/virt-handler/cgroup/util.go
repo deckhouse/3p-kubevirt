@@ -155,11 +155,24 @@ func generateDeviceRulesForVMI(vmi *v1.VirtualMachineInstance, isolationRes isol
 		}
 	}
 
+	// Device-plugin-provisioned devices (VFIO, USB) must be in the cgroup
+	// rule cache so they survive eBPF program rebuilds during hotplug.
+	for _, devDir := range []string{
+		filepath.Join("dev", "vfio"),
+		filepath.Join("dev", "bus", "usb"),
+	} {
+		rules, err := discoverDeviceRulesInDir(mountRoot, devDir)
+		if err != nil {
+			return nil, fmt.Errorf("failed to discover device rules in %s: %v", devDir, err)
+		}
+		vmiDeviceRules = append(vmiDeviceRules, rules...)
+	}
+
 	return vmiDeviceRules, nil
 }
 
-// generateDeviceRulesForAttachedHotplugDevices builds allow-rules for hotplug devices (block disks and USB host
-// devices) that are ALREADY attached to the virt-launcher pod, i.e. whose device node currently exists.
+// generateDeviceRulesForAttachedHotplugDevices builds allow-rules for hotplug block disks that are ALREADY
+// attached to the virt-launcher pod, i.e. whose device node currently exists.
 //
 // This is required because a fresh cgroup manager is created on every reconcile and, in cgroup v2, every Set call
 // rewrites the whole device allowlist. generateDeviceRulesForVMI intentionally skips hotpluggable volumes, so
@@ -209,29 +222,56 @@ func generateDeviceRulesForAttachedHotplugDevices(vmi *v1.VirtualMachineInstance
 		}
 	}
 
-	// Already attached hotplug USB host devices.
-	if vmi.Status.DeviceStatus != nil {
-		for _, hostDeviceStatus := range vmi.Status.DeviceStatus.HostDeviceStatuses {
-			if hostDeviceStatus.Hotplug == nil {
-				continue
-			}
-			if hostDeviceStatus.DeviceResourceClaimStatus == nil ||
-				hostDeviceStatus.DeviceResourceClaimStatus.Attributes == nil ||
-				hostDeviceStatus.DeviceResourceClaimStatus.Attributes.USBAddress == nil {
-				continue
-			}
-			usbAddr := hostDeviceStatus.DeviceResourceClaimStatus.Attributes.USBAddress
-			rule, err := resolveRule(fmt.Sprintf("dev/bus/usb/%03d/%03d", usbAddr.Bus, usbAddr.DeviceNumber))
-			if err != nil {
-				return nil, fmt.Errorf("failed to create device rule for hotplug host device %s: %v", hostDeviceStatus.Name, err)
-			}
-			if rule != nil {
-				log.Log.V(loggingVerbosity).Infof("seeding cgroup with attached hotplug host device %s: %v", hostDeviceStatus.Name, rule)
-				rules = append(rules, rule)
-			}
+	return rules, nil
+}
+
+// discoverDeviceRulesInDir recursively scans a directory under the
+// container's filesystem and creates allow rules for all device nodes
+// found. These devices are provisioned by device plugins or the container
+// runtime and must be preserved in the v2 cgroup manager's rule cache so
+// they are not lost when the eBPF device filter is rebuilt by subsequent
+// Set() calls (e.g. during hotplug volume mounting).
+func discoverDeviceRulesInDir(mountRoot *safepath.Path, relPath string) ([]*devices.Rule, error) {
+	dirPath, err := safepath.JoinNoFollow(mountRoot, relPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
 		}
+		return nil, err
 	}
 
+	var entries []os.DirEntry
+	err = dirPath.ExecuteNoFollow(func(path string) (err error) {
+		entries, err = os.ReadDir(path)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var rules []*devices.Rule
+	for _, entry := range entries {
+		if entry.IsDir() {
+			subRules, err := discoverDeviceRulesInDir(mountRoot, filepath.Join(relPath, entry.Name()))
+			if err != nil {
+				return nil, err
+			}
+			rules = append(rules, subRules...)
+			continue
+		}
+		devPath, err := safepath.JoinNoFollow(dirPath, entry.Name())
+		if err != nil {
+			return nil, err
+		}
+		rule, err := newAllowedDeviceRule(devPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create device rule for %s/%s: %v", relPath, entry.Name(), err)
+		}
+		if rule != nil {
+			log.Log.V(loggingVerbosity).Infof("device rule for %s/%s: %v", relPath, entry.Name(), rule)
+			rules = append(rules, rule)
+		}
+	}
 	return rules, nil
 }
 

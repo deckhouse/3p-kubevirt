@@ -1,6 +1,8 @@
 package cgroup
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -8,6 +10,11 @@ import (
 	cgroups "github.com/opencontainers/cgroups"
 	devices "github.com/opencontainers/cgroups/devices/config"
 	"go.uber.org/mock/gomock"
+
+	v1 "kubevirt.io/api/core/v1"
+
+	"kubevirt.io/kubevirt/pkg/safepath"
+	"kubevirt.io/kubevirt/pkg/virt-handler/isolation"
 )
 
 var _ = Describe("cgroup manager", func() {
@@ -197,5 +204,49 @@ var _ = Describe("cgroup manager", func() {
 			Entry("non-numeric major", "b foo:0 rwm"),
 			Entry("missing permissions", "b 8:0"),
 		)
+	})
+
+})
+
+var _ = Describe("generateDeviceRulesForVMI", func() {
+	var (
+		ctrl    *gomock.Controller
+		tempDir string
+	)
+
+	BeforeEach(func() {
+		ctrl = gomock.NewController(GinkgoT())
+		var err error
+		tempDir, err = os.MkdirTemp("", "cgroup-device-rules")
+		Expect(err).ToNot(HaveOccurred())
+		DeferCleanup(os.RemoveAll, tempDir)
+	})
+
+	newMockIsolationWithMountRoot := func() *isolation.MockIsolationResult {
+		mountRoot, err := safepath.JoinAndResolveWithRelativeRoot(tempDir)
+		Expect(err).ToNot(HaveOccurred())
+		isolationRes := isolation.NewMockIsolationResult(ctrl)
+		isolationRes.EXPECT().MountRoot().Return(mountRoot, nil).AnyTimes()
+		return isolationRes
+	}
+
+	It("should not fail when /dev/vfio does not exist", func() {
+		rules, err := generateDeviceRulesForVMI(&v1.VirtualMachineInstance{}, newMockIsolationWithMountRoot(), "")
+		Expect(err).ToNot(HaveOccurred())
+		Expect(rules).To(BeEmpty())
+	})
+
+	It("should not fail when /dev/vfio exists but is empty", func() {
+		Expect(os.MkdirAll(filepath.Join(tempDir, "dev", "vfio"), 0755)).To(Succeed())
+		rules, err := generateDeviceRulesForVMI(&v1.VirtualMachineInstance{}, newMockIsolationWithMountRoot(), "")
+		Expect(err).ToNot(HaveOccurred())
+		Expect(rules).To(BeEmpty())
+	})
+
+	It("should not fail when /dev/bus/usb exists but is empty", func() {
+		Expect(os.MkdirAll(filepath.Join(tempDir, "dev", "bus", "usb"), 0755)).To(Succeed())
+		rules, err := generateDeviceRulesForVMI(&v1.VirtualMachineInstance{}, newMockIsolationWithMountRoot(), "")
+		Expect(err).ToNot(HaveOccurred())
+		Expect(rules).To(BeEmpty())
 	})
 })

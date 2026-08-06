@@ -24,6 +24,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -60,9 +61,15 @@ const (
 	deleteNotifFailed        = "Failed to process delete notification"
 	tombstoneGetObjectErrFmt = "couldn't get object from tombstone %+v"
 
-	indexByNodeName              = "byNodeName"
-	PCIAddressDeviceAttributeKey = "resource.kubernetes.io/pcieRoot"
-	MDevUUIDDeviceAttributeKey   = "resource.kubernetes.io/mDevUUID"
+	indexByNodeName                         = "byNodeName"
+	PCIAddressDeviceAttributeKey            = "resource.kubernetes.io/pcieRoot"
+	MDevUUIDDeviceAttributeKey              = "resource.kubernetes.io/mDevUUID"
+	DeckhouseGPUPCIAddressAttributeKey      = "gpu.deckhouse.io/pciAddress"
+	DeckhouseGPUDeviceTypeAttributeKey      = "gpu.deckhouse.io/deviceType"
+	DeckhouseGPUSharingStrategyAttributeKey = "gpu.deckhouse.io/sharingStrategy"
+	DeckhouseGPUDeviceTypePhysical          = "physical"
+	DeckhouseGPUDeviceTypeMIG               = "mig"
+	DeckhouseGPUDriverName                  = "gpu.deckhouse.io"
 	// USBAddressAttributeKey = "usbAddress"
 	// No Kubernetes resource.kubernetes.io/ prefix is used because this is a
 	// driver-specific attribute.
@@ -568,8 +575,8 @@ func (c *DRAStatusController) getGPUStatus(gpuInfo DeviceInfo, pod *k8sv1.Pod) (
 	if err != nil {
 		return gpuStatus, err
 	}
-	if info.pciAddress == "" && info.mdevUUID == "" {
-		return gpuStatus, fmt.Errorf("failed to get pciAddress or mdevUUID for gpu %s", gpuInfo.VMISpecClaimName)
+	if err := validateGPUDeviceInfo(info, gpuInfo.VMISpecClaimName); err != nil {
+		return gpuStatus, err
 	}
 	attrs := v1.DeviceAttribute{}
 	if info.pciAddress != "" {
@@ -636,8 +643,56 @@ type deviceInfo struct {
 	pciAddress               string
 	mdevUUID                 string
 	usbAddress               *v1.USBAddress
+	deviceType               string
+	sharingStrategy          string
 	allowMultipleAllocations bool
 	bindsToNode              bool
+}
+
+func validateGPUDeviceInfo(info deviceInfo, claimName string) error {
+	if info.pciAddress == "" && info.mdevUUID == "" {
+		return fmt.Errorf("failed to get pciAddress or mdevUUID for gpu %s", claimName)
+	}
+	if info.allowMultipleAllocations {
+		return fmt.Errorf("gpu %s allows multiple allocations and cannot be used for VM passthrough", claimName)
+	}
+	if info.sharingStrategy != "" {
+		return fmt.Errorf("gpu %s uses sharing strategy %q and cannot be used for VM passthrough", claimName, info.sharingStrategy)
+	}
+	if info.deviceType == DeckhouseGPUDeviceTypeMIG && info.mdevUUID == "" {
+		return fmt.Errorf("gpu %s has MIG device type without mdevUUID", claimName)
+	}
+	if info.pciAddress != "" && info.deviceType != "" && info.deviceType != DeckhouseGPUDeviceTypePhysical {
+		return fmt.Errorf("gpu %s has device type %q and cannot be used for PCI passthrough", claimName, info.deviceType)
+	}
+	return nil
+}
+
+func normalizePCIAddress(address string) string {
+	parts := strings.Split(address, ":")
+	if len(parts) == 3 && len(parts[0]) == 8 {
+		parts[0] = parts[0][4:]
+		return strings.Join(parts, ":")
+	}
+	return address
+}
+
+// deckhouseGPUDeviceNameRegexp matches a full physical GPU device name published by the
+// gpu.deckhouse.io DRA driver, e.g. "gpu-00000000-4f-00-0", capturing the PCI address parts.
+var deckhouseGPUDeviceNameRegexp = regexp.MustCompile(`^gpu-([0-9a-f]{8})-([0-9a-f]{2})-([0-9a-f]{2})-([0-9a-f])$`)
+
+// pciAddressFromDeckhouseGPUDeviceName derives the PCI address of a physical GPU from its DRA
+// device name. The name deterministically encodes the address, so the device name from the
+// ResourceClaim allocation result is a stable source that, unlike the ResourceSlice, remains
+// available after the device is bound to vfio-pci for passthrough and drops out of the slice.
+// It returns an empty string for anything that is not a full physical GPU device (partitions,
+// mdev/MIG, time-slicing/MPS variants), whose attributes must still come from the slice.
+func pciAddressFromDeckhouseGPUDeviceName(name string) string {
+	m := deckhouseGPUDeviceNameRegexp.FindStringSubmatch(name)
+	if m == nil {
+		return ""
+	}
+	return fmt.Sprintf("%s:%s:%s.%s", m[1], m[2], m[3], m[4])
 }
 
 // getDeviceInfo returns the pciAddress, mdevUUID, usbAddress of the device. It will return all if found, otherwise it will return empty strings or nil.
@@ -654,11 +709,21 @@ func (c *DRAStatusController) getDeviceInfo(nodeName string, deviceName, driverN
 					info := deviceInfo{}
 
 					for key, value := range device.Attributes {
-						if string(key) == PCIAddressDeviceAttributeKey && value.StringValue != nil {
-							info.pciAddress = *value.StringValue
-						} else if string(key) == MDevUUIDDeviceAttributeKey && value.StringValue != nil {
+						if value.StringValue == nil {
+							continue
+						}
+						switch string(key) {
+						case PCIAddressDeviceAttributeKey:
+							info.pciAddress = normalizePCIAddress(*value.StringValue)
+						case DeckhouseGPUPCIAddressAttributeKey:
+							info.pciAddress = normalizePCIAddress(*value.StringValue)
+						case MDevUUIDDeviceAttributeKey:
 							info.mdevUUID = *value.StringValue
-						} else if string(key) == USBAddressAttributeKey && value.StringValue != nil {
+						case DeckhouseGPUDeviceTypeAttributeKey:
+							info.deviceType = *value.StringValue
+						case DeckhouseGPUSharingStrategyAttributeKey:
+							info.sharingStrategy = *value.StringValue
+						case USBAddressAttributeKey:
 							info.usbAddress, err = resolveUSBAddress(*value.StringValue)
 							if err != nil {
 								return deviceInfo{}, err
@@ -676,7 +741,15 @@ func (c *DRAStatusController) getDeviceInfo(nodeName string, deviceName, driverN
 			}
 		}
 	}
-	return deviceInfo{}, nil
+	if driverName == DeckhouseGPUDriverName {
+		if pciAddress := pciAddressFromDeckhouseGPUDeviceName(deviceName); pciAddress != "" {
+			return deviceInfo{
+				pciAddress: normalizePCIAddress(pciAddress),
+				deviceType: DeckhouseGPUDeviceTypePhysical,
+			}, nil
+		}
+	}
+	return deviceInfo{}, fmt.Errorf("device %s with driver %s not found in any ResourceSlice on node %s", deviceName, driverName, nodeName)
 }
 
 func (c *DRAStatusController) getResourceSlices(nodeName string) ([]*resourcev1.ResourceSlice, error) {
