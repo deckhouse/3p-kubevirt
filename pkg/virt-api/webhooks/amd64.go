@@ -41,7 +41,10 @@ func validateVideoTypeAmd64(field *k8sfield.Path, spec *v1.VirtualMachineInstanc
 
 	videoType := spec.Domain.Devices.Video.Type
 
-	validTypes := []string{"vga", "cirrus", "virtio", "ramfb", "bochs"}
+	// qxl is the only model that ever sent drawing commands to SPICE. Its Windows
+	// driver ended at Windows 10, but Linux and pre-8 guests still have it, and it
+	// is the only way to compare the command path against a plain framebuffer.
+	validTypes := []string{"vga", "cirrus", "virtio", "ramfb", "bochs", "qxl"}
 	if !slices.Contains(validTypes, videoType) {
 		*statusCauses = append(*statusCauses, metav1.StatusCause{
 			Type:    metav1.CauseTypeFieldValueNotSupported,

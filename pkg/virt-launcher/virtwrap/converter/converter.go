@@ -98,6 +98,16 @@ const (
 	// never is. Measured on win11, 800x600, one framebuffer, the same moment:
 	// VNC+JPEG 4.9 Mbps at 16.5 FPS against SPICE 12-17 Mbps and a slideshow.
 	SpiceJPEGAnnotation = "virtualization.deckhouse.io/spice-jpeg"
+
+	// SpiceZlibAnnotation overrides zlib compression of the remaining lossless
+	// images: always, auto, never. Like JPEG, "auto" only fires on links the
+	// server counts as WAN, which a unix socket never is.
+	SpiceZlibAnnotation = "virtualization.deckhouse.io/spice-zlib"
+
+	// SpicePlaybackAnnotation turns audio compression on or off: on, off.
+	// Off costs bandwidth but removes the codec from the path when hunting
+	// for audio glitches.
+	SpicePlaybackAnnotation = "virtualization.deckhouse.io/spice-playback"
 )
 
 type deviceNamer struct {
@@ -993,6 +1003,12 @@ var (
 	}
 	spiceJPEGValues = map[string]bool{
 		"always": true, "auto": true, "never": true,
+	}
+	spiceZlibValues = map[string]bool{
+		"always": true, "auto": true, "never": true,
+	}
+	spicePlaybackValues = map[string]bool{
+		"on": true, "off": true,
 	}
 )
 
@@ -2085,6 +2101,12 @@ func Convert_v1_VirtualMachineInstance_To_api_Domain(vmi *v1.VirtualMachineInsta
 				spice.JPEG = &api.GraphicsJPEG{Compression: j}
 			} else if spice.JPEG == nil {
 				spice.JPEG = &api.GraphicsJPEG{Compression: "always"}
+			}
+			if z := vmi.Annotations[SpiceZlibAnnotation]; spiceZlibValues[z] {
+				spice.Zlib = &api.GraphicsZlib{Compression: z}
+			}
+			if pb := vmi.Annotations[SpicePlaybackAnnotation]; spicePlaybackValues[pb] {
+				spice.Playback = &api.GraphicsPlayback{Compression: pb}
 			}
 			domain.Spec.Devices.Graphics = append(domain.Spec.Devices.Graphics, spice)
 		}
