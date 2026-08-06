@@ -1193,6 +1193,11 @@ func (l *LibvirtDomainManager) generateConverterContext(vmi *v1.VirtualMachineIn
 			if err := osdisk.VerifyImage(info); err != nil {
 				return nil, fmt.Errorf("invalid image in containerDisk %v: %v", volume.Name, err)
 			}
+			// Zero size means the placeholder touched before the image is bind mounted, not an
+			// image: qemu-img accepts it as a valid "raw, 0 bytes" disk and the result is cached.
+			if info.VirtualSize == 0 {
+				return nil, fmt.Errorf("containerDisk %v is empty at %s: the image is not mounted there (yet)", volume.Name, imagePath)
+			}
 			l.disksInfo[volume.Name] = info
 		}
 	}
