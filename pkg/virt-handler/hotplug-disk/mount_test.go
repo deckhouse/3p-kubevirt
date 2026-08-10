@@ -1267,6 +1267,22 @@ var _ = Describe("HotplugVolume", func() {
 			Expect(m.Mount(vmi, cgroupManagerMock)).To(Succeed())
 		})
 
+		It("Should drop mount record entries whose pod directory is gone", func() {
+			// A record outlives the pod that owned the mount: a VMI that migrates away from a
+			// node and back again finds entries pointing at a pod directory that no longer
+			// exists. Unmount has to drop them, otherwise every later synchronization fails.
+			stalePath := filepath.Join(tempDir, "gone-pod-uid/volumes/kubernetes.io~empty-dir/hotplug-disks/vd-disk.img")
+			Expect(m.setMountTargetRecord(vmi, &vmiMountTargetRecord{
+				UsesSafePaths:      true,
+				MountTargetEntries: []vmiMountTargetEntry{{TargetFile: stalePath}},
+			})).To(Succeed())
+
+			Expect(m.Unmount(vmi, cgroupManagerMock)).To(Succeed())
+
+			_, err = os.Stat(filepath.Join(tempDir, string(vmi.UID)))
+			Expect(err).To(HaveOccurred(), "the stale record should have been deleted")
+		})
+
 		It("Should not do anything if vmi has no hotplug volumes", func() {
 			volumeStatuses := make([]v1.VolumeStatus, 0)
 			volumeStatuses = append(volumeStatuses, v1.VolumeStatus{
