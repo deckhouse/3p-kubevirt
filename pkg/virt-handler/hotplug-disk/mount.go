@@ -750,33 +750,49 @@ func (m *volumeMounter) Unmount(vmi *v1.VirtualMachineInstance, cgroupManager cg
 
 		// Collect all device rules for removal first
 		var deviceRules []*devices.Rule
+		var errs []error
+		logErrAndKeepMount := func(path string, format string, args ...any) {
+			err := fmt.Errorf(format, args...)
+			log.Log.Object(vmi).Error(err.Error())
+			newRecord.MountTargetEntries = append(newRecord.MountTargetEntries, vmiMountTargetEntry{TargetFile: path})
+			errs = append(errs, err)
+		}
 
 		for _, entry := range record.MountTargetEntries {
 			fd, err := safepath.NewFileNoFollow(entry.TargetFile)
 			if err != nil {
-				return err
+				if errors.Is(err, os.ErrNotExist) {
+					log.Log.Object(vmi).Infof("Volume %v is not mounted anymore, continuing", entry.TargetFile)
+				} else {
+					logErrAndKeepMount(entry.TargetFile, "Unable to unmount volume at path %s: %v", entry.TargetFile, err)
+				}
+				continue
 			}
 			fd.Close()
 			diskPath := fd.Path()
+			diskPathAbs := unsafepath.UnsafeAbsolute(diskPath.Raw())
 
-			if _, ok := currentHotplugPaths[unsafepath.UnsafeAbsolute(diskPath.Raw())]; !ok {
+			if _, ok := currentHotplugPaths[diskPathAbs]; !ok {
 				if blockDevice, err := isBlockDevice(diskPath); err != nil {
-					return err
+					logErrAndKeepMount(diskPathAbs, "Unable to unmount volume at path %s: %v", diskPath, err)
+					continue
 				} else if blockDevice {
 					deviceRule, err := m.unmountBlockHotplugVolumes(diskPath, cgroupManager)
 					if err != nil {
-						return err
+						logErrAndKeepMount(diskPathAbs, "Unable to remove block device at path %s: %v", diskPath, err)
+						continue
 					}
 					if deviceRule != nil {
 						deviceRules = append(deviceRules, deviceRule)
 					}
 				} else if err := m.unmountFileSystemHotplugVolumes(diskPath); err != nil {
-					return err
+					logErrAndKeepMount(diskPathAbs, "Unable to unmount filesystem volume at path %s: %v", diskPath, err)
+					continue
 				}
 				log.Log.Object(vmi).V(3).Infof("Unmounted hotplug volume path %s", diskPath)
 			} else {
 				newRecord.MountTargetEntries = append(newRecord.MountTargetEntries, vmiMountTargetEntry{
-					TargetFile: unsafepath.UnsafeAbsolute(diskPath.Raw()),
+					TargetFile: diskPathAbs,
 				})
 			}
 		}
@@ -806,6 +822,9 @@ func (m *volumeMounter) Unmount(vmi *v1.VirtualMachineInstance, cgroupManager cg
 		}
 		if err != nil {
 			return err
+		}
+		if len(errs) > 0 {
+			return fmt.Errorf("failed to cleanup hotplug mounts for VMI %s: %w", vmi.Name, errors.Join(errs...))
 		}
 	}
 	return nil

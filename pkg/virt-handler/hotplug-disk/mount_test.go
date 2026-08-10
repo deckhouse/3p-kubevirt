@@ -988,6 +988,55 @@ var _ = Describe("HotplugVolume", func() {
 			Expect(err).To(HaveOccurred(), "block device volume still exists %s", blockVolume)
 		})
 
+		It("Unmount, if failed, should continue for other volumes", func() {
+			badPath, err := newFile(targetPodPath, "badvolume.img")
+			Expect(err).ToNot(HaveOccurred())
+			goodPath, err := newFile(targetPodPath, "goodvolume.img")
+			Expect(err).ToNot(HaveOccurred())
+			badPathAbs := unsafepath.UnsafeAbsolute(badPath.Raw())
+			goodPathAbs := unsafepath.UnsafeAbsolute(goodPath.Raw())
+
+			record := &vmiMountTargetRecord{
+				MountTargetEntries: []vmiMountTargetEntry{
+					{TargetFile: badPathAbs},
+					{TargetFile: goodPathAbs},
+				},
+			}
+			Expect(m.setMountTargetRecord(vmi, record)).To(Succeed())
+
+			// Inject block probe failure
+			isBlockDevice = func(path *safepath.Path) (bool, error) {
+				if unsafepath.UnsafeAbsolute(path.Raw()) == badPathAbs {
+					return false, fmt.Errorf("block probe error")
+				}
+				return false, nil
+			}
+
+			isMounted = func(path *safepath.Path) (bool, error) {
+				Expect(unsafepath.UnsafeAbsolute(path.Raw())).To(Equal(goodPathAbs))
+				return true, nil
+			}
+			unmountCommand = func(diskPath *safepath.Path) ([]byte, error) {
+				Expect(unsafepath.UnsafeAbsolute(diskPath.Raw())).To(Equal(goodPathAbs))
+				return []byte("Success"), nil
+			}
+
+			err = m.Unmount(vmi, cgroupManagerMock)
+			Expect(err).To(HaveOccurred())
+
+			_, err = os.Stat(goodPathAbs)
+			Expect(err).To(HaveOccurred(), "filesystem volume file still exists %s", goodPathAbs)
+			_, err = os.Stat(badPathAbs)
+			Expect(err).ToNot(HaveOccurred(), "failed volume should remain %s", badPathAbs)
+
+			bytes, err := os.ReadFile(filepath.Join(tempDir, string(vmi.UID)))
+			Expect(err).ToNot(HaveOccurred())
+			updated := &vmiMountTargetRecord{}
+			Expect(json.Unmarshal(bytes, updated)).To(Succeed())
+			Expect(updated.MountTargetEntries).To(HaveLen(1))
+			Expect(updated.MountTargetEntries[0].TargetFile).To(Equal(badPathAbs))
+		})
+
 		It("Should skip hotplug volumes missing from spec", func() {
 			block := k8sv1.PersistentVolumeBlock
 			vmi.Status.VolumeStatus = []v1.VolumeStatus{
@@ -1012,6 +1061,22 @@ var _ = Describe("HotplugVolume", func() {
 			}
 
 			Expect(m.Mount(vmi, cgroupManagerMock)).To(Succeed())
+		})
+
+		It("Should drop mount record entries whose pod directory is gone", func() {
+			// A record outlives the pod that owned the mount: a VMI that migrates away from a
+			// node and back again finds entries pointing at a pod directory that no longer
+			// exists. Unmount has to drop them, otherwise every later synchronization fails.
+			stalePath := filepath.Join(tempDir, "gone-pod-uid/volumes/kubernetes.io~empty-dir/hotplug-disks/vd-disk.img")
+			Expect(m.setMountTargetRecord(vmi, &vmiMountTargetRecord{
+				UsesSafePaths:      true,
+				MountTargetEntries: []vmiMountTargetEntry{{TargetFile: stalePath}},
+			})).To(Succeed())
+
+			Expect(m.Unmount(vmi, cgroupManagerMock)).To(Succeed())
+
+			_, err = os.Stat(filepath.Join(tempDir, string(vmi.UID)))
+			Expect(err).To(HaveOccurred(), "the stale record should have been deleted")
 		})
 
 		It("Should not do anything if vmi has no hotplug volumes", func() {
