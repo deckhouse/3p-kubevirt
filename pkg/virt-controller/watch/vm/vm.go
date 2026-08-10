@@ -32,6 +32,8 @@ import (
 	"strings"
 	"time"
 
+	jsonpatch "gopkg.in/evanphx/json-patch.v4"
+
 	"kubevirt.io/kubevirt/pkg/instancetype/revision"
 	"kubevirt.io/kubevirt/pkg/libvmi"
 	"kubevirt.io/kubevirt/pkg/liveupdate/memory"
@@ -3327,7 +3329,11 @@ func (c *Controller) syncRestartRequired(lastSeenVMSpec *virtv1.VirtualMachineSp
 	}
 
 	if !equality.Semantic.DeepEqual(lastSeenVM.Spec.Template.Spec, currentVM.Spec.Template.Spec) {
-		setRestartRequired(vm, "a non-live-updatable field was changed in the template spec")
+		message := "a non-live-updatable field was changed in the template spec"
+		if diff := templateSpecDiff(&lastSeenVM.Spec.Template.Spec, &currentVM.Spec.Template.Spec); diff != "" {
+			message = fmt.Sprintf("%s: %s", message, diff)
+		}
+		setRestartRequired(vm, message)
 		return true
 	}
 
@@ -3340,6 +3346,44 @@ func (c *Controller) syncRestartRequired(lastSeenVMSpec *virtv1.VirtualMachineSp
 	}
 
 	return false
+}
+
+// templateSpecDiffMaxLen bounds the diff embedded into the RestartRequired condition message, so that
+// a change touching a large part of the template spec cannot bloat the VirtualMachine object.
+const templateSpecDiffMaxLen = 1024
+
+// templateSpecDiff describes the change between the last seen and the current template spec as a JSON
+// merge patch: every key present in the result was changed to the shown value, and a null value means
+// the field was removed. It returns an empty string if the diff cannot be computed, so that callers can
+// fall back to a message without it.
+func templateSpecDiff(lastSeen, current *virtv1.VirtualMachineInstanceSpec) string {
+	lastSeenJSON, err := json.Marshal(lastSeen)
+	if err != nil {
+		return ""
+	}
+	currentJSON, err := json.Marshal(current)
+	if err != nil {
+		return ""
+	}
+
+	patch, err := jsonpatch.CreateMergePatch(lastSeenJSON, currentJSON)
+	if err != nil {
+		return ""
+	}
+
+	// An empty patch means the specs only differ in a way that is invisible in JSON, e.g. a nil slice
+	// versus an empty one. There is nothing useful to report in that case.
+	diff := string(patch)
+	if diff == "{}" {
+		return ""
+	}
+
+	if len(diff) > templateSpecDiffMaxLen {
+		// The cut can land in the middle of a multi-byte character, drop the leftover bytes.
+		diff = strings.ToValidUTF8(diff[:templateSpecDiffMaxLen], "") + "... (truncated)"
+	}
+
+	return diff
 }
 
 // bpfBridgeBindingName is the network binding plugin DVP connects bridge interfaces through.
