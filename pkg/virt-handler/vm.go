@@ -1620,7 +1620,8 @@ func vmiContainsNonMigratableGpuDevices(vmi *v1.VirtualMachineInstance) bool {
 func deviceResourceClaimIsMigratable(hd v1.DeviceStatusInfo, strategy v1.USBMigrationStrategy) bool {
 	// only usb can be migrated
 	if hd.DeviceResourceClaimStatus == nil || hd.DeviceResourceClaimStatus.Attributes == nil || hd.DeviceResourceClaimStatus.Attributes.USBAddress == nil {
-		return false
+		// hotfix. Deckhouse usb from virtualization-dra devices always migratable
+		return strings.HasPrefix(hd.Name, "usb")
 	}
 
 	switch strategy {
