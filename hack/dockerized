@@ -12,9 +12,7 @@ fi
 
 fail_if_cri_bin_missing
 
-# The WORKSPACE pins rules_go v0.60.0, which requires bazel >= 6.5.0 (see .bazelversion). The builder
-# image ships a plain bazel binary, not bazelisk, so the image itself has to carry that version.
-kubevirt_builder_version="2602201229-4494d1587"
+kubevirt_builder_version="2505091401-8ab710cdb8"
 default_kubevirt_builder_image="quay.io/kubevirt/builder:${kubevirt_builder_version}"
 kubevirt_cross_compile_image="quay.io/kubevirt/builder-cross:${kubevirt_builder_version}"
 
