@@ -95,6 +95,25 @@ func (c *ConfigStateCache) Exists(key string) (bool, error) {
 	return true, nil
 }
 
+// Keys returns every network name known to the cache: both entries persisted
+// on disk and volatile ones seen during this process lifetime.
+func (c *ConfigStateCache) Keys() ([]string, error) {
+	names, err := cache.ListPodInterfaceCache(c.cacheCreator, c.vmiUID)
+	if err != nil {
+		return nil, err
+	}
+	seen := map[string]struct{}{}
+	for _, name := range names {
+		seen[name] = struct{}{}
+	}
+	for name := range c.volatilePodIfaceState {
+		if _, exists := seen[name]; !exists {
+			names = append(names, name)
+		}
+	}
+	return names, nil
+}
+
 func (c *ConfigStateCache) Delete(key string) error {
 	delete(c.volatilePodIfaceState, key)
 	podIfaceCacheData, err := cache.ReadPodInterfaceCache(c.cacheCreator, c.vmiUID, key)

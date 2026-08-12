@@ -38,7 +38,7 @@ import (
 // the relevant data (for recovery and data sharing).
 func (n NetPod) discover(currentStatus *nmstate.Status) error {
 	podIfaceStatusByName := ifaceStatusByName(currentStatus.Interfaces)
-	podIfaceNameByVMINetwork := createNetworkNameScheme(n.vmiSpecNets, n.vmiIfaceStatuses, currentStatus.Interfaces)
+	podIfaceNameByVMINetwork := n.createNetworkNameScheme(currentStatus.Interfaces)
 
 	for _, vmiSpecIface := range n.vmiSpecIfaces {
 		if skipPodInterfaceIsNotDefault(vmiSpecIface.Name, n.vmiSpecNets) && !vmispec.IsBPFBridgeBinding(vmiSpecIface) {
@@ -111,6 +111,9 @@ func (n NetPod) discover(currentStatus *nmstate.Status) error {
 				}
 			}
 			if vmispec.IsBPFBridgeBinding(vmiSpecIface) {
+				if podIfaceName == "" {
+					return fmt.Errorf("SDN pod interface for network %s is not present yet", vmiSpecIface.Name)
+				}
 				if !podIfaceExists {
 					return fmt.Errorf("pod link (%s) is missing", podIfaceName)
 				}

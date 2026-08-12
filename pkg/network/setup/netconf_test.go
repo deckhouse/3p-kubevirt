@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"sync"
 
 	kfs "kubevirt.io/kubevirt/pkg/os/fs"
@@ -63,6 +64,41 @@ var _ = Describe("netconf", func() {
 
 	It("runs setup successfully without networks", func() {
 		Expect(netConf.Setup(vmi, vmi.Spec.Networks, launcherPid)).To(Succeed())
+	})
+
+	Context("HasOrphanedNetworks with a real on-disk cache", func() {
+		var cacheCreator tempCacheCreator
+
+		AfterEach(func() { Expect(cacheCreator.New("").Delete()).To(Succeed()) })
+
+		BeforeEach(func() {
+			netConf = netsetup.NewNetConfWithCustomFactoryAndConfigState(nsNoopFactory, &cacheCreator, stateMap, cConfigStub{}, false)
+			vmi.Spec.Networks = []v1.Network{{
+				Name:          testNetworkName,
+				NetworkSource: v1.NetworkSource{Pod: &v1.PodNetwork{}},
+			}}
+		})
+
+		It("is false for a VMI with no cache entries", func() {
+			Expect(netConf.HasOrphanedNetworks(vmi)).To(BeFalse())
+		})
+
+		It("is false when only spec'd networks and the launcher-pid file are cached", func() {
+			Expect(cache.WritePodInterfaceCache(&cacheCreator, string(vmi.UID), testNetworkName, &cache.PodIfaceCacheData{})).To(Succeed())
+			// The pid file shares the per-UID directory; treating it as a network
+			// would flag every VMI as orphaned and let cleanup destroy the pid,
+			// breaking replaced-pod detection after a virt-handler restart.
+			Expect(cache.NewLauncherPidCache(&cacheCreator, string(vmi.UID)).Write(4242)).To(Succeed())
+
+			Expect(netConf.HasOrphanedNetworks(vmi)).To(BeFalse())
+		})
+
+		It("is true when a cached network is no longer in the spec", func() {
+			Expect(cache.WritePodInterfaceCache(&cacheCreator, string(vmi.UID), testNetworkName, &cache.PodIfaceCacheData{})).To(Succeed())
+			Expect(cache.WritePodInterfaceCache(&cacheCreator, string(vmi.UID), "veth_n5340036e", &cache.PodIfaceCacheData{})).To(Succeed())
+
+			Expect(netConf.HasOrphanedNetworks(vmi)).To(BeTrue())
+		})
 	})
 
 	It("runs setup successfully with networks", func() {
@@ -173,6 +209,7 @@ func (f stubFS) RemoveAll(path string) error {
 	}
 	return nil
 }
+func (f stubFS) Walk(root string, walkFn filepath.WalkFunc) error { return nil }
 
 type stateCacheStub struct {
 	stateCache map[string]cache.PodIfaceState
@@ -184,6 +221,14 @@ func newConfigStateCacheStub() stateCacheStub {
 
 func (c stateCacheStub) Read(key string) (cache.PodIfaceState, error) {
 	return c.stateCache[key], nil
+}
+
+func (c stateCacheStub) Keys() ([]string, error) {
+	var keys []string
+	for k := range c.stateCache {
+		keys = append(keys, k)
+	}
+	return keys, nil
 }
 
 func (c stateCacheStub) Write(key string, state cache.PodIfaceState) error {

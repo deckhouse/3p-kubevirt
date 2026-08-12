@@ -99,6 +99,12 @@ type NetPod struct {
 	// BPF attach in setupBPFBridge always runs, whether the TAP is native or external.
 	externalTapProvisioning bool
 
+	// orphanedNetworks lists networks that still have leftovers (state cache,
+	// TAP device) but are no longer part of the FULL VMI spec. Computed by the
+	// caller against vmi.Spec.Networks: the networks passed to NewNetPod are a
+	// filtered subset and must not be used as the comparison base.
+	orphanedNetworks []string
+
 	log *log.FilteredLogger
 }
 
@@ -184,6 +190,12 @@ func WithVMIIfaceStatuses(vmiIfaceStatuses []v1.VirtualMachineInstanceNetworkInt
 	}
 }
 
+func WithOrphanedNetworks(networkNames []string) option {
+	return func(n *NetPod) {
+		n.orphanedNetworks = networkNames
+	}
+}
+
 func (n NetPod) Setup() error {
 	// Not all network bindings are processed in the network setup.
 	filteredNets, err := filterSupportedBindingNetworks(n.vmiSpecNets, n.vmiSpecIfaces)
@@ -207,8 +219,24 @@ func (n NetPod) Setup() error {
 		iface := vmispec.LookupInterfaceByName(n.vmiSpecIfaces, net.Name)
 		return iface != nil && iface.State != v1.InterfaceStateAbsent
 	})
+
 	if len(pendingNets) == 0 && len(unplugIfaces) == 0 {
-		return nil
+		if len(n.orphanedNetworks) == 0 {
+			return nil
+		}
+		return n.state.NSExec.Do(func() error {
+			currentStatus, err := n.nmstateAdapter.Read()
+			if err != nil {
+				return err
+			}
+			// Cleaning up leftovers of already unplugged networks is housekeeping:
+			// a failure must not fail the sync, it is retried on the next reconcile
+			// (the leftovers stay recorded in the state cache).
+			if cerr := n.cleanupOrphanedNetworks(currentStatus.Interfaces); cerr != nil {
+				n.log.Reason(cerr).Warning("failed to clean up leftovers of unplugged networks")
+			}
+			return nil
+		})
 	}
 
 	err = n.state.NSExec.Do(func() error {
@@ -234,6 +262,14 @@ func (n NetPod) Setup() error {
 		if err = n.config(currentStatus); err != nil {
 			log.Log.Reason(err).Errorf("failed to configure pod network")
 			return neterrors.CreateCriticalNetworkError(err)
+		}
+
+		// Housekeeping only: a cleanup failure must not abort the setup, otherwise
+		// the networks configured above would stay in the "started" state and the
+		// next reconcile would report them as non-restartable (a critical network
+		// error that fails the VMI).
+		if cerr := n.cleanupOrphanedNetworks(currentStatus.Interfaces); cerr != nil {
+			n.log.Reason(cerr).Warning("failed to clean up leftovers of unplugged networks")
 		}
 
 		return nil
@@ -296,7 +332,7 @@ func (n NetPod) config(currentStatus *nmstate.Status) error {
 func (n NetPod) composeDesiredSpec(currentStatus *nmstate.Status) (*nmstate.Spec, error) {
 	podIfaceStatusByName := ifaceStatusByName(currentStatus.Interfaces)
 
-	podIfaceNameByVMINetwork := createNetworkNameScheme(n.vmiSpecNets, n.vmiIfaceStatuses, currentStatus.Interfaces)
+	podIfaceNameByVMINetwork := n.createNetworkNameScheme(currentStatus.Interfaces)
 
 	spec := nmstate.Spec{Interfaces: []nmstate.Interface{}}
 
@@ -351,6 +387,19 @@ func (n NetPod) composeDesiredSpec(currentStatus *nmstate.Status) (*nmstate.Spec
 		case iface.Binding != nil:
 			bindingPlugin, exists := n.bindingPluginsByName[iface.Binding.Name]
 			if exists && vmispec.IsBPFBridgeBinding(iface) {
+				// An interface marked for removal must not fail the spec composition:
+				// SDN tears down its side on its own, so both the SDN report and the
+				// pod link may legitimately be gone already. The TAP, however, is ours
+				// to delete — its name derives from the VMI network alone, so it can be
+				// removed without resolving the (possibly gone) SDN pod interface. The
+				// TC filters die with their devices, releasing the BPF program.
+				if iface.State == v1.InterfaceStateAbsent {
+					ifacesSpec = n.bpfBridgeAbsentSpec(ifIndex, currentStatus.Interfaces)
+					break
+				}
+				if podIfaceName == "" {
+					return nil, fmt.Errorf("SDN pod interface for network %s is not present yet", iface.Name)
+				}
 				if _, exists := podIfaceStatusByName[podIfaceName]; !exists {
 					return nil, fmt.Errorf("pod link (%s) is missing", podIfaceName)
 				}
@@ -526,6 +575,102 @@ func (n NetPod) masqueradeBindingSpec(podIfaceName string, vmiIfaceIndex int, if
 	return []nmstate.Interface{bridgeIface, tapIface}, nil
 }
 
+const primaryTapName = "tap0"
+
+// tapIsDetached reports whether the TAP's operational state proves no guest is
+// attached to it (netlink OperState "down"/"lower-layer-down").
+func tapIsDetached(iface nmstate.Interface) bool {
+	return iface.State == nmstate.IfaceStateDown || iface.State == "lower-layer-down"
+}
+
+// cleanupOrphanedNetworks removes what is left in the pod netns from networks
+// that disappeared from the VMI spec: the KubeVirt-owned TAP (named after the
+// network for secondary pod networks) and the per-network cache entries. The
+// SDN-provisioned pod interface is not touched — its lifecycle belongs to SDN.
+// TC filters die with their devices, releasing the BPF program.
+//
+// A TAP whose operational state is still up has the guest attached: the domain
+// hot-unplug has not finished yet, so the device (and its cache entry, which
+// keeps the network flagged as orphaned) is left for a later reconcile.
+func (n NetPod) cleanupOrphanedNetworks(currentIfaces []nmstate.Interface) error {
+	currentIfaceByName := ifaceStatusByName(currentIfaces)
+
+	var absentIfaces []nmstate.Interface
+	var cleanableNets []string
+	for _, networkName := range n.orphanedNetworks {
+		iface, exists := currentIfaceByName[networkName]
+		// A network named like the primary TAP would match the default network's
+		// device below; its cache entry is still cleanable, the device is not ours
+		// to delete here.
+		deviceIsLeftoverTap := exists && iface.TypeName == nmstate.TypeTap && networkName != primaryTapName
+		if deviceIsLeftoverTap && !tapIsDetached(iface) {
+			// Only a provably carrier-less TAP (guest detached by the domain
+			// hot-unplug) is removed; "unknown" and other states postpone to a
+			// later reconcile rather than risk racing the guest detach.
+			n.log.Infof("Postponing leftover TAP removal for unplugged network %s: the guest is still attached", networkName)
+			continue
+		}
+		if deviceIsLeftoverTap {
+			absentIfaces = append(absentIfaces, nmstate.Interface{
+				Name:     networkName,
+				TypeName: nmstate.TypeTap,
+				State:    nmstate.IfaceStateAbsent,
+				Metadata: &nmstate.IfaceMetadata{NetworkName: networkName},
+			})
+		}
+		cleanableNets = append(cleanableNets, networkName)
+	}
+
+	if len(absentIfaces) > 0 {
+		n.log.Infof("Removing leftover TAP devices of unplugged networks: %v", cleanableNets)
+		if err := n.nmstateAdapter.Apply(&nmstate.Spec{Interfaces: absentIfaces}); err != nil {
+			return fmt.Errorf("failed to remove leftover TAP devices: %w", err)
+		}
+	}
+
+	for _, networkName := range cleanableNets {
+		if err := n.state.Delete([]v1.Network{{Name: networkName}}); err != nil {
+			return err
+		}
+		delete(n.state.BPFBridgePodIfaceByNetwork, networkName)
+		if err := cache.DeletePodInterfaceCache(n.cacheCreator, n.vmiUID, networkName); err != nil {
+			n.log.Reason(err).Warningf("failed to delete pod interface cache for unplugged network %s", networkName)
+		}
+	}
+	return nil
+}
+
+// bpfBridgeAbsentSpec marks the bpfbridge TAP of an unplugged interface for
+// removal. Only a device that actually exists and is KubeVirt-owned is emitted,
+// so a repeated reconcile after the deletion stays a no-op and a foreign device
+// that happens to share the name is left alone.
+func (n NetPod) bpfBridgeAbsentSpec(vmiIfaceIndex int, currentIfaces []nmstate.Interface) []nmstate.Interface {
+	vmiNetworkName := n.vmiSpecIfaces[vmiIfaceIndex].Name
+	vmiNetwork := vmispec.LookupNetworkByName(n.vmiSpecNets, vmiNetworkName)
+	if vmiNetwork == nil {
+		return nil
+	}
+	// Only secondary pod networks get their TAP named after the network; a multus
+	// TAP name derives from the (here unresolved) pod interface name, so it is
+	// left alone rather than mis-targeted.
+	if vmispec.IsSecondaryMultusNetwork(*vmiNetwork) {
+		return nil
+	}
+
+	tapName := link.GenerateTapDeviceName(vmiNetworkName, *vmiNetwork)
+	for _, currentIface := range currentIfaces {
+		if currentIface.Name == tapName && currentIface.TypeName == nmstate.TypeTap {
+			return []nmstate.Interface{{
+				Name:     tapName,
+				TypeName: nmstate.TypeTap,
+				State:    nmstate.IfaceStateAbsent,
+				Metadata: &nmstate.IfaceMetadata{NetworkName: vmiNetworkName},
+			}}
+		}
+	}
+	return nil
+}
+
 func (n NetPod) bpfBridgeSpec(podIfaceName string, vmiIfaceIndex int, ifaceStatusByName map[string]nmstate.Interface) ([]nmstate.Interface, error) {
 	podIface := ifaceStatusByName[podIfaceName]
 	vmiNetworkName := n.vmiSpecIfaces[vmiIfaceIndex].Name
@@ -617,9 +762,15 @@ func (n NetPod) managedTapSpec(podIfaceName string, vmiIfaceIndex int, ifaceStat
 }
 
 func (n NetPod) setupBPFBridge(currentStatus *nmstate.Status) error {
-	podIfaceNameByVMINetwork := createNetworkNameScheme(n.vmiSpecNets, n.vmiIfaceStatuses, currentStatus.Interfaces)
+	podIfaceNameByVMINetwork := n.createNetworkNameScheme(currentStatus.Interfaces)
 	for ifIndex, iface := range n.vmiSpecIfaces {
 		if !vmispec.IsBPFBridgeBinding(iface) {
+			continue
+		}
+		// Never attach for an interface that is being unplugged: with its own SDN
+		// veth already gone, the resolved name could point at another network's
+		// device and Attach would replace that device's ingress filter.
+		if iface.State == v1.InterfaceStateAbsent {
 			continue
 		}
 
@@ -662,7 +813,7 @@ func (n NetPod) setupNAT(desiredSpec *nmstate.Spec, currentStatus *nmstate.Statu
 	if bridgeIfaceSpec == nil {
 		return nil
 	}
-	podIfaceNameByVMINetwork := createNetworkNameScheme(n.vmiSpecNets, n.vmiIfaceStatuses, currentStatus.Interfaces)
+	podIfaceNameByVMINetwork := n.createNetworkNameScheme(currentStatus.Interfaces)
 	podIfaceName := podIfaceNameByVMINetwork[bridgeIfaceSpec.Metadata.NetworkName]
 	podIfaceSpec := nmstate.LookupInterface(currentStatus.Interfaces, func(i nmstate.Interface) bool {
 		return i.Name == podIfaceName
@@ -773,17 +924,43 @@ func firstIPGlobalUnicast(ip nmstate.IP) *nmstate.IPAddress {
 	return nil
 }
 
-func createNetworkNameScheme(networks []v1.Network, ifaceStatuses []v1.VirtualMachineInstanceNetworkInterface, currentIfaces []nmstate.Interface) map[string]string {
+func (n NetPod) createNetworkNameScheme(currentIfaces []nmstate.Interface) map[string]string {
 	var podIfaceNamesByNetworkName map[string]string
 
 	if includesOrdinalNames(currentIfaces) {
-		podIfaceNamesByNetworkName = namescheme.CreateOrdinalNetworkNameScheme(networks)
+		podIfaceNamesByNetworkName = namescheme.CreateOrdinalNetworkNameScheme(n.vmiSpecNets)
 	} else {
-		podIfaceNamesByNetworkName = namescheme.CreateHashedNetworkNameScheme(networks)
+		podIfaceNamesByNetworkName = namescheme.CreateHashedNetworkNameScheme(n.vmiSpecNets)
 	}
 
-	podIfaceNamesByNetworkName = namescheme.UpdatePrimaryPodIfaceNameFromVMIStatus(podIfaceNamesByNetworkName, networks, ifaceStatuses)
-	return updateNonDefaultPodInterfaceNamesFromCurrentStatus(podIfaceNamesByNetworkName, networks, ifaceStatuses, currentIfaces)
+	podIfaceNamesByNetworkName = namescheme.UpdatePrimaryPodIfaceNameFromVMIStatus(podIfaceNamesByNetworkName, n.vmiSpecNets, n.vmiIfaceStatuses)
+	return updateNonDefaultPodInterfaceNamesFromCurrentStatus(podIfaceNamesByNetworkName, n.vmiSpecNets, n.vmiIfaceStatuses, currentIfaces)
+}
+
+// sdnAltNamePrefix marks the pod-side interface the SDN agent provisioned for a
+// VM network. The full altname is "d8-sdn-veth-in-<networkName>-<requestedIfName>",
+// where the requested ifName equals the VMI network name and never contains
+// dashes, so it is parsed from the last "-veth_" occurrence.
+const sdnAltNamePrefix = "d8-sdn-veth-in-"
+
+// sdnPodIfaceNamesFromAltNames derives the authoritative VMI-network -> pod
+// interface mapping from the SDN altname contract present on the links in the
+// pod netns.
+func sdnPodIfaceNamesFromAltNames(currentIfaces []nmstate.Interface) map[string]string {
+	podIfaceByNetwork := map[string]string{}
+	for _, iface := range currentIfaces {
+		for _, altName := range iface.AltNames {
+			if !strings.HasPrefix(altName, sdnAltNamePrefix) {
+				continue
+			}
+			idx := strings.LastIndex(altName, "-veth_")
+			if idx < 0 {
+				continue
+			}
+			podIfaceByNetwork[altName[idx+1:]] = iface.Name
+		}
+	}
+	return podIfaceByNetwork
 }
 
 func updateNonDefaultPodInterfaceNamesFromCurrentStatus(
@@ -813,7 +990,25 @@ func updateNonDefaultPodInterfaceNamesFromCurrentStatus(
 	}
 
 	usedCandidateNames := map[string]struct{}{primaryPodIfaceName: {}}
+	// The SDN altname contract is authoritative. When ANY link in the netns
+	// carries it, the environment is SDN-managed: every secondary pod network is
+	// resolved strictly by altname, and a network whose interface is not present
+	// yet gets an empty name so the setup fails with a retriable error instead of
+	// guessing a device heuristically — with several networks a guess can
+	// cross-wire one network's traffic into another.
+	sdnPodIfaceNamesByNetwork := sdnPodIfaceNamesFromAltNames(currentIfaces)
+	sdnManagedNetns := len(sdnPodIfaceNamesByNetwork) > 0
+	sdnResolvedNetworks := map[string]struct{}{}
 	for _, network := range secondaryPodNetworks {
+		if sdnManagedNetns {
+			podIfaceName := sdnPodIfaceNamesByNetwork[network.Name]
+			podIfaceNamesByNetworkName[network.Name] = podIfaceName
+			if podIfaceName != "" {
+				usedCandidateNames[podIfaceName] = struct{}{}
+			}
+			sdnResolvedNetworks[network.Name] = struct{}{}
+			continue
+		}
 		// A current interface named exactly like the network is only the pod
 		// interface when it is not a KubeVirt-owned device. The managed tap is
 		// named after the network (see link.GenerateTapDeviceName), so without
@@ -854,6 +1049,9 @@ func updateNonDefaultPodInterfaceNamesFromCurrentStatus(
 
 	candidateIndex := 0
 	for _, network := range secondaryPodNetworks {
+		if _, sdnResolved := sdnResolvedNetworks[network.Name]; sdnResolved {
+			continue
+		}
 		if podIfaceName, exists := podIfaceNamesByNetworkName[network.Name]; exists {
 			if _, linkExists := currentIfaceByName[podIfaceName]; linkExists {
 				continue
