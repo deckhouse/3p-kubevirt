@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"syscall"
 
-	"github.com/opencontainers/runc/libcontainer/configs"
-	"github.com/opencontainers/runc/libcontainer/devices"
+	"github.com/opencontainers/cgroups"
+	devices "github.com/opencontainers/cgroups/devices/config"
 	"golang.org/x/sys/unix"
 	"k8s.io/apimachinery/pkg/types"
 
@@ -574,7 +574,7 @@ func (a hostDeviceAttacher) applyDeviceRules(rules []*devices.Rule, cgroupManage
 		return fmt.Errorf("failed to apply device rules %+v: cgroup manager is nil", rules)
 	}
 
-	err := cgroupManager.Set(&configs.Resources{
+	err := cgroupManager.Set(&cgroups.Resources{
 		Devices: rules,
 	})
 

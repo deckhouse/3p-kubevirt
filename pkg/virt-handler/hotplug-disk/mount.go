@@ -24,9 +24,9 @@ import (
 	cmdclient "kubevirt.io/kubevirt/pkg/virt-handler/cmd-client"
 	"kubevirt.io/kubevirt/pkg/virt-handler/isolation"
 
-	"github.com/opencontainers/runc/libcontainer/configs"
+	"github.com/opencontainers/cgroups"
 
-	"github.com/opencontainers/runc/libcontainer/devices"
+	devices "github.com/opencontainers/cgroups/devices/config"
 	"k8s.io/apimachinery/pkg/types"
 
 	v1 "kubevirt.io/api/core/v1"
@@ -373,7 +373,7 @@ func (m *volumeMounter) mountFromPod(vmi *v1.VirtualMachineInstance, sourceUID t
 			return fmt.Errorf("failed to apply device rules: cgroup manager is nil")
 		}
 
-		err := cgroupManager.Set(&configs.Resources{
+		err := cgroupManager.Set(&cgroups.Resources{
 			Devices: deviceRules,
 		})
 
@@ -533,7 +533,7 @@ func (m *volumeMounter) updateBlockMajorMinor(dev uint64, allow bool, cgroupMana
 		return fmt.Errorf("failed to apply device rule %+v: cgroup manager is nil", *deviceRule)
 	}
 
-	err := cgroupManager.Set(&configs.Resources{
+	err := cgroupManager.Set(&cgroups.Resources{
 		Devices: []*devices.Rule{deviceRule},
 	})
 
@@ -788,7 +788,7 @@ func (m *volumeMounter) Unmount(vmi *v1.VirtualMachineInstance, cgroupManager cg
 				return fmt.Errorf("failed to apply device rules: cgroup manager is nil")
 			}
 
-			err := cgroupManager.Set(&configs.Resources{
+			err := cgroupManager.Set(&cgroups.Resources{
 				Devices: deviceRules,
 			})
 
@@ -903,7 +903,7 @@ func (m *volumeMounter) UnmountAll(vmi *v1.VirtualMachineInstance, cgroupManager
 			if cgroupManager == nil {
 				logger.Warningf("cgroup manager is nil, skipping device rules removal")
 			} else {
-				err := cgroupManager.Set(&configs.Resources{
+				err := cgroupManager.Set(&cgroups.Resources{
 					Devices: deviceRules,
 				})
 

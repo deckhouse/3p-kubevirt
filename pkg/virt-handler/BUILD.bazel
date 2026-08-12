@@ -68,7 +68,7 @@ go_library(
         "//staging/src/kubevirt.io/client-go/log:go_default_library",
         "//tools/cache:go_default_library",
         "//vendor/github.com/mitchellh/go-ps:go_default_library",
-        "//vendor/github.com/opencontainers/runc/libcontainer/cgroups:go_default_library",
+        "//vendor/github.com/opencontainers/cgroups:go_default_library",
         "//vendor/golang.org/x/sys/unix:go_default_library",
         "//vendor/k8s.io/api/core/v1:go_default_library",
         "//vendor/k8s.io/apimachinery/pkg/api/equality:go_default_library",
@@ -102,6 +102,7 @@ go_test(
         "vm_test.go",
     ],
     embed = [":go_default_library"],
+    race = "on",
     tags = ["cov"],
     deps = [
         "//pkg/certificates:go_default_library",
@@ -155,6 +156,7 @@ go_test(
 
 ginkgo_test(
     name = "go_parallel_test",
+    timeout = "long",
     ginkgo_args = ["-p"],
     go_test = ":go_default_test",
     tags = ["nocov"],
