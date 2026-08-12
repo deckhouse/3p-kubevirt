@@ -13,13 +13,9 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/opencontainers/runc/libcontainer/cgroups"
+	cgroups "github.com/opencontainers/cgroups"
+	devices "github.com/opencontainers/cgroups/devices/config"
 	"golang.org/x/sys/unix"
-
-	"github.com/opencontainers/runc/libcontainer/devices"
-
-	runc_cgroups "github.com/opencontainers/runc/libcontainer/cgroups"
-	runc_configs "github.com/opencontainers/runc/libcontainer/configs"
 
 	v1 "kubevirt.io/api/core/v1"
 	"kubevirt.io/client-go/log"
@@ -45,8 +41,8 @@ var (
 	defaultDeviceRules []*devices.Rule
 )
 
-type execVirtChrootFunc func(r *runc_configs.Resources, subsystemPaths map[string]string, rootless bool, version CgroupVersion) error
-type getCurrentlyDefinedRulesFunc func(runcManager runc_cgroups.Manager) ([]*devices.Rule, error)
+type execVirtChrootFunc func(r *cgroups.Resources, subsystemPaths map[string]string, rootless bool, version CgroupVersion) error
+type getCurrentlyDefinedRulesFunc func(cgManager cgroups.Manager) ([]*devices.Rule, error)
 
 // addCurrentRules gets a slice of rules as a parameter and returns a new slice that contains all given rules
 // and all of the rules that are currently set. This way rules that are already defined won't be deleted by this
@@ -159,7 +155,124 @@ func generateDeviceRulesForVMI(vmi *v1.VirtualMachineInstance, isolationRes isol
 		}
 	}
 
+	// Device-plugin-provisioned devices (VFIO, USB) must be in the cgroup
+	// rule cache so they survive eBPF program rebuilds during hotplug.
+	for _, devDir := range []string{
+		filepath.Join("dev", "vfio"),
+		filepath.Join("dev", "bus", "usb"),
+	} {
+		rules, err := discoverDeviceRulesInDir(mountRoot, devDir)
+		if err != nil {
+			return nil, fmt.Errorf("failed to discover device rules in %s: %v", devDir, err)
+		}
+		vmiDeviceRules = append(vmiDeviceRules, rules...)
+	}
+
 	return vmiDeviceRules, nil
+}
+
+// generateDeviceRulesForAttachedHotplugDevices builds allow-rules for hotplug block disks that are ALREADY
+// attached to the virt-launcher pod, i.e. whose device node currently exists.
+//
+// This is required because a fresh cgroup manager is created on every reconcile and, in cgroup v2, every Set call
+// rewrites the whole device allowlist. generateDeviceRulesForVMI intentionally skips hotpluggable volumes, so
+// without seeding the manager with the currently attached hotplug devices, an early Set that runs before the
+// hotplug-disk mount (e.g. the USB host device attach) would transiently drop the disk from the allowlist and
+// briefly deny access to it. The seeded rules are merged with every subsequent Set via addCurrentRules; explicit
+// removal rules (allow=false) emitted by detach/unmount still override them.
+func generateDeviceRulesForAttachedHotplugDevices(vmi *v1.VirtualMachineInstance, isolationRes isolation.IsolationResult) ([]*devices.Rule, error) {
+	mountRoot, err := isolationRes.MountRoot()
+	if err != nil {
+		return nil, err
+	}
+
+	// resolveRule returns an allow-rule for the device node at relPath (relative to the pod mount root), or nil if
+	// the node is not present yet (device not attached) - in that case the corresponding mount/attach flow will add
+	// it later, so there is nothing to seed.
+	resolveRule := func(relPath string) (*devices.Rule, error) {
+		devicePath, err := safepath.JoinNoFollow(mountRoot, relPath)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return nil, nil
+			}
+			return nil, err
+		}
+		return newAllowedDeviceRule(devicePath)
+	}
+
+	var rules []*devices.Rule
+
+	// Already attached hotplug block volumes. Filesystem hotplug volumes are files, not device nodes, so they are
+	// skipped (newAllowedDeviceRule would return nil for them anyway).
+	for _, volumeStatus := range vmi.Status.VolumeStatus {
+		if volumeStatus.HotplugVolume == nil {
+			continue
+		}
+		if volumeStatus.PersistentVolumeClaimInfo == nil ||
+			!storagetypes.IsPVCBlock(volumeStatus.PersistentVolumeClaimInfo.VolumeMode) {
+			continue
+		}
+		rule, err := resolveRule(filepath.Join("var/run/kubevirt/hotplug-disks", volumeStatus.Name))
+		if err != nil {
+			return nil, fmt.Errorf("failed to create device rule for hotplug volume %s: %v", volumeStatus.Name, err)
+		}
+		if rule != nil {
+			log.Log.V(loggingVerbosity).Infof("seeding cgroup with attached hotplug volume %s: %v", volumeStatus.Name, rule)
+			rules = append(rules, rule)
+		}
+	}
+
+	return rules, nil
+}
+
+// discoverDeviceRulesInDir recursively scans a directory under the
+// container's filesystem and creates allow rules for all device nodes
+// found. These devices are provisioned by device plugins or the container
+// runtime and must be preserved in the v2 cgroup manager's rule cache so
+// they are not lost when the eBPF device filter is rebuilt by subsequent
+// Set() calls (e.g. during hotplug volume mounting).
+func discoverDeviceRulesInDir(mountRoot *safepath.Path, relPath string) ([]*devices.Rule, error) {
+	dirPath, err := safepath.JoinNoFollow(mountRoot, relPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	var entries []os.DirEntry
+	err = dirPath.ExecuteNoFollow(func(path string) (err error) {
+		entries, err = os.ReadDir(path)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var rules []*devices.Rule
+	for _, entry := range entries {
+		if entry.IsDir() {
+			subRules, err := discoverDeviceRulesInDir(mountRoot, filepath.Join(relPath, entry.Name()))
+			if err != nil {
+				return nil, err
+			}
+			rules = append(rules, subRules...)
+			continue
+		}
+		devPath, err := safepath.JoinNoFollow(dirPath, entry.Name())
+		if err != nil {
+			return nil, err
+		}
+		rule, err := newAllowedDeviceRule(devPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create device rule for %s/%s: %v", relPath, entry.Name(), err)
+		}
+		if rule != nil {
+			log.Log.V(loggingVerbosity).Infof("device rule for %s/%s: %v", relPath, entry.Name(), rule)
+			rules = append(rules, rule)
+		}
+	}
+	return rules, nil
 }
 
 func newAllowedDeviceRule(devicePath *safepath.Path) (*devices.Rule, error) {
@@ -260,7 +373,7 @@ func GenerateDefaultDeviceRules() []*devices.Rule {
 
 // execVirtChrootCgroups executes virt-chroot cgroups command to apply changes via virt-chroot.
 // This is needed since high privileges are needed and root is needed to change.
-func execVirtChrootCgroups(r *runc_configs.Resources, subsystemPaths map[string]string, rootless bool, version CgroupVersion) error {
+func execVirtChrootCgroups(r *cgroups.Resources, subsystemPaths map[string]string, rootless bool, version CgroupVersion) error {
 	marshalledRules, err := json.Marshal(*r)
 	if err != nil {
 		return fmt.Errorf("failed to marshall resources. err: %v resources: %+v", err, *r)
@@ -336,5 +449,5 @@ func setCpuSetHelper(manager Manager, subCgroup string, cpusList []int) error {
 
 	wVal := strings.Trim(strings.Replace(fmt.Sprint(cpusList), " ", ",", -1), "[]")
 
-	return runc_cgroups.WriteFile(subSysPath, "cpuset.cpus", wVal)
+	return cgroups.WriteFile(subSysPath, "cpuset.cpus", wVal)
 }

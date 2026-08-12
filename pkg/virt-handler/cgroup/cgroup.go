@@ -28,9 +28,8 @@ import (
 
 	"kubevirt.io/client-go/log"
 
-	runc_cgroups "github.com/opencontainers/runc/libcontainer/cgroups"
-	"github.com/opencontainers/runc/libcontainer/configs"
-	"github.com/opencontainers/runc/libcontainer/devices"
+	cgroups "github.com/opencontainers/cgroups"
+	devices "github.com/opencontainers/cgroups/devices/config"
 
 	v1 "kubevirt.io/api/core/v1"
 
@@ -43,11 +42,11 @@ import (
 
 // Manager is the only interface to use in order to inspect, update or define cgroup properties.
 // This interface is agnostic to cgroups version (supports v1 and v2) and is completely transparent from the
-// users perspective. To achieve this "runc"'s cgroup manager is being levitated. This package's implementation
-// guide-line is to have the thinnest glue layer possible in order to have all runc's capabilities without extra effort.
-// This interface can, of course, extend runc and introduce new functionalities that are specific to Kubevirt's use.
+// user's perspective. To achieve this, the opencontainers/cgroups library is being leveraged. This package's
+// implementation guide-line is to have the thinnest glue layer possible. This interface can, of course, extend
+// the library and introduce new functionalities that are specific to KubeVirt's use.
 type Manager interface {
-	Set(r *configs.Resources) error
+	Set(r *cgroups.Resources) error
 
 	// GetBasePathToHostSubsystem returns the path to the specified subsystem
 	// from the host's viewpoint.
@@ -72,9 +71,9 @@ type Manager interface {
 	GetCgroupThreads() ([]int, error)
 }
 
-// This is here so that mockgen would create a mock out of it. That way we would have a mocked runc manager.
-type runcManager interface {
-	runc_cgroups.Manager
+// This is here so that mockgen would create a mock out of it. That way we would have a mocked cgroups manager.
+type cgroupsManager interface {
+	cgroups.Manager
 }
 
 // If a task is moved into a sub-cgroup, we want the manager to
@@ -98,20 +97,20 @@ func newManagerFromPid(pid int, deviceRules []*devices.Rule) (manager Manager, e
 	var version CgroupVersion
 
 	procCgroupBasePath := filepath.Join(cgroupconsts.ProcMountPoint, strconv.Itoa(pid), cgroupconsts.CgroupStr)
-	controllerPaths, err := runc_cgroups.ParseCgroupFile(procCgroupBasePath)
+	controllerPaths, err := cgroups.ParseCgroupFile(procCgroupBasePath)
 	if err != nil {
 		return nil, fmt.Errorf("cannot initialize new cgroup manager. err: %v", err)
 	}
 
-	config := &configs.Cgroup{
+	config := &cgroups.Cgroup{
 		Path: cgroupconsts.HostCgroupBasePath,
-		Resources: &configs.Resources{
+		Resources: &cgroups.Resources{
 			Devices: deviceRules,
 		},
 		Rootless: isRootless,
 	}
 
-	if runc_cgroups.IsCgroup2UnifiedMode() {
+	if cgroups.IsCgroup2UnifiedMode() {
 		version = V2
 		slicePath := filepath.Join(cgroupconsts.CgroupBasePath, controllerPaths[""])
 		slicePath = managerPath(slicePath)
@@ -149,12 +148,21 @@ func NewManagerFromVM(vmi *v1.VirtualMachineInstance, host string) (Manager, err
 		return nil, err
 	}
 
+	// Seed the manager with hotplug devices that are already attached. Otherwise the first Set of a reconcile
+	// (which rewrites the whole cgroup v2 device allowlist) could transiently drop them - see
+	// generateDeviceRulesForAttachedHotplugDevices for details.
+	hotplugDeviceRules, err := generateDeviceRulesForAttachedHotplugDevices(vmi, isolationRes)
+	if err != nil {
+		return nil, err
+	}
+	vmiDeviceRules = append(vmiDeviceRules, hotplugDeviceRules...)
+
 	return newManagerFromPid(isolationRes.Pid(), vmiDeviceRules)
 }
 
 // GetGlobalCpuSetPath returns the CPU set of the main cgroup slice
 func GetGlobalCpuSetPath() string {
-	if runc_cgroups.IsCgroup2UnifiedMode() {
+	if cgroups.IsCgroup2UnifiedMode() {
 		return filepath.Join(cgroupconsts.CgroupBasePath, "cpuset.cpus.effective")
 	}
 	return filepath.Join(cgroupconsts.CgroupBasePath, "cpuset", "cpuset.cpus")

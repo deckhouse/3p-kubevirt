@@ -25,7 +25,7 @@ go_library(
     deps = [
         "//vendor/github.com/cilium/ebpf/asm:go_default_library",
         "//vendor/github.com/cilium/ebpf/internal:go_default_library",
-        "//vendor/github.com/cilium/ebpf/internal/kallsyms:go_default_library",
+        "//vendor/github.com/cilium/ebpf/internal/linux:go_default_library",
         "//vendor/github.com/cilium/ebpf/internal/sys:go_default_library",
         "//vendor/github.com/cilium/ebpf/internal/unix:go_default_library",
     ],
