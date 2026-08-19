@@ -59,11 +59,7 @@ func (c *Controller) Run(stopCh <-chan struct{}) {
 	defer c.queue.ShutDown()
 	c.log.Info("Starting checksum controller")
 
-	go wait.Until(func() {
-		for key := range c.objects {
-			c.queue.Add(key)
-		}
-	}, time.Minute, stopCh)
+	go wait.Until(c.enqueueAll, time.Minute, stopCh)
 
 	wait.Until(c.runWorker, time.Second, stopCh)
 }
@@ -167,6 +163,14 @@ func (c *Controller) delete(key types.NamespacedName) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	delete(c.objects, key)
+}
+
+func (c *Controller) enqueueAll() {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	for key := range c.objects {
+		c.queue.Add(key)
+	}
 }
 
 func (c *Controller) get(key types.NamespacedName) (VMIControl, bool) {
