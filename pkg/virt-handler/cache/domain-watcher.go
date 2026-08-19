@@ -175,6 +175,13 @@ func (d *domainWatcher) handleStaleSocketConnections() error {
 		if err == nil {
 			// socket is alive still
 			sock.Close()
+			// MarkSocketUnresponsive below records the failure as a file next
+			// to the socket, and nothing else ever deletes that file. Remove
+			// it now that the launcher answers again, otherwise the launcher
+			// would be treated as unresponsive forever after one timeout.
+			if err := cmdclient.ClearSocketUnresponsive(socket); err != nil {
+				log.Log.Reason(err).Errorf("Unable to clear the unresponsive mark of socket %s", socket)
+			}
 			continue
 		}
 		unresponsive = append(unresponsive, socket)
@@ -205,7 +212,8 @@ func (d *domainWatcher) handleStaleSocketConnections() error {
 		// remove from unresponsive list if not found unresponsive this iteration
 		if !found {
 			delete(d.unresponsiveSockets, key)
-			break
+			// continue, not break: reap every recovered socket, not just the first.
+			continue
 		}
 
 		diff := now - timeStamp

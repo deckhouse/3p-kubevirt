@@ -244,7 +244,19 @@ func domainIsActiveOnTarget(domain *api.Domain) bool {
 }
 
 func (c *MigrationTargetController) ackMigrationCompletion(vmi *v1.VirtualMachineInstance, domain *api.Domain) {
-	vmi.Status.MigrationState.EndTimestamp = domain.Spec.Metadata.KubeVirt.Migration.EndTimestamp
+	migrationMetadata := domain.Spec.Metadata.KubeVirt.Migration
+	vmi.Status.MigrationState.EndTimestamp = migrationMetadata.EndTimestamp
+	// The source samples StartTimestamp from the domain on resync, so a
+	// migration that finishes within one resync interval leaves it nil, while
+	// the TargetReady -> Running transition and migrationNeedsFinalization
+	// gate on it. Fall back to the target's view of the migration.
+	if vmi.Status.MigrationState.StartTimestamp == nil {
+		if migrationMetadata.StartTimestamp != nil {
+			vmi.Status.MigrationState.StartTimestamp = migrationMetadata.StartTimestamp
+		} else {
+			vmi.Status.MigrationState.StartTimestamp = migrationMetadata.EndTimestamp
+		}
+	}
 	vmi.Labels[v1.NodeNameLabel] = c.host
 	delete(vmi.Labels, v1.OutdatedLauncherImageLabel)
 	vmi.Status.LauncherContainerImageVersion = ""

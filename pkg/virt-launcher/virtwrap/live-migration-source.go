@@ -538,7 +538,8 @@ func (m *migrationMonitor) isMigrationProgressing() bool {
 func (m *migrationMonitor) determineNonRunningMigrationStatus(dom cli.VirDomain) *libvirt.DomainJobInfo {
 	logger := log.Log.Object(m.vmi)
 	// Check if a migration job was not started.
-	if m.lastProgressUpdate == 0 || m.lastProgressUpdate < m.start {
+	// lastProgressUpdate is initialized to start; equality means no progress observed yet.
+	if m.lastProgressUpdate <= m.start {
 		logger.Info("Migration job didn't start yet")
 		return nil
 	}
