@@ -901,7 +901,23 @@ func (m *volumeMounter) UnmountAll(vmi *v1.VirtualMachineInstance, cgroupManager
 				continue
 			}
 			diskPath.Close()
-			if isBlock, err := isBlockDevice(diskPath.Path()); err != nil {
+			if isBlock, err := isBlockDevice(diskPath.Path()); errors.Is(err, syscall.ESTALE) {
+				// A stale NFS file handle means the export backing this mount
+				// is already gone: every stat through the mount fails, but the
+				// mount itself is still in place and keeps blocking the kubelet
+				// from tearing down the pod directory. A block device node
+				// cannot be stale, so unmount it as a filesystem mount without
+				// further checks.
+				logger.Infof("unmounting stale hotplug volume mount at path %s", diskPath)
+				if out, unmountErr := unmountCommand(diskPath.Path()); unmountErr != nil {
+					unmountErr = fmt.Errorf("failed to unmount stale hotplug disk %v: %v: %w", diskPath, string(out), unmountErr)
+					logger.Warningf("Unable to unmount volume at path %s: %v", diskPath, unmountErr)
+					unmountErrors = append(unmountErrors, unmountErr)
+				} else if unlinkErr := safepath.UnlinkAtNoFollow(diskPath.Path()); unlinkErr != nil {
+					logger.Warningf("Unable to remove stale hotplug disk file at path %s: %v", diskPath, unlinkErr)
+					unmountErrors = append(unmountErrors, unlinkErr)
+				}
+			} else if err != nil {
 				logger.Warningf("Unable to unmount volume at path %s: %v", diskPath, err)
 				unmountErrors = append(unmountErrors, err)
 			} else if isBlock {
