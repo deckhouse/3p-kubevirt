@@ -1002,6 +1002,7 @@ const (
 	VirtualMachineInstanceMigrationFailedReasonMigrationStateWasTakenOverByAnotherMigrationObject string = "MigrationStateWasTakenOverByAnotherMigrationObject"
 	VirtualMachineInstanceMigrationFailedReasonSourceNodeReportedMigrationFailed                  string = "SourceNodeReportedMigrationFailed"
 	VirtualMachineInstanceMigrationFailedReasonTargetAttachmentPodShutdownDuringMigration         string = "TargetAttachmentPodShutdownDuringMigration"
+	VirtualMachineInstanceMigrationFailedReasonVolumeMigrationCanceled                            string = "VolumeMigrationCanceled"
 )
 
 // Machine-readable reasons for the VirtualMachineInstanceMigrationConcurrencyLimitReached
