@@ -81,6 +81,8 @@ var _ = Describe("Status Update", func() {
 
 		defaultNetworkName = "default"
 
+		secondaryPodNetworkName = "veth_cn74327bb9"
+
 		secondaryNetworkName                     = "iface1"
 		secondaryNetworkAttachmentDefinitionName = "meganet"
 
@@ -475,6 +477,47 @@ var _ = Describe("Status Update", func() {
 		Expect(vmi.Status.Interfaces).To(Equal(expectedInterfacesStatus))
 	})
 
+	It("Should keep the reported status of a secondary pod interface requested as absent", func() {
+		existingInterfacesStatus := []v1.VirtualMachineInstanceNetworkInterface{
+			{Name: defaultNetworkName, PodInterfaceName: "eth0", InfoSource: vmispec.InfoSourceDomainAndGA},
+			{Name: secondaryPodNetworkName, PodInterfaceName: secondaryPodNetworkName, InfoSource: vmispec.InfoSourceDomainAndGA},
+		}
+
+		vmi := libvmi.New(
+			libvmi.WithNamespace(testNamespace),
+			libvmi.WithInterface(*v1.DefaultBridgeNetworkInterface()),
+			libvmi.WithInterface(absentInterface(secondaryPodNetworkName)),
+			libvmi.WithNetwork(v1.DefaultPodNetwork()),
+			libvmi.WithNetwork(secondaryPodNetwork(secondaryPodNetworkName)),
+			libvmistatus.WithStatus(libvmistatus.New(WithInterfacesStatus(existingInterfacesStatus))),
+		)
+
+		podAnnotations := map[string]string{networkv1.NetworkStatusAnnot: multusNetworkStatusWithPrimaryNetAndIfaceName}
+		Expect(controllers.UpdateVMIStatus(vmi, newPodFromVMI(vmi, podAnnotations))).To(Succeed())
+
+		Expect(vmi.Status.Interfaces).To(Equal(existingInterfacesStatus))
+	})
+
+	It("Shouldn't report a secondary pod interface requested as absent once it is no longer reported", func() {
+		existingInterfacesStatus := []v1.VirtualMachineInstanceNetworkInterface{
+			{Name: defaultNetworkName, PodInterfaceName: "eth0", InfoSource: vmispec.InfoSourceDomainAndGA},
+		}
+
+		vmi := libvmi.New(
+			libvmi.WithNamespace(testNamespace),
+			libvmi.WithInterface(*v1.DefaultBridgeNetworkInterface()),
+			libvmi.WithInterface(absentInterface(secondaryPodNetworkName)),
+			libvmi.WithNetwork(v1.DefaultPodNetwork()),
+			libvmi.WithNetwork(secondaryPodNetwork(secondaryPodNetworkName)),
+			libvmistatus.WithStatus(libvmistatus.New(WithInterfacesStatus(existingInterfacesStatus))),
+		)
+
+		podAnnotations := map[string]string{networkv1.NetworkStatusAnnot: multusNetworkStatusWithPrimaryNetAndIfaceName}
+		Expect(controllers.UpdateVMIStatus(vmi, newPodFromVMI(vmi, podAnnotations))).To(Succeed())
+
+		Expect(vmi.Status.Interfaces).To(Equal(existingInterfacesStatus))
+	})
+
 	It("Should keep existing interface status when info source is empty and Multus network-status is missing", func() {
 		existingInterfacesStatus := []v1.VirtualMachineInstanceNetworkInterface{
 			{Name: secondaryNetworkName},
@@ -515,4 +558,17 @@ func WithInterfacesStatus(interfaces []v1.VirtualMachineInstanceNetworkInterface
 	return func(vmiStatus *v1.VirtualMachineInstanceStatus) {
 		vmiStatus.Interfaces = interfaces
 	}
+}
+
+func secondaryPodNetwork(name string) *v1.Network {
+	return &v1.Network{
+		Name:          name,
+		NetworkSource: v1.NetworkSource{Pod: &v1.PodNetwork{}},
+	}
+}
+
+func absentInterface(name string) v1.Interface {
+	iface := libvmi.InterfaceDeviceWithBridgeBinding(name)
+	iface.State = v1.InterfaceStateAbsent
+	return iface
 }

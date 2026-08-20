@@ -78,7 +78,17 @@ func calculatePodIfaceStatuses(
 		}
 
 		iface := vmispec.LookupInterfaceByName(vmi.Spec.Domain.Devices.Interfaces, network.Name)
+		ifaceStatus := vmispec.LookupInterfaceStatusByName(vmi.Status.Interfaces, network.Name)
 		if iface != nil && iface.State == v1.InterfaceStateAbsent {
+			// An interface requested as absent keeps its already reported status until the
+			// virt-handler stops reporting it, which happens once the device is really gone
+			// from the domain. The VM and VMI interface clean-up treats a missing status as
+			// "detached", so dropping the status here would strip the interface from both
+			// specs before the virt-launcher had a chance to detach it, leaving the device
+			// attached to the running domain for good.
+			if ifaceStatus != nil {
+				interfaceStatuses = append(interfaceStatuses, *ifaceStatus)
+			}
 			continue
 		}
 
@@ -91,7 +101,6 @@ func calculatePodIfaceStatuses(
 			podIfaceName = network.Name
 		}
 
-		ifaceStatus := vmispec.LookupInterfaceStatusByName(vmi.Status.Interfaces, network.Name)
 		if ifaceStatus == nil {
 			interfaceStatuses = append(interfaceStatuses, v1.VirtualMachineInstanceNetworkInterface{
 				Name:             network.Name,
