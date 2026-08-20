@@ -2167,6 +2167,183 @@ var _ = Describe("Migration watcher", func() {
 		})
 	})
 
+	Context("Migration deleted after the hand-off to virt-handler", func() {
+		var vmi *virtv1.VirtualMachineInstance
+		var migration *virtv1.VirtualMachineInstanceMigration
+
+		handOff := func(phase virtv1.VirtualMachineInstanceMigrationPhase, startTimestamp *metav1.Time) {
+			migration = newMigration("testmigration", vmi.Name, phase)
+			migration.DeletionTimestamp = pointer.P(metav1.Now())
+			vmi.Status.MigrationState = &virtv1.VirtualMachineInstanceMigrationState{
+				MigrationUID:   migration.UID,
+				TargetNode:     "node01",
+				SourceNode:     "node02",
+				StartTimestamp: startTimestamp,
+			}
+			controller.addHandOffKey(virtcontroller.MigrationKey(migration))
+			Expect(controller.isMigrationHandedOff(migration, vmi)).To(BeTrue(), "this test assumes the migration was handed off")
+
+			addMigration(migration)
+			addVirtualMachineInstance(vmi)
+			addPod(newSourcePodForVirtualMachine(vmi))
+			addPod(newTargetPodForVirtualMachine(vmi, migration, k8sv1.PodRunning))
+		}
+
+		BeforeEach(func() {
+			vmi = newVirtualMachine("testvmi", virtv1.Running)
+			addNodeNameToVMI(vmi, "node02")
+		})
+
+		// Without this the phases keep progressing and the abort is only issued in
+		// MigrationRunning, which virt-handler reaches by starting the migration first.
+		DescribeTable("should finalize the migration on the VMI before it can start", func(phase virtv1.VirtualMachineInstanceMigrationPhase) {
+			handOff(phase, nil)
+
+			sanityExecute()
+
+			testutils.ExpectEvent(recorder, virtcontroller.FailedMigrationReason)
+			expectVirtualMachineInstanceMigrationState(vmi.Namespace, vmi.Name, PointTo(MatchFields(IgnoreExtras, Fields{
+				"MigrationUID": Equal(migration.UID),
+				"Failed":       BeTrue(),
+				"Completed":    BeTrue(),
+			})))
+		},
+			Entry("while preparing the target", virtv1.MigrationPreparingTarget),
+			Entry("once the target is ready", virtv1.MigrationTargetReady),
+		)
+
+		DescribeTable("should request an abort once the migration has started", func(phase virtv1.VirtualMachineInstanceMigrationPhase) {
+			handOff(phase, pointer.P(metav1.Now()))
+
+			sanityExecute()
+
+			testutils.ExpectEvent(recorder, virtcontroller.SuccessfulAbortMigrationReason)
+			expectVirtualMachineInstanceMigrationState(vmi.Namespace, vmi.Name, PointTo(MatchFields(IgnoreExtras, Fields{
+				"MigrationUID":   Equal(migration.UID),
+				"AbortRequested": BeTrue(),
+				"Failed":         BeFalse(),
+			})))
+		},
+			Entry("while preparing the target", virtv1.MigrationPreparingTarget),
+			Entry("once the target is ready", virtv1.MigrationTargetReady),
+		)
+	})
+
+	Context("Migration with a canceled volume migration", func() {
+		var vmi *virtv1.VirtualMachineInstance
+		var migration *virtv1.VirtualMachineInstanceMigration
+
+		expectVolumesChangeCondition := func(namespace, name string, matcher gomegaTypes.GomegaMatcher) {
+			updatedVMI, err := virtClientset.KubevirtV1().VirtualMachineInstances(namespace).Get(context.Background(), name, metav1.GetOptions{})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(virtcontroller.NewVirtualMachineInstanceConditionManager().
+				GetCondition(updatedVMI, virtv1.VirtualMachineInstanceVolumesChange)).To(matcher)
+		}
+
+		cancelVolumeMigration := func(transitionTime metav1.Time) {
+			vmi.Status.Conditions = append(vmi.Status.Conditions, virtv1.VirtualMachineInstanceCondition{
+				Type:               virtv1.VirtualMachineInstanceVolumesChange,
+				Status:             k8sv1.ConditionFalse,
+				Reason:             virtv1.VirtualMachineInstanceReasonVolumesChangeCancellation,
+				LastTransitionTime: transitionTime,
+			})
+		}
+
+		addAll := func() {
+			addMigration(migration)
+			addVirtualMachineInstance(vmi)
+			addPod(newSourcePodForVirtualMachine(vmi))
+			addPod(newTargetPodForVirtualMachine(vmi, migration, k8sv1.PodRunning))
+		}
+
+		BeforeEach(func() {
+			vmi = newVirtualMachine("testvmi", virtv1.Running)
+			addNodeNameToVMI(vmi, "node02")
+			migration = newMigration("testmigration", vmi.Name, virtv1.MigrationTargetReady)
+			vmi.Status.MigrationState = &virtv1.VirtualMachineInstanceMigrationState{
+				MigrationUID: migration.UID,
+				TargetNode:   "node01",
+				SourceNode:   "node02",
+			}
+		})
+
+		// The cancellation clears vmi.status.migratedVolumes, so a migration that still
+		// starts copies no disk and lands the guest on the destination PVCs, empty.
+		It("should fail the migration and clear the cancellation marker", func() {
+			cancelVolumeMigration(metav1.NewTime(migration.CreationTimestamp.Add(time.Second)))
+			addAll()
+
+			sanityExecute()
+
+			testutils.ExpectEvent(recorder, virtcontroller.FailedMigrationReason)
+			expectMigrationFailedState(migration.Namespace, migration.Name)
+			expectMigrationCondition(migration.Namespace, migration.Name, virtv1.VirtualMachineInstanceMigrationFailed)
+			expectVirtualMachineInstanceMigrationState(vmi.Namespace, vmi.Name, PointTo(MatchFields(IgnoreExtras, Fields{
+				"Failed":    BeTrue(),
+				"Completed": BeTrue(),
+			})))
+			// The marker is otherwise only cleared by a successful finalization, which a
+			// canceled migration never reaches, and would block every later migration.
+			expectVolumesChangeCondition(vmi.Namespace, vmi.Name, BeNil())
+		})
+
+		It("should request an abort when the migration has already started", func() {
+			vmi.Status.MigrationState.StartTimestamp = pointer.P(metav1.Now())
+			cancelVolumeMigration(metav1.NewTime(migration.CreationTimestamp.Add(time.Second)))
+			addAll()
+
+			sanityExecute()
+
+			testutils.ExpectEvent(recorder, virtcontroller.FailedMigrationReason)
+			expectVirtualMachineInstanceMigrationState(vmi.Namespace, vmi.Name, PointTo(MatchFields(IgnoreExtras, Fields{
+				"AbortRequested": BeTrue(),
+				"Failed":         BeFalse(),
+			})))
+		})
+
+		// A marker predating the migration belongs to an earlier volume migration.
+		It("should ignore a cancellation that predates the migration", func() {
+			cancelVolumeMigration(metav1.NewTime(migration.CreationTimestamp.Add(-time.Minute)))
+			addAll()
+
+			sanityExecute()
+
+			updatedVMIM, err := virtClientset.KubevirtV1().VirtualMachineInstanceMigrations(migration.Namespace).Get(
+				context.Background(), migration.Name, metav1.GetOptions{})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(updatedVMIM.Status.Phase).ToNot(BeEquivalentTo(virtv1.MigrationFailed))
+			expectVirtualMachineInstanceMigrationState(vmi.Namespace, vmi.Name, PointTo(MatchFields(IgnoreExtras, Fields{
+				"Failed": BeFalse(),
+			})))
+		})
+
+		// Otherwise virt-handler refuses to start this migration too: it has no way to
+		// tell a marker of its own from one left behind by an earlier volume migration.
+		It("should drop a stale marker when handing the migration off", func() {
+			migration = newMigration("testmigration", vmi.Name, virtv1.MigrationScheduled)
+			vmi.Status.MigrationState = nil
+			cancelVolumeMigration(metav1.NewTime(migration.CreationTimestamp.Add(-time.Minute)))
+			addAll()
+
+			sanityExecute()
+
+			testutils.ExpectEvent(recorder, virtcontroller.SuccessfulHandOverPodReason)
+			expectVolumesChangeCondition(vmi.Namespace, vmi.Name, BeNil())
+		})
+
+		DescribeTable("dropStaleVolumeMigrationCancellation", func(offset time.Duration, matcher gomegaTypes.GomegaMatcher) {
+			cancelVolumeMigration(metav1.NewTime(migration.CreationTimestamp.Add(offset)))
+
+			dropStaleVolumeMigrationCancellation(migration, vmi)
+
+			Expect(virtcontroller.NewVirtualMachineInstanceConditionManager().
+				GetCondition(vmi, virtv1.VirtualMachineInstanceVolumesChange)).To(matcher)
+		},
+			Entry("drops a marker predating the migration", -time.Minute, BeNil()),
+			Entry("keeps a marker issued for this migration", time.Second, Not(BeNil())),
+		)
+	})
+
 	Context("Migration backoff", func() {
 		var vmi *virtv1.VirtualMachineInstance
 

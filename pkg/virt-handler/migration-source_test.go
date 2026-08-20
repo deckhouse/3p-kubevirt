@@ -614,6 +614,45 @@ var _ = Describe("VirtualMachineInstance migration target", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(updatedVMI.Status.Interfaces[0].InterfaceName).To(Equal(testIfaceName))
 	})
+
+	// The cancellation clears vmi.status.migratedVolumes. Starting now would copy no
+	// disk and hand the guest over to the destination PVCs, which hold no data.
+	It("should not migrate vmi once the volume migration was canceled", func() {
+		vmi := api2.NewMinimalVMI("testvmi")
+		vmi.UID = vmiTestUUID
+		vmi.ObjectMeta.ResourceVersion = "1"
+		vmi.Status.Phase = v1.Running
+		vmi.Labels = map[string]string{v1.MigrationTargetNodeNameLabel: "othernode"}
+		vmi.Status.NodeName = host
+		vmi.Status.MigrationState = &v1.VirtualMachineInstanceMigrationState{
+			TargetNode:                     "othernode",
+			TargetNodeAddress:              "127.0.0.1:12345",
+			SourceNode:                     host,
+			MigrationUID:                   "123",
+			TargetDirectMigrationNodePorts: map[string]int{"49152": 12132},
+		}
+		vmi.Status.Conditions = []v1.VirtualMachineInstanceCondition{
+			{
+				Type:   v1.VirtualMachineInstanceIsMigratable,
+				Status: k8sv1.ConditionTrue,
+			},
+			{
+				Type:   v1.VirtualMachineInstanceVolumesChange,
+				Status: k8sv1.ConditionFalse,
+				Reason: v1.VirtualMachineInstanceReasonVolumesChangeCancellation,
+			},
+		}
+		vmi = addActivePods(vmi, podTestUUID, host)
+
+		domain := api.NewMinimalDomainWithUUID("testvmi", vmiTestUUID)
+		domain.Status.Status = api.Running
+		addVMI(vmi, domain)
+
+		client.EXPECT().GetDomainStats().Return(nil, false, nil).AnyTimes()
+		client.EXPECT().MigrateVirtualMachine(gomock.Any(), gomock.Any()).Times(0)
+
+		sanityExecute()
+	})
 })
 
 type stubSourcePasstRepairHandler struct {

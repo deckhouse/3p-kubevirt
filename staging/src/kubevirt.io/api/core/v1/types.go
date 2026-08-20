@@ -912,6 +912,7 @@ const (
 	VirtualMachineInstanceMigrationFailedReasonMigrationStateWasTakenOverByAnotherMigrationObject string = "MigrationStateWasTakenOverByAnotherMigrationObject"
 	VirtualMachineInstanceMigrationFailedReasonSourceNodeReportedMigrationFailed                  string = "SourceNodeReportedMigrationFailed"
 	VirtualMachineInstanceMigrationFailedReasonTargetAttachmentPodShutdownDuringMigration         string = "TargetAttachmentPodShutdownDuringMigration"
+	VirtualMachineInstanceMigrationFailedReasonVolumeMigrationCanceled                            string = "VolumeMigrationCanceled"
 )
 
 type VirtualMachineInstanceCondition struct {

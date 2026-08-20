@@ -567,6 +567,15 @@ func (c *MigrationSourceController) migrateVMI(vmi *v1.VirtualMachineInstance, d
 		return nil
 	}
 
+	// The volume migration this migration was prepared for has been canceled, which
+	// clears vmi.status.migratedVolumes. Starting now would copy no disk and hand the
+	// guest over to the destination PVCs, which hold no data. virt-controller unwinds
+	// the migration, we only have to not start it in the meantime.
+	if volumeMigrationCanceled(vmi) {
+		log.Log.Object(vmi).Warningf("volume migration was canceled, not starting migration %s", vmi.Status.MigrationState.MigrationUID)
+		return nil
+	}
+
 	// External migration configuration: interrupt reconcile and wait for the next VMI update with filled MigrationConfiguration.
 	if vmi.Status.MigrationState.MigrationConfiguration == nil {
 		// Wait for migration options.
@@ -633,6 +642,16 @@ func derefOrDefault[T any](v *T) T {
 		return defaultT
 	}
 	return *v
+}
+
+// volumeMigrationCanceled reports whether a volume migration was canceled for
+// this VMI. virt-controller clears the condition again once it has unwound the
+// migration, so this does not linger for later, unrelated migrations.
+func volumeMigrationCanceled(vmi *v1.VirtualMachineInstance) bool {
+	cond := controller.NewVirtualMachineInstanceConditionManager().GetCondition(vmi, v1.VirtualMachineInstanceVolumesChange)
+
+	return cond != nil && cond.Status == k8sv1.ConditionFalse &&
+		cond.Reason == v1.VirtualMachineInstanceReasonVolumesChangeCancellation
 }
 
 func (c *MigrationSourceController) passtSocketDirOnHostMigrationSource(vmi *v1.VirtualMachineInstance) (string, error) {
