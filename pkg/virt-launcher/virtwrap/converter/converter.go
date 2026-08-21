@@ -75,11 +75,6 @@ const (
 	bootMenuTimeoutMS          = uint(10000)
 	multiQueueMaxQueues        = uint32(256)
 	QEMUSeaBiosDebugPipe       = "/var/run/kubevirt-private/QEMUSeaBiosDebugPipe"
-
-	// SpiceAnnotation turns the SPICE display on. SPICE is added next to VNC rather
-	// than replacing it: QEMU and libvirt accept both displays at once, so existing
-	// VNC sessions keep working unchanged.
-	SpiceAnnotation = "virtualization.deckhouse.io/spice"
 )
 
 type deviceNamer struct {
@@ -964,7 +959,9 @@ func Convert_v1_Rng_To_api_Rng(_ *v1.Rng, rng *api.Rng, c *ConverterContext) err
 
 // spiceEnabled reports whether the SPICE display is requested on this VMI.
 func spiceEnabled(vmi *v1.VirtualMachineInstance) bool {
-	return vmi.Annotations[SpiceAnnotation] == "true"
+	// The annotation constant lives in the api package: the same value is read by the
+	// memory overhead calculation in virt-controller.
+	return vmi.Annotations[v1.SpiceAnnotation] == "true"
 }
 
 func Convert_v1_Usbredir_To_api_Usbredir(vmi *v1.VirtualMachineInstance, domainDevices *api.Devices, _ *ConverterContext) error {

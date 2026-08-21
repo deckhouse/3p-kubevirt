@@ -137,6 +137,13 @@ const (
 	VirtlogdOverhead            = "25Mi"  // The `ps` RSS for virtlogd
 	VirtqemudOverhead           = "40Mi"  // The `ps` RSS for virtqemud
 	QemuOverhead                = "30Mi"  // The `ps` RSS for qemu, minus the RAM of its (stressed) guest, minus the virtual page table
+	// SPICE, measured on a graphical guest as the RSS of qemu minus the guest RAM
+	// region. Static: the display, sound, redirection slots and vdagent channel with
+	// no client connected, +17.3 and +17.9 MiB on two VM sizes with an 8 MiB spread
+	// between identical runs. Session: one active client with the display channel
+	// open, +44 MiB.
+	SpiceStaticOverhead  = "25Mi"
+	SpiceSessionOverhead = "44Mi"
 	// Default: limits.memory = 2*requests.memory
 	DefaultMemoryLimitOverheadRatio = float64(2.0)
 
