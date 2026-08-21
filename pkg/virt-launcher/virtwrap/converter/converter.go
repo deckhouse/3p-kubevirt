@@ -76,38 +76,10 @@ const (
 	multiQueueMaxQueues        = uint32(256)
 	QEMUSeaBiosDebugPipe       = "/var/run/kubevirt-private/QEMUSeaBiosDebugPipe"
 
-	// SpiceAnnotation включает SPICE-дисплей на ВМ. SPICE добавляется рядом с VNC,
-	// а не вместо него: QEMU и libvirt допускают оба дисплея одновременно, поэтому
-	// существующие VNC-сессии продолжают работать без изменений.
+	// SpiceAnnotation turns the SPICE display on. SPICE is added next to VNC rather
+	// than replacing it: QEMU and libvirt accept both displays at once, so existing
+	// VNC sessions keep working unchanged.
 	SpiceAnnotation = "virtualization.deckhouse.io/spice"
-
-	// SpiceCompressionAnnotation sets the image compression of the SPICE display.
-	// Only the values libvirt accepts in <image compression="..."> are allowed —
-	// note that lz4, which the SPICE server itself supports, is NOT among them and
-	// makes libvirt refuse the whole domain. libvirt defaults target a slow WAN, so
-	// inside a cluster network "off" or "lz" usually responds better.
-	SpiceCompressionAnnotation = "virtualization.deckhouse.io/spice-compression"
-
-	// SpiceStreamingAnnotation sets video streaming detection: filter, all, off.
-	SpiceStreamingAnnotation = "virtualization.deckhouse.io/spice-streaming"
-
-	// SpiceJPEGAnnotation overrides lossy JPEG compression of photo-like areas:
-	// always, auto, never. The default is "always", because every image compression
-	// mode SPICE offers (glz, lz, quic, auto_*) is LOSSLESS, and "auto" only applies
-	// to connections the server treats as WAN — which a unix socket behind a proxy
-	// never is. Measured on win11, 800x600, one framebuffer, the same moment:
-	// VNC+JPEG 4.9 Mbps at 16.5 FPS against SPICE 12-17 Mbps and a slideshow.
-	SpiceJPEGAnnotation = "virtualization.deckhouse.io/spice-jpeg"
-
-	// SpiceZlibAnnotation overrides zlib compression of the remaining lossless
-	// images: always, auto, never. Like JPEG, "auto" only fires on links the
-	// server counts as WAN, which a unix socket never is.
-	SpiceZlibAnnotation = "virtualization.deckhouse.io/spice-zlib"
-
-	// SpicePlaybackAnnotation turns audio compression on or off: on, off.
-	// Off costs bandwidth but removes the codec from the path when hunting
-	// for audio glitches.
-	SpicePlaybackAnnotation = "virtualization.deckhouse.io/spice-playback"
 )
 
 type deviceNamer struct {
@@ -990,27 +962,10 @@ func Convert_v1_Rng_To_api_Rng(_ *v1.Rng, rng *api.Rng, c *ConverterContext) err
 	return nil
 }
 
-// Values libvirt accepts for the SPICE graphics element. An unknown value makes
-// libvirt reject the domain, which leaves the VM stuck in Starting, so anything
-// outside these sets is ignored and the libvirt default applies.
-var (
-	spiceCompressionValues = map[string]bool{
-		"off": true, "auto_glz": true, "auto_lz": true,
-		"quic": true, "glz": true, "lz": true,
-	}
-	spiceStreamingValues = map[string]bool{
-		"filter": true, "all": true, "off": true,
-	}
-	spiceJPEGValues = map[string]bool{
-		"always": true, "auto": true, "never": true,
-	}
-	spiceZlibValues = map[string]bool{
-		"always": true, "auto": true, "never": true,
-	}
-	spicePlaybackValues = map[string]bool{
-		"on": true, "off": true,
-	}
-)
+// spiceEnabled reports whether the SPICE display is requested on this VMI.
+func spiceEnabled(vmi *v1.VirtualMachineInstance) bool {
+	return vmi.Annotations[SpiceAnnotation] == "true"
+}
 
 func Convert_v1_Usbredir_To_api_Usbredir(vmi *v1.VirtualMachineInstance, domainDevices *api.Devices, _ *ConverterContext) error {
 	clientDevices := vmi.Spec.Domain.Devices.ClientPassthrough
@@ -1027,10 +982,8 @@ func Convert_v1_Usbredir_To_api_Usbredir(vmi *v1.VirtualMachineInstance, domainD
 	// With SPICE enabled the redirected devices are wired to the SPICE channels, so a
 	// SPICE client redirects USB on its own. Otherwise they stay on unix sockets, which
 	// is what `virtctl usbredir` connects to.
-	spiceEnabled := vmi.Annotations[SpiceAnnotation] == "true"
-
 	for i := 0; i < v1.UsbClientPassthroughMaxNumberOf; i++ {
-		if spiceEnabled {
+		if spiceEnabled(vmi) {
 			redirectDevices[i] = api.RedirectedDevice{
 				Type: "spicevmc",
 				Bus:  "usb",
@@ -1627,7 +1580,7 @@ func Convert_v1_VirtualMachineInstance_To_api_Domain(vmi *v1.VirtualMachineInsta
 		domain.Spec.Devices.Channels = append(domain.Spec.Devices.Channels, convertDownwardMetricsChannel())
 	}
 
-	if vmi.Annotations[SpiceAnnotation] == "true" {
+	if spiceEnabled(vmi) {
 		// spice-vdagent in the guest talks over this virtio-serial port. Without it the
 		// agent cannot run at all, and with it come client-side mouse (the pointer is
 		// drawn locally instead of making a round trip), automatic resize to the client
@@ -2073,42 +2026,25 @@ func Convert_v1_VirtualMachineInstance_To_api_Domain(vmi *v1.VirtualMachineInsta
 				Type: "vnc",
 			},
 		}
-		if vmi.Annotations[SpiceAnnotation] == "true" {
-			spice := api.Graphics{
+		if spiceEnabled(vmi) {
+			// The tuning is fixed instead of configurable: the client always arrives over
+			// a unix socket behind proxies, so the server never treats the connection as
+			// WAN and every "auto" heuristic inside SPICE stays dormant. auto_glz is the
+			// lossless image codec, JPEG adds lossy compression of photo-like areas and
+			// zlib deflates what is left; "filter" keeps video-area detection on without
+			// forcing a stream for every update.
+			domain.Spec.Devices.Graphics = append(domain.Spec.Devices.Graphics, api.Graphics{
 				Listen: &api.GraphicsListen{
 					Type:   "socket",
 					Socket: fmt.Sprintf("/var/run/kubevirt-private/%s/virt-spice", vmi.ObjectMeta.UID),
 				},
-				Type: "spice",
-			}
-			if c := vmi.Annotations[SpiceCompressionAnnotation]; spiceCompressionValues[c] {
-				spice.Image = &api.GraphicsImage{Compression: c}
-				if c == "off" {
-					// The WAN-oriented codecs are separate knobs: leaving them on would
-					// keep compressing despite image compression being disabled.
-					spice.JPEG = &api.GraphicsJPEG{Compression: "never"}
-					spice.Zlib = &api.GraphicsZlib{Compression: "never"}
-					spice.Playback = &api.GraphicsPlayback{Compression: "off"}
-				}
-			}
-			if m := vmi.Annotations[SpiceStreamingAnnotation]; spiceStreamingValues[m] {
-				spice.Streaming = &api.GraphicsStreaming{Mode: m}
-			}
-			// An explicit annotation wins, including over the "off" case above; otherwise
-			// lossy JPEG is on by default — without it SPICE is not competitive with VNC
-			// at any image-compression setting.
-			if j := vmi.Annotations[SpiceJPEGAnnotation]; spiceJPEGValues[j] {
-				spice.JPEG = &api.GraphicsJPEG{Compression: j}
-			} else if spice.JPEG == nil {
-				spice.JPEG = &api.GraphicsJPEG{Compression: "always"}
-			}
-			if z := vmi.Annotations[SpiceZlibAnnotation]; spiceZlibValues[z] {
-				spice.Zlib = &api.GraphicsZlib{Compression: z}
-			}
-			if pb := vmi.Annotations[SpicePlaybackAnnotation]; spicePlaybackValues[pb] {
-				spice.Playback = &api.GraphicsPlayback{Compression: pb}
-			}
-			domain.Spec.Devices.Graphics = append(domain.Spec.Devices.Graphics, spice)
+				Type:      "spice",
+				Image:     &api.GraphicsImage{Compression: "auto_glz"},
+				JPEG:      &api.GraphicsJPEG{Compression: "always"},
+				Zlib:      &api.GraphicsZlib{Compression: "always"},
+				Streaming: &api.GraphicsStreaming{Mode: "filter"},
+				Playback:  &api.GraphicsPlayback{Compression: "on"},
+			})
 		}
 	}
 
