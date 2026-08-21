@@ -7,16 +7,16 @@ import (
 	"kubevirt.io/client-go/kubecli"
 )
 
-// SPICERequestHandler открывает websocket-соединение к SPICE-дисплею ВМ.
+// SPICERequestHandler opens a websocket connection to the SPICE display of a VM.
 //
-// В отличие от VNC, клиент устанавливает несколько таких соединений на одну сессию —
-// по одному на канал SPICE (main, display, inputs, cursor, звук, usbredir). Каждый
-// запрос обслуживается независимо, поэтому здесь нет ни счётчика сессий, ни вытеснения
-// предыдущего соединения.
+// Unlike VNC, a client establishes several such connections per session, one per SPICE
+// channel (main, display, inputs, cursor, audio, usbredir). Every request is served
+// independently, so there is neither a session counter nor eviction of the previous
+// connection here.
 func (app *SubresourceAPIApp) SPICERequestHandler(request *restful.Request, response *restful.Response) {
-	// ponytail: без метрик активных соединений — у VNC они считают сессии, а для SPICE
-	// счётчик соединений сессиям не равен и вводил бы в заблуждение. Отдельная метрика
-	// «сессий SPICE» нужна, но требует группировки соединений, что за рамками PoC.
+	// No active-connection metric on purpose: for VNC such a counter equals sessions,
+	// while for SPICE it does not and would mislead. A real "SPICE sessions" metric
+	// needs connections grouped into sessions, which this change does not attempt.
 	streamer := NewRawStreamer(
 		app.FetchVirtualMachineInstance,
 		validateVMIForVNC,

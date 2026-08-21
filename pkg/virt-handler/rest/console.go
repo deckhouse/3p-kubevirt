@@ -172,11 +172,11 @@ func (t *ConsoleHandler) SPICEHandler(request *restful.Request, response *restfu
 		response.WriteError(http.StatusBadRequest, err)
 		return
 	}
-	// В отличие от VNC, соединение намеренно не регистрируется в общей map: SPICE
-	// многоканальный и открывает 4-11 параллельных соединений к одному сокету (main,
-	// display, inputs, cursor, playback, record, usbredir x4). Вытеснение предыдущего
-	// соединения, как это делает newStopChan в VNCHandler, обрывало бы каналы одной и
-	// той же сессии и делало протокол неработоспособным.
+	// Unlike VNC, this connection is deliberately not registered in the shared map:
+	// SPICE is multi-channel and opens 4-11 parallel connections to the same socket
+	// (main, display, inputs, cursor, playback, record, usbredir x4). Evicting the
+	// previous connection, the way newStopChan does in VNCHandler, would tear down
+	// channels of the very same session and leave the protocol unusable.
 	t.stream(vmi, request, response, unixSocketDialer(vmi, unixSocketPath), make(chan struct{}))
 }
 
