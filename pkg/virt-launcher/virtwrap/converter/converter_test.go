@@ -2097,6 +2097,41 @@ var _ = Describe("Converter", func() {
 		},
 			MultiArchEntry(""),
 		)
+
+		DescribeTable("Should add a spice display next to vnc when annotated", func(arch string) {
+			vmi := v1.VirtualMachineInstance{
+				ObjectMeta: k8smeta.ObjectMeta{
+					Name:        "testvmi",
+					Namespace:   "default",
+					UID:         "1234",
+					Annotations: map[string]string{SpiceAnnotation: "true"},
+				},
+				Spec: v1.VirtualMachineInstanceSpec{
+					Domain: v1.DomainSpec{},
+				},
+			}
+
+			domain := vmiToDomain(&vmi, &ConverterContext{Architecture: archconverter.NewConverter(arch), AllowEmulation: true})
+			Expect(domain.Spec.Devices.Graphics).To(HaveLen(2))
+			spice := domain.Spec.Devices.Graphics[1]
+			Expect(spice.Type).To(Equal("spice"))
+			Expect(spice.Listen.Type).To(Equal("socket"))
+			Expect(spice.Listen.Socket).To(Equal("/var/run/kubevirt-private/1234/virt-spice"))
+			// The tuning is fixed, so a regression here silently changes the bandwidth
+			// profile of every SPICE session.
+			Expect(spice.Image.Compression).To(Equal("auto_glz"))
+			Expect(spice.JPEG.Compression).To(Equal("always"))
+			Expect(spice.Zlib.Compression).To(Equal("always"))
+			Expect(spice.Streaming.Mode).To(Equal("filter"))
+			Expect(spice.Playback.Compression).To(Equal("on"))
+			// Without the vdagent channel there is no client-side mouse, no clipboard
+			// and no automatic resize.
+			Expect(domain.Spec.Devices.Channels).To(ContainElement(gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
+				"Type": Equal("spicevmc"),
+			})))
+		},
+			MultiArchEntry(""),
+		)
 	})
 
 	Context("HyperV", func() {
