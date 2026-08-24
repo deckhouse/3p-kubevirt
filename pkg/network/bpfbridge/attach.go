@@ -73,18 +73,18 @@ func Attach(objPath, tapName, podName string) error {
 	}
 
 	// Rewrite .rodata-backed TAP_IFINDEX / POD_IFINDEX BEFORE the collection is
-	// uploaded to the kernel. RewriteConstants finds every map whose name starts
-	// with ".rodata", resolves the named symbols through BTF and patches the raw
-	// bytes of the map's initial contents. From the verifier's point of view the
-	// values then look like immediates, so the unused redirect branch is dead-code
-	// eliminated and the fast path is two cmp+jmp instructions plus the redirect.
+	// uploaded to the kernel: the variable specs resolve the named symbols through
+	// BTF and patch the raw bytes of the backing map's initial contents. From the
+	// verifier's point of view the values then look like immediates, so the unused
+	// redirect branch is dead-code eliminated and the fast path is two cmp+jmp
+	// instructions plus the redirect.
 	tapIdx := uint32(tap.Attrs().Index)
 	podIdx := uint32(pod.Attrs().Index)
-	if err := spec.RewriteConstants(map[string]interface{}{
-		"TAP_IFINDEX": tapIdx,
-		"POD_IFINDEX": podIdx,
-	}); err != nil {
-		return fmt.Errorf("rewrite BPF constants (tap=%d pod=%d): %w", tapIdx, podIdx, err)
+	if err := setConstant(spec, "TAP_IFINDEX", tapIdx); err != nil {
+		return err
+	}
+	if err := setConstant(spec, "POD_IFINDEX", podIdx); err != nil {
+		return err
 	}
 
 	coll, err := ebpf.NewCollection(spec)
@@ -108,6 +108,20 @@ func Attach(objPath, tapName, podName string) error {
 		if err := replaceIngressBPF(dev, prog); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func setConstant(spec *ebpf.CollectionSpec, name string, value uint32) error {
+	v, ok := spec.Variables[name]
+	if !ok {
+		return fmt.Errorf("BPF object missing %s constant", name)
+	}
+	if !v.Constant() {
+		return fmt.Errorf("BPF variable %s is not a constant", name)
+	}
+	if err := v.Set(value); err != nil {
+		return fmt.Errorf("rewrite BPF constant %s=%d: %w", name, value, err)
 	}
 	return nil
 }
