@@ -162,6 +162,15 @@ func NewController(templateService services.TemplateService,
 		return nil, err
 	}
 
+	_, err = nodeInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc:    c.onNodeAddOrDelete,
+		UpdateFunc: c.updateNode,
+		DeleteFunc: c.onNodeAddOrDelete,
+	})
+	if err != nil {
+		return nil, err
+	}
+
 	return c, nil
 }
 
@@ -464,6 +473,41 @@ func (c *Controller) deleteResourceQuota(obj interface{}) {
 		}
 	}
 	return
+}
+
+// When a node is added or deleted, the set of the nodes the running VirtualMachineInstances can be
+// migrated to changes, so they have to be re-evaluated.
+func (c *Controller) onNodeAddOrDelete(obj interface{}) {
+	c.enqueueRunningVirtualMachineInstances()
+}
+
+// When a node is updated, the running VirtualMachineInstances have to be re-evaluated only if the
+// node placement related fields of the node have been changed.
+func (c *Controller) updateNode(old, cur interface{}) {
+	oldNode, ok := old.(*k8sv1.Node)
+	if !ok {
+		return
+	}
+	curNode, ok := cur.(*k8sv1.Node)
+	if !ok {
+		return
+	}
+	if oldNode.Spec.Unschedulable == curNode.Spec.Unschedulable &&
+		equality.Semantic.DeepEqual(oldNode.Labels, curNode.Labels) &&
+		equality.Semantic.DeepEqual(oldNode.Spec.Taints, curNode.Spec.Taints) {
+		return
+	}
+	c.enqueueRunningVirtualMachineInstances()
+}
+
+func (c *Controller) enqueueRunningVirtualMachineInstances() {
+	for _, obj := range c.vmiIndexer.List() {
+		vmi, ok := obj.(*virtv1.VirtualMachineInstance)
+		if !ok || !vmi.IsRunning() {
+			continue
+		}
+		c.enqueueVirtualMachine(vmi)
+	}
 }
 
 // When a pod is deleted, enqueue the vmi that manages the pod and update its podExpectations.

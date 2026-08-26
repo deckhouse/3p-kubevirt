@@ -6,6 +6,7 @@ go_library(
         "datavolumes.go",
         "hotplug.go",
         "lifecycle.go",
+        "migration_target.go",
         "resourceclaim-hotplug.go",
         "storage.go",
         "vmi.go",

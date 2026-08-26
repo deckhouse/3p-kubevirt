@@ -561,6 +561,10 @@ func (c *Controller) updateStatus(vmi *virtv1.VirtualMachineInstance, pod *k8sv1
 			return fmt.Errorf("failed to update condition %s", virtv1.VirtualMachineInstanceNodePlacementNotMatched)
 		}
 
+		if err := c.syncMigrationTargetAvailableCondition(vmiCopy); err != nil {
+			return fmt.Errorf("failed to update condition %s: %w", virtv1.VirtualMachineInstanceMigrationTargetAvailable, err)
+		}
+
 		c.syncMigrationRequiredCondition(vmiCopy)
 
 	case vmi.IsScheduled():
@@ -644,13 +648,17 @@ func (c *Controller) syncNodePlacementCondition(vmi *virtv1.VirtualMachineInstan
 	if err != nil {
 		return fmt.Errorf("failed to render pod manifest: %w", err)
 	}
-	copyPod := pod.DeepCopy()
-	changed, err := c.isChangedNodePlacement(copyPod, templatePod)
-	if err != nil {
-		return fmt.Errorf("could not verify if NodePlacement update is required: %w", err)
-	}
-	if changed {
-		matched, err := c.nodePlacementIsMatched(copyPod, templatePod)
+	if c.isChangedNodePlacement(pod, templatePod) {
+		node, err := c.getNode(pod.Spec.NodeName)
+		if err != nil {
+			return fmt.Errorf("failed to verify if NodePlacement update is matched: %w", err)
+		}
+
+		// Exclude kubevirt.io/schedulable from the matching: it is managed by virt-handler and
+		// reflects the readiness of the node, not the node placement rules of the VirtualMachine.
+		delete(templatePod.Spec.NodeSelector, virtv1.NodeSchedulable)
+
+		matched, err := nodeAffinityIsMatched(node, templatePod)
 		if err != nil {
 			return fmt.Errorf("failed to verify if NodePlacement update is matched: %w", err)
 		}
@@ -662,64 +670,60 @@ func (c *Controller) syncNodePlacementCondition(vmi *virtv1.VirtualMachineInstan
 	return nil
 }
 
-func (c *Controller) isChangedNodePlacement(pod, templatePod *k8sv1.Pod) (bool, error) {
-	if pod == nil || templatePod == nil {
-		return false, nil
+// getNode returns the node with the given name from the node cache.
+func (c *Controller) getNode(name string) (*k8sv1.Node, error) {
+	obj, exists, err := c.nodeIndexer.GetByKey(name)
+	if err != nil {
+		return nil, err
 	}
-
-	// when migration controller creating target pod. It will be created with PodAntiAffinity
-	{
-		var antiAffinityTerm *k8sv1.PodAffinityTerm
-
-		if pod.Spec.Affinity != nil &&
-			pod.Spec.Affinity.PodAntiAffinity != nil &&
-			len(pod.Spec.Affinity.PodAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution) > 0 {
-			for _, rd := range pod.Spec.Affinity.PodAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution {
-				if rd.LabelSelector != nil {
-					if _, found := rd.LabelSelector.MatchLabels[virtv1.CreatedByLabel]; found {
-						antiAffinityTerm = rd.DeepCopy()
-					}
-				}
-			}
-		}
-		if antiAffinityTerm != nil {
-			antiAffinityRule := &k8sv1.PodAntiAffinity{
-				RequiredDuringSchedulingIgnoredDuringExecution: []k8sv1.PodAffinityTerm{*antiAffinityTerm},
-			}
-			if templatePod.Spec.Affinity == nil {
-				templatePod.Spec.Affinity = &k8sv1.Affinity{
-					PodAntiAffinity: antiAffinityRule,
-				}
-			} else if templatePod.Spec.Affinity.PodAntiAffinity == nil {
-				templatePod.Spec.Affinity.PodAntiAffinity = antiAffinityRule
-			} else {
-				templatePod.Spec.Affinity.PodAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution = append(templatePod.Spec.Affinity.PodAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution, *antiAffinityTerm)
-			}
-		}
+	if !exists {
+		return nil, fmt.Errorf("not found node %s", name)
 	}
-
-	// Exclude kubevirt.io/schedulable from NodeSelector comparison - it is added by the
-	// cluster for scheduling and should not affect NodePlacement condition.
-	delete(pod.Spec.NodeSelector, virtv1.NodeSchedulable)
-	delete(templatePod.Spec.NodeSelector, virtv1.NodeSchedulable)
-
-	return !equality.Semantic.DeepEqual(pod.Spec.NodeSelector, templatePod.Spec.NodeSelector) ||
-		!equality.Semantic.DeepEqual(pod.Spec.Affinity, templatePod.Spec.Affinity), nil
+	node, ok := obj.(*k8sv1.Node)
+	if !ok {
+		return nil, fmt.Errorf("unexpected object type %T in the node cache", obj)
+	}
+	return node, nil
 }
 
-func (c *Controller) nodePlacementIsMatched(pod, templatePod *k8sv1.Pod) (bool, error) {
+// isChangedNodePlacement reports whether the node placement rules of the VirtualMachineInstance
+// have been changed after its Pod had been scheduled.
+//
+// Only the node level rules are compared. Pod affinity rules are always
+// requiredDuringSchedulingIgnoredDuringExecution, so Pods scheduled to the same node afterwards
+// must not affect an already running VirtualMachineInstance.
+func (c *Controller) isChangedNodePlacement(pod, templatePod *k8sv1.Pod) bool {
 	if pod == nil || templatePod == nil {
-		return false, fmt.Errorf("pod or templatePod must not be nil")
+		return false
 	}
-	templatePod.Namespace = pod.Namespace
-	templatePod.Name = pod.Name
-	obj, exist, err := c.nodeIndexer.GetByKey(pod.Spec.NodeName)
-	if err != nil {
-		return false, err
+
+	return !equality.Semantic.DeepEqual(nodeSelectorOf(pod), nodeSelectorOf(templatePod)) ||
+		!equality.Semantic.DeepEqual(nodeAffinityOf(pod), nodeAffinityOf(templatePod))
+}
+
+// nodeSelectorOf returns the node selector of the Pod without kubevirt.io/schedulable: it is added
+// by the cluster for scheduling and should not affect the NodePlacement condition.
+func nodeSelectorOf(pod *k8sv1.Pod) map[string]string {
+	nodeSelector := maps.Clone(pod.Spec.NodeSelector)
+	delete(nodeSelector, virtv1.NodeSchedulable)
+	if len(nodeSelector) == 0 {
+		return nil
 	}
-	node := obj.(*k8sv1.Node)
-	if !exist || node == nil {
-		return false, fmt.Errorf("not found node %s", pod.Spec.NodeName)
+	return nodeSelector
+}
+
+func nodeAffinityOf(pod *k8sv1.Pod) *k8sv1.NodeAffinity {
+	if pod.Spec.Affinity == nil {
+		return nil
+	}
+	return pod.Spec.Affinity.NodeAffinity
+}
+
+// nodeAffinityIsMatched reports whether the node satisfies the required node selector and the
+// required node affinity of the template Pod.
+func nodeAffinityIsMatched(node *k8sv1.Node, templatePod *k8sv1.Pod) (bool, error) {
+	if node == nil || templatePod == nil {
+		return false, fmt.Errorf("node or templatePod must not be nil")
 	}
 
 	requiredNodeSelectorAndAffinity := affinity.GetRequiredNodeAffinity(templatePod)
@@ -727,11 +731,30 @@ func (c *Controller) nodePlacementIsMatched(pod, templatePod *k8sv1.Pod) (bool, 
 	if err != nil {
 		return false, fmt.Errorf("failed to match required node selector and affinity: %w", err)
 	}
-	if !match {
-		return false, nil
+	return match, nil
+}
+
+// podAffinityIsMatched reports whether the Pods running on the node satisfy the required Pod
+// affinity and the required Pod anti-affinity of the template Pod. Pods with the given UIDs are
+// not taken into account.
+func (c *Controller) podAffinityIsMatched(nodeName string, templatePod *k8sv1.Pod, excludeUIDs ...types.UID) (bool, error) {
+	if templatePod == nil {
+		return false, fmt.Errorf("templatePod must not be nil")
 	}
 
-	pods, err := c.listPodsByNode(pod.Spec.NodeName)
+	podAffinityTerms, err := affinity.GetAffinityTerms(templatePod, affinity.GetPodAffinityTerms(templatePod.Spec.Affinity))
+	if err != nil {
+		return false, err
+	}
+	podAntiAffinityTerms, err := affinity.GetAffinityTerms(templatePod, affinity.GetPodAntiAffinityTerms(templatePod.Spec.Affinity))
+	if err != nil {
+		return false, err
+	}
+	if len(podAffinityTerms) == 0 && len(podAntiAffinityTerms) == 0 {
+		return true, nil
+	}
+
+	pods, err := c.listPodsByNode(nodeName)
 	if err != nil {
 		return false, err
 	}
@@ -743,27 +766,26 @@ func (c *Controller) nodePlacementIsMatched(pod, templatePod *k8sv1.Pod) (bool, 
 	allNamespaces := c.namespaceIndexer.List()
 	namespaceLabels := make(map[string]labels.Set, len(podNamespaces))
 	for _, o := range allNamespaces {
-		ns := o.(*k8sv1.Namespace)
+		ns, ok := o.(*k8sv1.Namespace)
+		if !ok {
+			continue
+		}
 		if _, ok := podNamespaces[ns.GetName()]; ok {
 			namespaceLabels[ns.GetName()] = ns.GetLabels()
 		}
 	}
 
-	podAffinityTerms, err := affinity.GetAffinityTerms(templatePod, affinity.GetPodAffinityTerms(templatePod.Spec.Affinity))
-	if err != nil {
-		return false, err
-	}
-	podAntiAffinityTerms, err := affinity.GetAffinityTerms(templatePod, affinity.GetPodAntiAffinityTerms(templatePod.Spec.Affinity))
-	if err != nil {
-		return false, err
+	excluded := make(map[types.UID]struct{}, len(excludeUIDs))
+	for _, uid := range excludeUIDs {
+		excluded[uid] = struct{}{}
 	}
 
-	var (
-		podMatchedByPodAffinityFound bool
-	)
+	// The Pod affinity is satisfied when at least one Pod on the node matches its terms. When no
+	// terms are defined, there is nothing to satisfy.
+	podMatchedByPodAffinityFound := len(podAffinityTerms) == 0
 
 	for _, p := range pods {
-		if p.GetUID() == pod.GetUID() {
+		if _, ok := excluded[p.GetUID()]; ok {
 			continue
 		}
 		if p.Status.Phase == k8sv1.PodSucceeded || p.Status.Phase == k8sv1.PodFailed {

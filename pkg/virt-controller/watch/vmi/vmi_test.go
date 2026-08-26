@@ -4082,6 +4082,372 @@ var _ = Describe("VirtualMachineInstance watcher", func() {
 		)
 	})
 
+	Context("NodePlacement condition", func() {
+		nodePlacementCondition := func(status k8sv1.ConditionStatus) gomegaTypes.GomegaMatcher {
+			return ContainElement(MatchFields(IgnoreExtras, Fields{
+				"Type":   Equal(virtv1.VirtualMachineInstanceNodePlacementNotMatched),
+				"Status": Equal(status),
+			}))
+		}
+
+		podAffinityTerm := func(key string) []k8sv1.PodAffinityTerm {
+			return []k8sv1.PodAffinityTerm{{
+				LabelSelector: &metav1.LabelSelector{MatchLabels: map[string]string{key: "true"}},
+				TopologyKey:   k8sv1.LabelHostname,
+			}}
+		}
+
+		nodeAffinity := func(key string) *k8sv1.Affinity {
+			return &k8sv1.Affinity{
+				NodeAffinity: &k8sv1.NodeAffinity{
+					RequiredDuringSchedulingIgnoredDuringExecution: &k8sv1.NodeSelector{
+						NodeSelectorTerms: []k8sv1.NodeSelectorTerm{{
+							MatchExpressions: []k8sv1.NodeSelectorRequirement{{
+								Key:      key,
+								Operator: k8sv1.NodeSelectorOpExists,
+							}},
+						}},
+					},
+				},
+			}
+		}
+
+		DescribeTable("should sync the condition", func(mutateVMI func(*virtv1.VirtualMachineInstance), mutatePod func(*k8sv1.Pod), nodeLabels map[string]string, expectedStatus k8sv1.ConditionStatus) {
+			vmi := newPendingVirtualMachine("testvmi")
+			vmi.Status.Phase = virtv1.Running
+			mutateVMI(vmi)
+
+			pod := newPodForVirtualMachine(vmi, k8sv1.PodRunning)
+			mutatePod(pod)
+
+			addActivePods(vmi, pod.UID, "")
+			addVirtualMachine(vmi)
+			addPod(pod)
+
+			node := NewNodeForPod(pod)
+			node.Labels = nodeLabels
+			Expect(nodeInformer.GetIndexer().Add(node)).To(Succeed())
+
+			sanityExecute()
+
+			expectVMIWithMatcherConditions(vmi.Namespace, vmi.Name, nodePlacementCondition(expectedStatus))
+		},
+			Entry("to False when the node placement is not changed",
+				func(vmi *virtv1.VirtualMachineInstance) {},
+				func(pod *k8sv1.Pod) {},
+				nil,
+				k8sv1.ConditionFalse,
+			),
+			Entry("to False when only kubevirt.io/schedulable differs and the node is not labeled",
+				func(vmi *virtv1.VirtualMachineInstance) {},
+				func(pod *k8sv1.Pod) {
+					pod.Spec.NodeSelector = map[string]string{virtv1.NodeSchedulable: "true"}
+				},
+				nil,
+				k8sv1.ConditionFalse,
+			),
+			Entry("to True when the node does not match the new node selector",
+				func(vmi *virtv1.VirtualMachineInstance) {
+					vmi.Spec.NodeSelector = map[string]string{"zone": "a"}
+				},
+				func(pod *k8sv1.Pod) {},
+				map[string]string{"zone": "b"},
+				k8sv1.ConditionTrue,
+			),
+			Entry("to False when the node matches the new node selector",
+				func(vmi *virtv1.VirtualMachineInstance) {
+					vmi.Spec.NodeSelector = map[string]string{"zone": "a"}
+				},
+				func(pod *k8sv1.Pod) {},
+				map[string]string{"zone": "a"},
+				k8sv1.ConditionFalse,
+			),
+			Entry("to True when the node does not match the new node affinity",
+				func(vmi *virtv1.VirtualMachineInstance) {
+					vmi.Spec.Affinity = nodeAffinity("gpu")
+				},
+				func(pod *k8sv1.Pod) {},
+				nil,
+				k8sv1.ConditionTrue,
+			),
+			Entry("to False when the node matches the new node affinity",
+				func(vmi *virtv1.VirtualMachineInstance) {
+					vmi.Spec.Affinity = nodeAffinity("gpu")
+				},
+				func(pod *k8sv1.Pod) {},
+				map[string]string{"gpu": "nvidia"},
+				k8sv1.ConditionFalse,
+			),
+			Entry("to False when only the pod affinity is changed",
+				func(vmi *virtv1.VirtualMachineInstance) {
+					vmi.Spec.Affinity = &k8sv1.Affinity{
+						PodAffinity: &k8sv1.PodAffinity{
+							RequiredDuringSchedulingIgnoredDuringExecution: podAffinityTerm("app"),
+						},
+					}
+				},
+				func(pod *k8sv1.Pod) {},
+				nil,
+				k8sv1.ConditionFalse,
+			),
+			Entry("to False when only the pod anti-affinity is changed",
+				func(vmi *virtv1.VirtualMachineInstance) {
+					vmi.Spec.Affinity = &k8sv1.Affinity{
+						PodAntiAffinity: &k8sv1.PodAntiAffinity{
+							RequiredDuringSchedulingIgnoredDuringExecution: podAffinityTerm("app"),
+						},
+					}
+				},
+				func(pod *k8sv1.Pod) {},
+				nil,
+				k8sv1.ConditionFalse,
+			),
+		)
+	})
+
+	Context("MigrationTargetAvailable condition", func() {
+		const targetNodeName = "node-02"
+
+		availableMatcher := ContainElement(MatchFields(IgnoreExtras, Fields{
+			"Type":   Equal(virtv1.VirtualMachineInstanceMigrationTargetAvailable),
+			"Status": Equal(k8sv1.ConditionTrue),
+			"Reason": Equal(virtv1.VirtualMachineInstanceReasonMigrationTargetAvailable),
+		}))
+
+		notAvailableMatcher := func(message string) gomegaTypes.GomegaMatcher {
+			return ContainElement(MatchFields(IgnoreExtras, Fields{
+				"Type":    Equal(virtv1.VirtualMachineInstanceMigrationTargetAvailable),
+				"Status":  Equal(k8sv1.ConditionFalse),
+				"Reason":  Equal(virtv1.VirtualMachineInstanceReasonNoMigrationTarget),
+				"Message": Equal(message),
+			}))
+		}
+
+		noConditionMatcher := Not(ContainElement(MatchFields(IgnoreExtras, Fields{
+			"Type": Equal(virtv1.VirtualMachineInstanceMigrationTargetAvailable),
+		})))
+
+		schedulableNode := func(name string) *k8sv1.Node {
+			return &k8sv1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:   name,
+					Labels: map[string]string{virtv1.NodeSchedulable: "true"},
+				},
+			}
+		}
+
+		podOnNode := func(name, nodeName string, labels map[string]string) *k8sv1.Pod {
+			return &k8sv1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      name,
+					Namespace: k8sv1.NamespaceDefault,
+					UID:       types.UID(name),
+					Labels:    labels,
+				},
+				Spec:   k8sv1.PodSpec{NodeName: nodeName},
+				Status: k8sv1.PodStatus{Phase: k8sv1.PodRunning},
+			}
+		}
+
+		DescribeTable("should sync the condition", func(mutateVMI func(*virtv1.VirtualMachineInstance), targetNode *k8sv1.Node, podsOnTargetNode []*k8sv1.Pod, matcher gomegaTypes.GomegaMatcher) {
+			vmi := newPendingVirtualMachine("testvmi")
+			vmi.Status.Phase = virtv1.Running
+			mutateVMI(vmi)
+
+			pod := newPodForVirtualMachine(vmi, k8sv1.PodRunning)
+			vmi.Status.NodeName = pod.Spec.NodeName
+
+			addActivePods(vmi, pod.UID, pod.Spec.NodeName)
+			addVirtualMachine(vmi)
+			addPod(pod)
+
+			// The node of the VirtualMachineInstance is schedulable, otherwise it would not run on it.
+			Expect(nodeInformer.GetIndexer().Add(schedulableNode(pod.Spec.NodeName))).To(Succeed())
+			if targetNode != nil {
+				Expect(nodeInformer.GetIndexer().Add(targetNode)).To(Succeed())
+			}
+			for _, p := range podsOnTargetNode {
+				Expect(controller.podIndexer.Add(p)).To(Succeed())
+			}
+
+			sanityExecute()
+
+			expectVMIWithMatcherConditions(vmi.Namespace, vmi.Name, matcher)
+		},
+			Entry("to True when another schedulable node exists",
+				func(vmi *virtv1.VirtualMachineInstance) {},
+				schedulableNode(targetNodeName),
+				nil,
+				availableMatcher,
+			),
+			Entry("to False when the VirtualMachineInstance occupies the only node",
+				func(vmi *virtv1.VirtualMachineInstance) {},
+				nil,
+				nil,
+				notAvailableMatcher(noNodeMatchesPlacementMessage),
+			),
+			Entry("to False when the only other node is not marked as schedulable",
+				func(vmi *virtv1.VirtualMachineInstance) {},
+				&k8sv1.Node{ObjectMeta: metav1.ObjectMeta{Name: targetNodeName}},
+				nil,
+				notAvailableMatcher(noNodeMatchesPlacementMessage),
+			),
+			Entry("to False when the only other node is cordoned",
+				func(vmi *virtv1.VirtualMachineInstance) {},
+				func() *k8sv1.Node {
+					node := schedulableNode(targetNodeName)
+					node.Spec.Unschedulable = true
+					return node
+				}(),
+				nil,
+				notAvailableMatcher(noNodeMatchesPlacementMessage),
+			),
+			Entry("to False when the only other node has a taint which is not tolerated",
+				func(vmi *virtv1.VirtualMachineInstance) {},
+				func() *k8sv1.Node {
+					node := schedulableNode(targetNodeName)
+					node.Spec.Taints = []k8sv1.Taint{{Key: "dedicated", Value: "db", Effect: k8sv1.TaintEffectNoSchedule}}
+					return node
+				}(),
+				nil,
+				notAvailableMatcher(noNodeMatchesPlacementMessage),
+			),
+			Entry("to True when the taint of the only other node is tolerated",
+				func(vmi *virtv1.VirtualMachineInstance) {
+					vmi.Spec.Tolerations = []k8sv1.Toleration{{
+						Key:      "dedicated",
+						Operator: k8sv1.TolerationOpEqual,
+						Value:    "db",
+						Effect:   k8sv1.TaintEffectNoSchedule,
+					}}
+				},
+				func() *k8sv1.Node {
+					node := schedulableNode(targetNodeName)
+					node.Spec.Taints = []k8sv1.Taint{{Key: "dedicated", Value: "db", Effect: k8sv1.TaintEffectNoSchedule}}
+					return node
+				}(),
+				nil,
+				availableMatcher,
+			),
+			Entry("to False when the only other node does not match the node selector",
+				func(vmi *virtv1.VirtualMachineInstance) {
+					vmi.Spec.NodeSelector = map[string]string{"zone": "a"}
+				},
+				schedulableNode(targetNodeName),
+				nil,
+				notAvailableMatcher(noNodeMatchesPlacementMessage),
+			),
+			Entry("to True when the only other node matches the node selector",
+				func(vmi *virtv1.VirtualMachineInstance) {
+					vmi.Spec.NodeSelector = map[string]string{"zone": "a"}
+				},
+				func() *k8sv1.Node {
+					node := schedulableNode(targetNodeName)
+					node.Labels["zone"] = "a"
+					return node
+				}(),
+				nil,
+				availableMatcher,
+			),
+			Entry("to False when the pod anti-affinity rejects the only other node",
+				func(vmi *virtv1.VirtualMachineInstance) {
+					vmi.Spec.Affinity = &k8sv1.Affinity{
+						PodAntiAffinity: &k8sv1.PodAntiAffinity{
+							RequiredDuringSchedulingIgnoredDuringExecution: []k8sv1.PodAffinityTerm{{
+								LabelSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "db"}},
+								TopologyKey:   k8sv1.LabelHostname,
+							}},
+						},
+					}
+				},
+				schedulableNode(targetNodeName),
+				[]*k8sv1.Pod{podOnNode("db-pod", targetNodeName, map[string]string{"app": "db"})},
+				notAvailableMatcher(noNodeMatchesPodAffinityMessage),
+			),
+			Entry("to True when the pod anti-affinity does not reject the only other node",
+				func(vmi *virtv1.VirtualMachineInstance) {
+					vmi.Spec.Affinity = &k8sv1.Affinity{
+						PodAntiAffinity: &k8sv1.PodAntiAffinity{
+							RequiredDuringSchedulingIgnoredDuringExecution: []k8sv1.PodAffinityTerm{{
+								LabelSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "db"}},
+								TopologyKey:   k8sv1.LabelHostname,
+							}},
+						},
+					}
+				},
+				schedulableNode(targetNodeName),
+				[]*k8sv1.Pod{podOnNode("web-pod", targetNodeName, map[string]string{"app": "web"})},
+				availableMatcher,
+			),
+			Entry("to False when the pod affinity is not satisfied on the only other node",
+				func(vmi *virtv1.VirtualMachineInstance) {
+					vmi.Spec.Affinity = &k8sv1.Affinity{
+						PodAffinity: &k8sv1.PodAffinity{
+							RequiredDuringSchedulingIgnoredDuringExecution: []k8sv1.PodAffinityTerm{{
+								LabelSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "db"}},
+								TopologyKey:   k8sv1.LabelHostname,
+							}},
+						},
+					}
+				},
+				schedulableNode(targetNodeName),
+				nil,
+				notAvailableMatcher(noNodeMatchesPodAffinityMessage),
+			),
+			Entry("to True when the pod affinity is satisfied on the only other node",
+				func(vmi *virtv1.VirtualMachineInstance) {
+					vmi.Spec.Affinity = &k8sv1.Affinity{
+						PodAffinity: &k8sv1.PodAffinity{
+							RequiredDuringSchedulingIgnoredDuringExecution: []k8sv1.PodAffinityTerm{{
+								LabelSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "db"}},
+								TopologyKey:   k8sv1.LabelHostname,
+							}},
+						},
+					}
+				},
+				schedulableNode(targetNodeName),
+				[]*k8sv1.Pod{podOnNode("db-pod", targetNodeName, map[string]string{"app": "db"})},
+				availableMatcher,
+			),
+			Entry("should not be set while the VirtualMachineInstance is migrating",
+				func(vmi *virtv1.VirtualMachineInstance) {
+					vmi.Status.MigrationState = &virtv1.VirtualMachineInstanceMigrationState{
+						StartTimestamp: pointer.P(metav1.NewTime(time.Now().Add(-time.Minute))),
+					}
+				},
+				nil,
+				nil,
+				noConditionMatcher,
+			),
+		)
+
+		It("should be True when a pod of the VirtualMachineInstance still occupies the other node", func() {
+			vmi := newPendingVirtualMachine("testvmi")
+			vmi.Status.Phase = virtv1.Running
+
+			pod := newPodForVirtualMachine(vmi, k8sv1.PodRunning)
+			vmi.Status.NodeName = pod.Spec.NodeName
+
+			// Around a migration the VirtualMachineInstance owns a pod on the node it runs on and a
+			// pod on the other side of the migration, and one of them outlives the migration itself.
+			otherPod := newPodForVirtualMachine(vmi, k8sv1.PodRunning)
+			otherPod.Name = "test-migration"
+			otherPod.UID = "virt-launch-uid-migration"
+			otherPod.Spec.NodeName = targetNodeName
+
+			addVirtualMachine(vmi)
+			addPod(pod)
+			addPod(otherPod)
+
+			Expect(nodeInformer.GetIndexer().Add(schedulableNode(pod.Spec.NodeName))).To(Succeed())
+			Expect(nodeInformer.GetIndexer().Add(schedulableNode(targetNodeName))).To(Succeed())
+
+			sanityExecute()
+
+			expectVMIWithMatcherConditions(vmi.Namespace, vmi.Name, availableMatcher)
+		})
+	})
+
 	Context("Automatic Migration Requirement", func() {
 		noConditionMatcher := Not(ContainElement(MatchFields(IgnoreExtras,
 			Fields{
