@@ -5,6 +5,7 @@ go_library(
     srcs = [
         "nodeaffinity.go",
         "podaffinity.go",
+        "taints.go",
     ],
     importpath = "kubevirt.io/kubevirt/pkg/util/affinity",
     visibility = ["//visibility:public"],

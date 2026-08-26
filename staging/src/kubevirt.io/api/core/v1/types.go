@@ -884,6 +884,10 @@ const (
 	// Indicates that the VMI has affinity or nodeSelector changes
 	VirtualMachineInstanceNodePlacementNotMatched VirtualMachineInstanceConditionType = "NodePlacementNotMatched"
 
+	// Indicates whether the cluster has a node the VMI can be migrated to according to the node
+	// placement rules of the VirtualMachine
+	VirtualMachineInstanceMigrationTargetAvailable VirtualMachineInstanceConditionType = "MigrationTargetAvailable"
+
 	// Indicates that the VMI domain shut off before the guest OS could boot,
 	// typically caused by the absence of a bootable device.
 	VirtualMachineInstanceBootFailed VirtualMachineInstanceConditionType = "BootFailed"
@@ -920,6 +924,11 @@ const (
 	VirtualMachineInstanceReasonPRNotMigratable = "PersistentReservationNotLiveMigratable"
 	// Reason means that VMI is not decentralized live migratable, the reason is specified in the condition message
 	VirtualMachineInstanceReasonDecentralizedNotMigratable = "DecentralizedNotLiveMigratable"
+	// Reason means that VMI is not live migratable because no node in the cluster matches the node
+	// placement rules of the VirtualMachine
+	VirtualMachineInstanceReasonNoMigrationTarget = "NoMigrationTargetAvailable"
+	// Reason means that the cluster has a node the VMI can be migrated to
+	VirtualMachineInstanceReasonMigrationTargetAvailable = "MigrationTargetAvailable"
 	// Reason means that not all of the VMI's DVs are ready
 	VirtualMachineInstanceReasonNotAllDVsReady = "NotAllDVsReady"
 	// Reason means that all of the VMI's DVs are bound and ready
