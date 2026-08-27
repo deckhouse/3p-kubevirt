@@ -23,12 +23,21 @@ import (
 // ToleratesNodeTaints reports whether the tolerations of the pod tolerate all the taints of the
 // node which prevent the pod from being scheduled to it.
 func ToleratesNodeTaints(node *v1.Node, pod *v1.Pod) bool {
-	if node == nil || pod == nil {
+	if node == nil {
+		return false
+	}
+	return ToleratesTaints(node.Spec.Taints, pod)
+}
+
+// ToleratesTaints reports whether the tolerations of the pod tolerate all the given taints which
+// prevent the pod from being scheduled.
+func ToleratesTaints(taints []v1.Taint, pod *v1.Pod) bool {
+	if pod == nil {
 		return false
 	}
 
-	for i := range node.Spec.Taints {
-		taint := &node.Spec.Taints[i]
+	for i := range taints {
+		taint := &taints[i]
 		if taint.Effect != v1.TaintEffectNoSchedule && taint.Effect != v1.TaintEffectNoExecute {
 			continue
 		}
