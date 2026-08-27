@@ -857,6 +857,9 @@ const (
 	VirtualMachineInstanceReasonNoMigrationTarget = "NoMigrationTargetAvailable"
 	// Reason means that the cluster has a node the VMI can be migrated to
 	VirtualMachineInstanceReasonMigrationTargetAvailable = "MigrationTargetAvailable"
+	// Reason means that the nodes matching the node placement rules of the VirtualMachine are not
+	// available at the moment: they are excluded from scheduling or do not run the virtualization
+	VirtualMachineInstanceReasonMigrationTargetUnavailable = "MigrationTargetUnavailable"
 	// Reason means that not all of the VMI's DVs are ready
 	VirtualMachineInstanceReasonNotAllDVsReady = "NotAllDVsReady"
 	// Reason means that all of the VMI's DVs are bound and ready

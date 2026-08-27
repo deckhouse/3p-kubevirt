@@ -4223,6 +4223,15 @@ var _ = Describe("VirtualMachineInstance watcher", func() {
 			}))
 		}
 
+		// A node that fits the VirtualMachine but cannot take a pod right now is reported apart from
+		// a cluster that has no fitting node at all: the first state clears up on its own.
+		unavailableMatcher := ContainElement(MatchFields(IgnoreExtras, Fields{
+			"Type":    Equal(virtv1.VirtualMachineInstanceMigrationTargetAvailable),
+			"Status":  Equal(k8sv1.ConditionFalse),
+			"Reason":  Equal(virtv1.VirtualMachineInstanceReasonMigrationTargetUnavailable),
+			"Message": Equal(noNodeAvailableMessage),
+		}))
+
 		noConditionMatcher := Not(ContainElement(MatchFields(IgnoreExtras, Fields{
 			"Type": Equal(virtv1.VirtualMachineInstanceMigrationTargetAvailable),
 		})))
@@ -4286,14 +4295,47 @@ var _ = Describe("VirtualMachineInstance watcher", func() {
 				nil,
 				notAvailableMatcher(noNodeMatchesPlacementMessage),
 			),
-			Entry("to False when the only other node is not marked as schedulable",
+			Entry("to False with the unavailable reason when the only other node is not marked as schedulable",
 				func(vmi *virtv1.VirtualMachineInstance) {},
 				&k8sv1.Node{ObjectMeta: metav1.ObjectMeta{Name: targetNodeName}},
 				nil,
-				notAvailableMatcher(noNodeMatchesPlacementMessage),
+				unavailableMatcher,
 			),
-			Entry("to False when the only other node is cordoned",
+			Entry("to False with the unavailable reason when the only other node is cordoned",
 				func(vmi *virtv1.VirtualMachineInstance) {},
+				func() *k8sv1.Node {
+					node := schedulableNode(targetNodeName)
+					node.Spec.Unschedulable = true
+					return node
+				}(),
+				nil,
+				unavailableMatcher,
+			),
+			Entry("to False with the unavailable reason when the only other node is tainted by its own condition",
+				func(vmi *virtv1.VirtualMachineInstance) {},
+				func() *k8sv1.Node {
+					node := schedulableNode(targetNodeName)
+					node.Spec.Taints = []k8sv1.Taint{{Key: k8sv1.TaintNodeNotReady, Effect: k8sv1.TaintEffectNoSchedule}}
+					return node
+				}(),
+				nil,
+				unavailableMatcher,
+			),
+			Entry("to False with the unavailable reason when the only other node is being deleted",
+				func(vmi *virtv1.VirtualMachineInstance) {},
+				func() *k8sv1.Node {
+					node := schedulableNode(targetNodeName)
+					now := metav1.Now()
+					node.DeletionTimestamp = &now
+					return node
+				}(),
+				nil,
+				unavailableMatcher,
+			),
+			Entry("to False with the no target reason when the cordoned node does not match the node selector either",
+				func(vmi *virtv1.VirtualMachineInstance) {
+					vmi.Spec.NodeSelector = map[string]string{"zone": "a"}
+				},
 				func() *k8sv1.Node {
 					node := schedulableNode(targetNodeName)
 					node.Spec.Unschedulable = true
