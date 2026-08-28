@@ -255,7 +255,10 @@ func (c *Controller) updateVolumeStatus(vmi *virtv1.VirtualMachineInstance, virt
 				// causing the new volume to inherit HotplugVolumeDetaching status from the previous
 				// hotplug instead of being reset. We reset the phase based on PVC status so it can
 				// properly transition through the normal attach flow on the next reconcile.
-				if status.Phase == virtv1.HotplugVolumeDetaching {
+				// The same applies to HotplugVolumeUnMounted: virt-handler sets it while the
+				// volume is out of the spec, and a re-add can land before this controller
+				// converts it to HotplugVolumeDetaching.
+				if status.Phase == virtv1.HotplugVolumeDetaching || status.Phase == virtv1.HotplugVolumeUnMounted {
 					phase, reason, message := c.getVolumePhaseMessageReason(&volume, vmi.Namespace)
 					status.Phase = phase
 					log.Log.V(3).Infof("Setting phase %s for volume %s", phase, volume.Name)

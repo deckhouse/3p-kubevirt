@@ -3125,6 +3125,10 @@ var _ = Describe("VirtualMachineInstance watcher", func() {
 			return makeVolumeStatusesForUpdateWithMessage("test-pod", "abcd", virtv1.HotplugVolumeDetaching, "Deleted hotplug attachment pod test-pod, for volume%d", kvcontroller.SuccessfulDeletePodReason, indexes...)
 		}
 
+		makeUnmountedVolumeStatus := func(indexes ...int) []virtv1.VolumeStatus {
+			return makeVolumeStatusesForUpdateWithMessage("test-pod", "abcd", virtv1.HotplugVolumeUnMounted, "Volume volume%d has been unmounted from virt-launcher pod", "VolumeUnMountedFromPod", indexes...)
+		}
+
 		DescribeTable("updateVolumeStatus", func(oldStatus []virtv1.VolumeStatus, specVolumes []*virtv1.Volume, podIndexes []int, pvcIndexes []int, expectedStatus []virtv1.VolumeStatus, expectedEvents []string) {
 			vmi := newPendingVirtualMachine("testvmi")
 			volumes := make([]virtv1.Volume, 0)
@@ -3187,6 +3191,13 @@ var _ = Describe("VirtualMachineInstance watcher", func() {
 				[]string{kvcontroller.SuccessfulDeletePodReason}),
 			Entry("should update volume status, if volume gets stuck in Detaching state due to it being removed and re-added",
 				makeDetachVolumeStatus(0),
+				makeVolumes(0),
+				[]int{0},
+				[]int{0},
+				makeVolumeStatusesForUpdateWithMessage("test-pod", "abcd", virtv1.VolumeBound, "PVC is in phase Bound", kvcontroller.PVCNotReadyReason, 0),
+				[]string{}),
+			Entry("should update volume status, if volume gets stuck in UnMountedFromPod state due to it being removed and re-added",
+				makeUnmountedVolumeStatus(0),
 				makeVolumes(0),
 				[]int{0},
 				[]int{0},
