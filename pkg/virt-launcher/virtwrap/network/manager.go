@@ -33,6 +33,7 @@ type domainClient interface {
 	AttachDeviceFlags(xml string, flags libvirt.DomainDeviceModifyFlags) error
 	UpdateDeviceFlags(xml string, flags libvirt.DomainDeviceModifyFlags) error
 	DetachDeviceFlags(xml string, flags libvirt.DomainDeviceModifyFlags) error
+	GetState() (libvirt.DomainState, int, error)
 	Free() error
 }
 
