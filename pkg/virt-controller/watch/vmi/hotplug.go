@@ -118,8 +118,12 @@ func (c *Controller) cleanupAttachmentPods(currentPod *k8sv1.Pod, oldPods []*k8s
 		}
 	}
 
+	inSpecVolumeStatusMap := make(map[string]v1.VolumeStatus)
 	for _, vmiVolume := range vmi.Spec.Volumes {
 		if storagetypes.IsHotplugVolume(&vmiVolume) {
+			if vs, ok := volumeStatusMap[vmiVolume.Name]; ok {
+				inSpecVolumeStatusMap[vmiVolume.Name] = vs
+			}
 			delete(volumeStatusMap, vmiVolume.Name)
 		}
 	}
@@ -159,6 +163,31 @@ func (c *Controller) cleanupAttachmentPods(currentPod *k8sv1.Pod, oldPods []*k8s
 
 		if volumesNotReadyForDelete > 0 {
 			log.Log.Object(vmi).V(3).Infof("Not deleting attachment pod %s, because there are still %d volumes to be unmounted", attachmentPod.Name, volumesNotReadyForDelete)
+			continue
+		}
+
+		// A volume that is still in the VMI spec must never lose its last carrier pod:
+		// an old pod is deletable only once the current pod carries the volume and the
+		// volume is served through it. Otherwise the volume silently disappears from
+		// the guest with no error surfaced anywhere.
+		volumesNotHandedOver := 0
+
+		for _, podVolume := range attachmentPod.Spec.Volumes {
+			volumeStatus, ok := inSpecVolumeStatusMap[podVolume.Name]
+			if !ok {
+				continue
+			}
+			if currentPod == nil ||
+				currentPod.Status.Phase != k8sv1.PodRunning ||
+				!podHasVolume(currentPod, podVolume.Name) ||
+				volumeStatus.HotplugVolume.AttachPodUID != currentPod.UID ||
+				volumeReadyForPodDelete(volumeStatus.Phase) {
+				volumesNotHandedOver++
+			}
+		}
+
+		if volumesNotHandedOver > 0 {
+			log.Log.Object(vmi).V(3).Infof("Not deleting attachment pod %s, because %d of its volumes are not served by the current pod yet", attachmentPod.Name, volumesNotHandedOver)
 			continue
 		}
 
@@ -313,6 +342,15 @@ func (c *Controller) deleteAttachmentPod(vmi *v1.VirtualMachineInstance, attachm
 	}
 	c.recorder.Eventf(vmi, k8sv1.EventTypeNormal, controller.SuccessfulDeletePodReason, "Deleted attachment pod %s", attachmentPod.Name)
 	return nil
+}
+
+func podHasVolume(pod *k8sv1.Pod, volumeName string) bool {
+	for _, podVolume := range pod.Spec.Volumes {
+		if podVolume.Name == volumeName {
+			return true
+		}
+	}
+	return false
 }
 
 func hasPendingPods(pods []*k8sv1.Pod) bool {

@@ -3015,6 +3015,67 @@ var _ = Describe("VirtualMachineInstance watcher", func() {
 			Expect(recorder.Events).To(BeEmpty())
 		})
 
+		makeHotpluggableVolumes := func(indexes ...int) []virtv1.Volume {
+			res := make([]virtv1.Volume, 0)
+			for _, index := range indexes {
+				res = append(res, virtv1.Volume{
+					Name: fmt.Sprintf("volume%d", index),
+					VolumeSource: virtv1.VolumeSource{
+						PersistentVolumeClaim: &virtv1.PersistentVolumeClaimVolumeSource{
+							PersistentVolumeClaimVolumeSource: k8sv1.PersistentVolumeClaimVolumeSource{
+								ClaimName: fmt.Sprintf("claim%d", index),
+							},
+							Hotpluggable: true,
+						},
+					},
+				})
+			}
+			return res
+		}
+
+		DescribeTable("cleanupAttachmentPods with an in-spec volume carried by an old pod", func(statusAttachPodUID string, expectedEvents []string) {
+			vmi := newPendingVirtualMachine("testvmi")
+			vmi.Spec.Volumes = makeHotpluggableVolumes(0)
+			vmi.Status.VolumeStatus = []virtv1.VolumeStatus{{
+				Name:  "volume0",
+				Phase: virtv1.VolumeReady,
+				HotplugVolume: &virtv1.HotplugVolumeStatus{
+					AttachPodName: "old-pod",
+					AttachPodUID:  types.UID(statusAttachPodUID),
+				},
+			}}
+			virtlauncherPod := newPodForVirtualMachine(vmi, k8sv1.PodRunning)
+			addVirtualMachine(vmi)
+			addPod(virtlauncherPod)
+			hotplugVolume := k8sv1.Volume{
+				Name: "volume0",
+				VolumeSource: k8sv1.VolumeSource{
+					PersistentVolumeClaim: &k8sv1.PersistentVolumeClaimVolumeSource{
+						ClaimName: "claim0",
+					},
+				},
+			}
+			oldPod := newPodForVirtlauncher(virtlauncherPod, "old-pod", "old-uid", k8sv1.PodRunning)
+			oldPod.Spec.Volumes = append(oldPod.Spec.Volumes, hotplugVolume)
+			currentPod := newPodForVirtlauncher(virtlauncherPod, "new-pod", "new-uid", k8sv1.PodRunning)
+			currentPod.Spec.Volumes = append(currentPod.Spec.Volumes, hotplugVolume)
+			addPod(oldPod)
+			addPod(currentPod)
+
+			syncError := controller.cleanupAttachmentPods(currentPod, []*k8sv1.Pod{oldPod}, vmi, 1, 0)
+			Expect(syncError).ToNot(HaveOccurred())
+			if len(expectedEvents) == 0 {
+				Expect(recorder.Events).To(BeEmpty())
+			} else {
+				testutils.ExpectEvents(recorder, expectedEvents...)
+			}
+		},
+			Entry("keeps the old pod while the volume is not served by the current pod",
+				"old-uid", []string{}),
+			Entry("deletes the old pod once the volume is served by the current pod",
+				"new-uid", []string{kvcontroller.SuccessfulDeletePodReason}),
+		)
+
 
 		DescribeTable("needsHandleVolumeHotplug", func(hotplugVolumes []*virtv1.Volume, hotplugAttachmentPods []*k8sv1.Pod, expected bool) {
 			res := needsHandleVolumeHotplug(hotplugVolumes, hotplugAttachmentPods)
