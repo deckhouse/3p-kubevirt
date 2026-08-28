@@ -188,6 +188,8 @@ var _ = Describe("VirtualMachineInstance watcher", func() {
 	sanityExecute := func() {}
 
 	BeforeEach(func() {
+		attachmentPodQuietPeriod = 0
+
 		virtClient := kubecli.NewMockKubevirtClient(gomock.NewController(GinkgoT()))
 		virtClientset = kubevirtfake.NewSimpleClientset()
 
@@ -2997,6 +2999,22 @@ var _ = Describe("VirtualMachineInstance watcher", func() {
 				"",
 				nil),
 		)
+
+		It("handleHotplugs should not replace a fresh attachment pod within the quiet period", func() {
+			attachmentPodQuietPeriod = 3 * time.Second
+			vmi := newPendingVirtualMachine("testvmi")
+			virtlauncherPod := newPodForVirtualMachine(vmi, k8sv1.PodRunning)
+			preparePVC(0, 1)
+			addVirtualMachine(vmi)
+			addPod(virtlauncherPod)
+			oldPod := makePods(0)[0]
+			oldPod.CreationTimestamp = metav1.Now()
+
+			syncError := controller.handleHotplugs(makeVolumes(0, 1), nil, []*k8sv1.Pod{oldPod}, vmi, virtlauncherPod, nil)
+			Expect(syncError).ToNot(HaveOccurred())
+			Expect(recorder.Events).To(BeEmpty())
+		})
+
 
 		DescribeTable("needsHandleVolumeHotplug", func(hotplugVolumes []*virtv1.Volume, hotplugAttachmentPods []*k8sv1.Pod, expected bool) {
 			res := needsHandleVolumeHotplug(hotplugVolumes, hotplugAttachmentPods)

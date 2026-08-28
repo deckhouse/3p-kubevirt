@@ -19,6 +19,10 @@ import (
 	"kubevirt.io/kubevirt/pkg/virt-controller/watch/common"
 )
 
+// attachmentPodQuietPeriod is the minimum quiet window between attachment pod
+// generations. It is a variable so tests can zero it out.
+var attachmentPodQuietPeriod = 3 * time.Second
+
 func needsHandleVolumeOrResourceClaimHotplug(hotplugVolumes []*v1.Volume, hotplugResourceClaims []*v1.ResourceClaim, hotplugAttachmentPods []*k8sv1.Pod) bool {
 	return needsHandleVolumeHotplug(hotplugVolumes, hotplugAttachmentPods) || needsHandleResourceClaimHotplug(hotplugResourceClaims, hotplugAttachmentPods)
 }
@@ -40,26 +44,25 @@ func (c *Controller) handleHotplugs(hotplugVolumes []*v1.Volume, hotplugResource
 	})
 
 	if currentPod == nil && !hasPendingPods(oldPods) && (len(readyHotplugVolumes) > 0 || len(readyResourceClaims) > 0) && selinuxContextResolved(vmi) {
-		// The threshold defines how long we should delay requeueing based on the number
-		// of ready hotplug volumes and resource claims.
+		// The threshold defines how long to wait after the newest existing
+		// attachment pod before creating its replacement.
 		//
-		// The delay scales linearly:
-		//   total = len(readyHotplugVolumes) + len(readyResourceClaims)
-		//   a threshold = (total / 10) seconds
+		// A single user-visible change (e.g. one patch adding several disks)
+		// reaches this controller as a series of VMI updates — one per volume —
+		// plus late PVC bindings (WaitForFirstConsumer). Without a quiet window
+		// every intermediate volume set materializes its own attachment pod,
+		// created and deleted within seconds, which churns volumes attached to
+		// the guest. The window lets the series settle into a single
+		// replacement pod.
 		//
-		// Note: integer division is used, so the delay increases only for each
-		// group of 10 objects:
-		//   0–9   -> 0s
-		//   10–19 -> 1s
-		//   20–29 -> 2s
+		// The window only delays replacements: the first attachment pod of a
+		// VMI (no existing pods) is created immediately. For large sets the
+		// delay scales linearly, (total / 10) seconds per group of 10 objects.
 		//
-		// The rate limit is applied only if the oldest pod was created less than
-		// `threshold` ago. In that case, reconciliation is requeued for the
-		// remaining time within that window.
-		//
-		// This provides a simple rate limiting mechanism to avoid excessive
-		// reconcile retries when many attachments are being processed
-		threshold := time.Duration((len(readyHotplugVolumes)+len(readyResourceClaims))/10) * time.Second
+		// The rate limit is applied only if the newest pod was created less
+		// than `threshold` ago. In that case, reconciliation is requeued for
+		// the remaining time within that window.
+		threshold := max(attachmentPodQuietPeriod, time.Duration((len(readyHotplugVolumes)+len(readyResourceClaims))/10)*time.Second)
 		if rateLimited, waitTime := c.requeueAfter(oldPods, threshold); rateLimited {
 			key, err := controller.KeyFunc(vmi)
 			if err != nil {
