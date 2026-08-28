@@ -39,6 +39,11 @@ import (
 	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/util"
 )
 
+// primaryNetworkName is the name the primary pod network carries in the VMI spec.
+// The same literal is what the tap device naming keys on, see GenerateTapDeviceName in
+// pkg/network/link/names.go: keep the two in step.
+const primaryNetworkName = "default"
+
 type vmConfigurator interface {
 	SetupPodNetworkPhase2(domain *api.Domain, networksToPlug []v1.Network) error
 }
@@ -137,11 +142,35 @@ func (vim *virtIOInterfaceManager) hotUnplugVirtioInterface(vmi *v1.VirtualMachi
 		}
 
 		if derr := vim.dom.DetachDeviceFlags(strings.ToLower(string(ifaceXML)), affectDeviceLiveAndConfigLibvirtFlags); derr != nil {
+			// A domain that is down or gone has nothing left to detach. The unplug is
+			// re-derived from the domain on every sync, so nothing is lost by tolerating
+			// it, while returning the error would fail the whole VMI sync - disk sync and
+			// online resize included - for as long as the domain stays down. Ask libvirt
+			// what state the domain is in instead of enumerating the errors a dying qemu
+			// produces: "domain is not running", a reset monitor connection and an end of
+			// file from the monitor have all been seen from the very same situation.
+			if !vim.isDomainActive() {
+				log.Log.Reason(derr).Warningf(
+					"skipping the hot-unplug of interface %s: the domain is no longer running",
+					domainIface.Alias.GetName())
+				continue
+			}
 			log.Log.Reason(derr).Errorf("libvirt failed to detach interface %s: %v", domainIface.Alias.GetName(), derr)
 			return derr
 		}
 	}
 	return nil
+}
+
+// isDomainActive reports whether the domain is still there to act upon. A domain whose
+// state cannot be read at all is taken to be gone.
+func (vim *virtIOInterfaceManager) isDomainActive() bool {
+	domState, _, err := vim.dom.GetState()
+	if err != nil {
+		log.Log.Reason(err).Warning("failed to read the domain state")
+		return false
+	}
+	return !cli.IsDown(domState)
 }
 
 func interfacesToHotUnplug(vmiSpecInterfaces []v1.Interface, vmiSpecNets []v1.Network, domainSpecInterfaces []api.Interface) []api.Interface {
@@ -158,6 +187,31 @@ func interfacesToHotUnplug(vmiSpecInterfaces []v1.Interface, vmiSpecNets []v1.Ne
 			}
 		}
 	}
+
+	// A secondary interface the VMI spec no longer mentions at all has to go as well.
+	// The absent state is the request to unplug, but it does not survive every path:
+	// the VM and VMI interface clean-up drops an absent interface as soon as its status
+	// is not reported, which can happen before this sync ever observes the request. The
+	// domain would then keep a device nothing asks about any more, and the guest would
+	// keep the NIC until a restart or a migration. Reconciling towards the spec instead
+	// of towards a single request makes the unplug independent of that ordering.
+	// The primary interface is exempt: it is not hot-unpluggable and is dropped from the
+	// spec by other flows as well.
+	specIfacesByName := netvmispec.IndexInterfaceSpecByName(vmiSpecInterfaces)
+	for _, domainIface := range domainSpecInterfaces {
+		if domainIface.Alias == nil {
+			continue
+		}
+		name := domainIface.Alias.GetName()
+		if name == "" || name == primaryNetworkName {
+			continue
+		}
+		if _, inSpec := specIfacesByName[name]; inSpec {
+			continue
+		}
+		domainIfacesToRemove = append(domainIfacesToRemove, domainIface)
+	}
+
 	return domainIfacesToRemove
 }
 

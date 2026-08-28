@@ -282,7 +282,7 @@ func (n NetPod) Setup() error {
 		return serr
 	}
 
-	unplugNetworks := vmispec.FilterNetworksByInterfaces(n.vmiSpecNets, unplugIfaces)
+	unplugNetworks := vmispec.FilterNetworksByInterfaces(n.vmiSpecNets, n.clearableUnplugInterfaces(unplugIfaces))
 	if serr := n.clearCache(unplugNetworks); serr != nil {
 		return serr
 	}
@@ -394,6 +394,16 @@ func (n NetPod) composeDesiredSpec(currentStatus *nmstate.Status) (*nmstate.Spec
 				// removed without resolving the (possibly gone) SDN pod interface. The
 				// TC filters die with their devices, releasing the BPF program.
 				if iface.State == v1.InterfaceStateAbsent {
+					// The TAP has to outlive the domain device it backs: QEMU holds its
+					// file descriptor, and an ioctl on a TAP that is already gone is
+					// fatal to it (TUNSETVNETHDRSZ answers EBADFD and QEMU aborts),
+					// taking the whole machine down instead of just the interface. The
+					// domain dropping the interface from the status is the only proof
+					// the device is released, so until then the TAP is left alone and a
+					// later reconcile removes it.
+					if !ifaceReleasedByDomain(n.vmiIfaceStatuses, iface.Name) {
+						break
+					}
 					ifacesSpec = n.bpfBridgeAbsentSpec(ifIndex, currentStatus.Interfaces)
 					break
 				}
@@ -638,6 +648,18 @@ func (n NetPod) cleanupOrphanedNetworks(currentIfaces []nmstate.Interface) error
 		}
 	}
 	return nil
+}
+
+// ifaceReleasedByDomain reports that the domain no longer holds the interface: its
+// status is either gone altogether or no longer names the domain as an info source.
+func ifaceReleasedByDomain(ifaceStatuses []v1.VirtualMachineInstanceNetworkInterface, name string) bool {
+	for _, ifaceStatus := range ifaceStatuses {
+		if ifaceStatus.Name != name {
+			continue
+		}
+		return !vmispec.ContainsInfoSource(ifaceStatus.InfoSource, vmispec.InfoSourceDomain)
+	}
+	return true
 }
 
 // bpfBridgeAbsentSpec marks the bpfbridge TAP of an unplugged interface for
@@ -1119,6 +1141,18 @@ func (n NetPod) unplugInterfaces(startedNets, finishedNets []v1.Network) []v1.In
 		return iface.State == v1.InterfaceStateAbsent && netExists
 	})
 	return unplugIfaces
+}
+
+// clearableUnplugInterfaces drops the interfaces whose TAP removal has been
+// postponed (see composeDesiredSpec): their cache entries are the only thing that
+// brings the leftover device back to a cleanup path. The state-cache entry keeps
+// the network in the unplug path of the next reconcile, and once the interface
+// leaves the VMI spec it is what marks the network as orphaned for
+// cleanupOrphanedNetworks. Clearing it now leaks the TAP for the pod lifetime.
+func (n NetPod) clearableUnplugInterfaces(unplugIfaces []v1.Interface) []v1.Interface {
+	return vmispec.FilterInterfacesSpec(unplugIfaces, func(iface v1.Interface) bool {
+		return !vmispec.IsBPFBridgeBinding(iface) || ifaceReleasedByDomain(n.vmiIfaceStatuses, iface.Name)
+	})
 }
 
 func (n NetPod) clearCache(nets []v1.Network) error {

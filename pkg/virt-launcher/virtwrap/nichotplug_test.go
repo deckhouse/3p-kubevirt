@@ -238,10 +238,19 @@ var _ = Describe("nic hot-unplug on virt-launcher", func() {
 			Expect(interfacesToHotUnplug(vmiSpecIfaces, vmiSpecNets, domainSpecIfaces)).To(ConsistOf(expectedDomainSpecIfaces))
 		},
 		Entry("given no VMI interfaces and no domain interfaces", nil, nil, nil, nil),
-		Entry("given no VMI interfaces and 1 domain interface",
+		// A secondary interface the VMI spec no longer has is unplugged as well: the
+		// absent request does not survive every clean-up path, and the domain must not
+		// keep a device nothing asks about any more.
+		Entry("given no VMI interfaces and 1 secondary domain interface",
 			nil,
 			nil,
 			[]api.Interface{{Alias: api.NewUserDefinedAlias(networkName)}},
+			[]api.Interface{{Alias: api.NewUserDefinedAlias(networkName)}},
+		),
+		Entry("given no VMI interfaces and the primary domain interface",
+			nil,
+			nil,
+			[]api.Interface{{Alias: api.NewUserDefinedAlias("default")}},
 			nil,
 		),
 		Entry("given 1 VMI non-absent interface and an associated interface in the domain",
@@ -475,3 +484,84 @@ func newDeviceInterface(ifaceName, state string) api.Interface {
 		LinkState: &api.LinkState{State: state},
 	}
 }
+
+var _ = Describe("nic hot-unplug against a domain that is not running", func() {
+	const secondaryNet = "veth_cn0badc0de"
+
+	// The VMI spec has no interfaces at all, so every secondary interface of the domain
+	// is unplugged by reconciling the domain towards the spec.
+	var vmi *v1.VirtualMachineInstance
+
+	BeforeEach(func() {
+		vmi = &v1.VirtualMachineInstance{}
+	})
+
+	// These are the failures a detach against a domain that is already gone has been
+	// observed to produce: the operation reported as invalid for the domain state, and
+	// two flavours of a monitor that is not there any more.
+	var (
+		operationInvalid = libvirt.Error{Code: libvirt.ERR_OPERATION_INVALID, Domain: libvirt.FROM_QEMU}
+		monitorReset     = libvirt.Error{Code: libvirt.ERR_SYSTEM_ERROR, Domain: libvirt.FROM_QEMU}
+		monitorEOF       = libvirt.Error{Code: libvirt.ERR_INTERNAL_ERROR, Domain: libvirt.FROM_QEMU}
+	)
+
+	newManager := func(setup func(*testing.Libvirt)) *virtIOInterfaceManager {
+		mockLibvirt := testing.NewLibvirt(gomock.NewController(GinkgoT()))
+		setup(mockLibvirt)
+		return newVirtIOInterfaceManager(mockLibvirt.VirtDomain, nil)
+	}
+
+	expectDetach := func(mockLibvirt *testing.Libvirt, result error) {
+		mockLibvirt.DomainEXPECT().
+			DetachDeviceFlags(gomock.Any(), affectDeviceLiveAndConfigLibvirtFlags).
+			Return(result)
+	}
+
+	domainWith := func(names ...string) *api.Domain {
+		domain := &api.Domain{}
+		for _, name := range names {
+			domain.Spec.Devices.Interfaces = append(
+				domain.Spec.Devices.Interfaces,
+				api.Interface{Alias: api.NewUserDefinedAlias(name)},
+			)
+		}
+		return domain
+	}
+
+	DescribeTable("does not fail the sync when the domain is gone", func(detachResult error) {
+		vim := newManager(func(mockLibvirt *testing.Libvirt) {
+			expectDetach(mockLibvirt, detachResult)
+			mockLibvirt.DomainEXPECT().GetState().Return(libvirt.DOMAIN_SHUTOFF, 0, nil)
+		})
+		Expect(vim.hotUnplugVirtioInterface(vmi, domainWith(secondaryNet))).To(Succeed())
+	},
+		Entry("when libvirt reports the operation as invalid", operationInvalid),
+		Entry("when the monitor connection was reset", monitorReset),
+		Entry("when the monitor reported an end of file", monitorEOF),
+	)
+
+	It("does not fail the sync when the domain state cannot be read at all", func() {
+		vim := newManager(func(mockLibvirt *testing.Libvirt) {
+			expectDetach(mockLibvirt, monitorEOF)
+			mockLibvirt.DomainEXPECT().GetState().Return(libvirt.DOMAIN_NOSTATE, 0, libvirt.Error{Code: libvirt.ERR_NO_DOMAIN})
+		})
+		Expect(vim.hotUnplugVirtioInterface(vmi, domainWith(secondaryNet))).To(Succeed())
+	})
+
+	It("keeps unplugging the remaining interfaces", func() {
+		vim := newManager(func(mockLibvirt *testing.Libvirt) {
+			expectDetach(mockLibvirt, operationInvalid)
+			mockLibvirt.DomainEXPECT().GetState().Return(libvirt.DOMAIN_SHUTOFF, 0, nil)
+			expectDetach(mockLibvirt, nil)
+		})
+		Expect(vim.hotUnplugVirtioInterface(vmi, domainWith(secondaryNet, secondaryNet+"1"))).To(Succeed())
+	})
+
+	It("still fails when the domain is running", func() {
+		vim := newManager(func(mockLibvirt *testing.Libvirt) {
+			expectDetach(mockLibvirt, libvirt.Error{Code: libvirt.ERR_OPERATION_FAILED})
+			mockLibvirt.DomainEXPECT().GetState().Return(libvirt.DOMAIN_RUNNING, 0, nil)
+		})
+		Expect(vim.hotUnplugVirtioInterface(vmi, domainWith(secondaryNet))).NotTo(Succeed())
+	})
+})

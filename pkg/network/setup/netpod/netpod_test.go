@@ -2346,6 +2346,141 @@ var _ = Describe("netpod", func() {
 			}
 		})
 
+		DescribeTable("keeps the TAP of an unplugged interface until the domain releases the device",
+			func(infoSource string, expectRemoval bool) {
+				const unpluggedNetworkName = "veth_cn9b3eac7b"
+
+				nmstatestub := nmstateStub{status: nmstate.Status{
+					Interfaces: []nmstate.Interface{
+						{
+							Name:       "eth0",
+							Index:      1,
+							TypeName:   nmstate.TypeVETH,
+							State:      nmstate.IfaceStateUp,
+							MacAddress: "12:34:56:78:90:ab",
+							MTU:        1500,
+						},
+						{
+							Name:       unpluggedNetworkName,
+							Index:      8,
+							TypeName:   nmstate.TypeTap,
+							State:      nmstate.IfaceStateUp,
+							MacAddress: "32:34:56:78:90:ab",
+							MTU:        1400,
+						},
+					},
+				}}
+
+				netPod := netpod.NewNetPod(
+					[]v1.Network{
+						*v1.DefaultPodNetwork(),
+						{Name: unpluggedNetworkName, NetworkSource: v1.NetworkSource{Pod: &v1.PodNetwork{}}},
+					},
+					[]v1.Interface{
+						{Name: defaultPodNetworkName, Binding: &v1.PluginBinding{Name: "bpfbridge"}},
+						{Name: unpluggedNetworkName, Binding: &v1.PluginBinding{Name: "bpfbridge"}, State: v1.InterfaceStateAbsent},
+					},
+					vmiUID, 0, 0, 0, state,
+					netpod.WithNMStateAdapter(&nmstatestub),
+					netpod.WithCacheCreator(&baseCacheCreator),
+					netpod.WithBindingPlugins(map[string]v1.InterfaceBindingPlugin{
+						"bpfbridge": {DomainAttachmentType: v1.Tap},
+					}),
+					netpod.WithBpfBridgeAdapter(&bpfBridgeStub{}),
+					netpod.WithExternalTapProvisioning(true),
+					netpod.WithVMIIfaceStatuses([]v1.VirtualMachineInstanceNetworkInterface{
+						{Name: unpluggedNetworkName, PodInterfaceName: unpluggedNetworkName, InfoSource: infoSource},
+					}),
+				)
+				Expect(netPod.Setup()).To(Succeed())
+
+				absentTap := nmstate.Interface{
+					Name:     unpluggedNetworkName,
+					TypeName: nmstate.TypeTap,
+					State:    nmstate.IfaceStateAbsent,
+					Metadata: &nmstate.IfaceMetadata{NetworkName: unpluggedNetworkName},
+				}
+				if expectRemoval {
+					Expect(nmstatestub.spec.Interfaces).To(ContainElement(absentTap))
+				} else {
+					Expect(nmstatestub.spec.Interfaces).NotTo(ContainElement(absentTap))
+				}
+			},
+			// Deleting the TAP while QEMU still holds its file descriptor kills the
+			// machine: the next ioctl on it answers EBADFD and QEMU aborts.
+			Entry("the domain still holds the device", vmispec.InfoSourceDomain, false),
+			Entry("the domain and the guest agent still hold the device", vmispec.InfoSourceDomainAndGA, false),
+			Entry("the domain has released the device", vmispec.InfoSourceMultusStatus, true),
+		)
+
+		DescribeTable("clears the cache of an unplugged interface only after the TAP has been removed",
+			func(infoSource string, expectStateKept bool) {
+				const unpluggedNetworkName = "veth_cn9b3eac7b"
+
+				unpluggedNet := v1.Network{
+					Name:          unpluggedNetworkName,
+					NetworkSource: v1.NetworkSource{Pod: &v1.PodNetwork{}},
+				}
+				Expect(state.SetFinished([]v1.Network{unpluggedNet})).To(Succeed())
+
+				nmstatestub := nmstateStub{status: nmstate.Status{
+					Interfaces: []nmstate.Interface{
+						{
+							Name:       "eth0",
+							Index:      1,
+							TypeName:   nmstate.TypeVETH,
+							State:      nmstate.IfaceStateUp,
+							MacAddress: "12:34:56:78:90:ab",
+							MTU:        1500,
+						},
+						{
+							Name:       unpluggedNetworkName,
+							Index:      8,
+							TypeName:   nmstate.TypeTap,
+							State:      nmstate.IfaceStateUp,
+							MacAddress: "32:34:56:78:90:ab",
+							MTU:        1400,
+						},
+					},
+				}}
+
+				netPod := netpod.NewNetPod(
+					[]v1.Network{*v1.DefaultPodNetwork(), unpluggedNet},
+					[]v1.Interface{
+						{Name: defaultPodNetworkName, Binding: &v1.PluginBinding{Name: "bpfbridge"}},
+						{Name: unpluggedNetworkName, Binding: &v1.PluginBinding{Name: "bpfbridge"}, State: v1.InterfaceStateAbsent},
+					},
+					vmiUID, 0, 0, 0, state,
+					netpod.WithNMStateAdapter(&nmstatestub),
+					netpod.WithCacheCreator(&baseCacheCreator),
+					netpod.WithBindingPlugins(map[string]v1.InterfaceBindingPlugin{
+						"bpfbridge": {DomainAttachmentType: v1.Tap},
+					}),
+					netpod.WithBpfBridgeAdapter(&bpfBridgeStub{}),
+					netpod.WithExternalTapProvisioning(true),
+					netpod.WithVMIIfaceStatuses([]v1.VirtualMachineInstanceNetworkInterface{
+						{Name: unpluggedNetworkName, PodInterfaceName: unpluggedNetworkName, InfoSource: infoSource},
+					}),
+				)
+				Expect(netPod.Setup()).To(Succeed())
+
+				pending, _, finished, err := state.PendingStartedFinished([]v1.Network{unpluggedNet})
+				Expect(err).NotTo(HaveOccurred())
+				if expectStateKept {
+					Expect(finished).To(ConsistOf(unpluggedNet))
+				} else {
+					Expect(pending).To(ConsistOf(unpluggedNet))
+				}
+			},
+			// The state-cache entry is the only thing that brings the leftover TAP back
+			// to a cleanup path: while it is there, the next reconcile retries the
+			// unplug, and once the interface leaves the VMI spec the entry marks the
+			// network as orphaned.
+			Entry("the domain still holds the device", vmispec.InfoSourceDomain, true),
+			Entry("the domain and the guest agent still hold the device", vmispec.InfoSourceDomainAndGA, true),
+			Entry("the domain has released the device", vmispec.InfoSourceMultusStatus, false),
+		)
+
 		It("deletes the leftover TAP of a network removed from the spec outright", func() {
 			const removedNetworkName = "veth_n5e374cdb"
 			const keptNetworkName = "veth_cne5e53dde"
