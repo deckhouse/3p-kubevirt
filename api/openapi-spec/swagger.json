@@ -8984,6 +8984,30 @@
      }
     ]
    },
+   "/apis/subresources.kubevirt.io/v1/namespaces/{namespace}/virtualmachineinstances/{name}/spice": {
+    "get": {
+     "description": "Open a websocket connection to connect to SPICE on the specified VirtualMachineInstance.",
+     "operationId": "v1SPICE",
+     "responses": {
+      "401": {
+       "description": "Unauthorized"
+      }
+     }
+    },
+    "parameters": [
+     {
+      "uniqueItems": true,
+      "type": "string",
+      "description": "Name of the resource",
+      "name": "name",
+      "in": "path",
+      "required": true
+     },
+     {
+      "$ref": "#/parameters/namespace-nfszEHZ0"
+     }
+    ]
+   },
    "/apis/subresources.kubevirt.io/v1/namespaces/{namespace}/virtualmachineinstances/{name}/unfreeze": {
     "put": {
      "description": "Unfreeze a VirtualMachineInstance object.",
@@ -10881,6 +10905,30 @@
        "schema": {
         "type": "string"
        }
+      }
+     }
+    },
+    "parameters": [
+     {
+      "uniqueItems": true,
+      "type": "string",
+      "description": "Name of the resource",
+      "name": "name",
+      "in": "path",
+      "required": true
+     },
+     {
+      "$ref": "#/parameters/namespace-nfszEHZ0"
+     }
+    ]
+   },
+   "/apis/subresources.kubevirt.io/v1alpha3/namespaces/{namespace}/virtualmachineinstances/{name}/spice": {
+    "get": {
+     "description": "Open a websocket connection to connect to SPICE on the specified VirtualMachineInstance.",
+     "operationId": "v1alpha3SPICE",
+     "responses": {
+      "401": {
+       "description": "Unauthorized"
       }
      }
     },

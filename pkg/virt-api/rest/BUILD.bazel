@@ -16,6 +16,7 @@ go_library(
         "profiler.go",
         "resourceclaims.go",
         "sev.go",
+        "spice.go",
         "streamer.go",
         "subresource.go",
         "usbredir.go",
