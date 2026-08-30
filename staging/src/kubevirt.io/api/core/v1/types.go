@@ -1554,10 +1554,11 @@ const (
 	CPUResourcesRequestsFraction = "internal.virtualization.deckhouse.io/cpu-resources-requests-fraction"
 
 	// SpiceAnnotation marks a VirtualMachineInstance whose domain must carry the SPICE
-	// display. The platform sets it from spec.enableSpice of the VirtualMachine; it is
-	// read both when the domain is built and when the memory overhead of the launcher
-	// pod is calculated, which is why it lives here rather than in either package.
-	SpiceAnnotation = "virtualization.deckhouse.io/spice"
+	// display. The platform sets it from spec.spice.enabled of the VirtualMachine; it
+	// is read both when the domain is built and when the memory overhead of the
+	// launcher pod is calculated, which is why it lives here rather than in either
+	// package.
+	SpiceAnnotation = "internal.virtualization.deckhouse.io/spice"
 )
 
 func NewVMI(name string, uid types.UID) *VirtualMachineInstance {
