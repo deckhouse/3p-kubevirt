@@ -633,7 +633,7 @@ var _ = Describe("GetMemoryOverhead calculation", func() {
 			// Values spelled out, not taken from the constants: they come from
 			// measurements on a graphical guest, and changing them silently is exactly
 			// what this test is here to catch.
-			expected.Add(resource.MustParse("25Mi"))
+			expected.Add(resource.MustParse("35Mi"))
 			expected.Add(resource.MustParse("44Mi"))
 
 			vmi.Annotations = map[string]string{v1.SpiceAnnotation: "true"}

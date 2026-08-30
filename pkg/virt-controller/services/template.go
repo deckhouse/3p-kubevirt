@@ -137,12 +137,22 @@ const (
 	VirtlogdOverhead            = "25Mi"  // The `ps` RSS for virtlogd
 	VirtqemudOverhead           = "40Mi"  // The `ps` RSS for virtqemud
 	QemuOverhead                = "30Mi"  // The `ps` RSS for qemu, minus the RAM of its (stressed) guest, minus the virtual page table
-	// SPICE, measured on a graphical guest as the RSS of qemu minus the guest RAM
-	// region. Static: the display, sound, redirection slots and vdagent channel with
-	// no client connected, +17.3 and +17.9 MiB on two VM sizes with an 8 MiB spread
-	// between identical runs. Session: one active client with the display channel
-	// open, +44 MiB.
-	SpiceStaticOverhead  = "25Mi"
+	// SPICE, measured on DVP as the RSS of qemu minus its guest RAM mappings, on the
+	// same virtual machine before and after the display was turned on, each figure
+	// taken once the process had settled.
+	//
+	// Static — the display, the sound card, the redirection slots and the vdagent
+	// channel with nobody connected: +28 MiB on Windows 11 at 1280x800 with 4 GiB of
+	// RAM (54 -> 82), +15 MiB on a Linux guest with 1 GiB (46 -> 61). The earlier 25Mi
+	// was measured before vp8 and opus were built in and undershot the larger guest,
+	// so the value follows the worse case with room on top.
+	//
+	// Session — one connected client: +10 MiB on the Windows guest sitting idle, +13
+	// MiB on a Linux guest redrawing the screen continuously. Far below the 44Mi
+	// budgeted here, which is kept on purpose: SPICE does not limit the number of
+	// clients, and at this price the reservation covers three or four of them instead
+	// of exactly one.
+	SpiceStaticOverhead  = "35Mi"
 	SpiceSessionOverhead = "44Mi"
 	// Default: limits.memory = 2*requests.memory
 	DefaultMemoryLimitOverheadRatio = float64(2.0)
