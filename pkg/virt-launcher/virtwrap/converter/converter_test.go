@@ -2104,7 +2104,7 @@ var _ = Describe("Converter", func() {
 					Name:        "testvmi",
 					Namespace:   "default",
 					UID:         "1234",
-					Annotations: map[string]string{SpiceAnnotation: "true"},
+					Annotations: map[string]string{v1.SpiceAnnotation: "true"},
 				},
 				Spec: v1.VirtualMachineInstanceSpec{
 					Domain: v1.DomainSpec{},
