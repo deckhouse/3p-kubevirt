@@ -52,9 +52,10 @@ const (
 	//
 	// Session — one connected client: +10 MiB on the Windows guest sitting idle, +13
 	// MiB on a Linux guest redrawing the screen continuously. Far below the 44Mi
-	// budgeted here, which is kept on purpose: SPICE does not limit the number of
-	// clients, and at this price the reservation covers three or four of them instead
-	// of exactly one.
+	// budgeted here, which is kept on purpose: the figures come from two guests at one
+	// resolution and an underestimate costs the VM, not a swap. One session is all that
+	// needs covering — acquireSpiceSession in pkg/virt-handler/rest/console.go hands the
+	// display to one client at a time and evicts the one before it.
 	//
 	// Both numbers describe one resolution: 1280x800. Nobody has run the same guest at
 	// two resolutions and compared, so the scaling is unknown by measurement. Reading
@@ -67,7 +68,7 @@ const (
 	//
 	// The knob is planned as spec.spice.resolution in DVP, taking named presets — HD, FHD,
 	// QHD, UHD. Video memory bounds them long before the pod does: the converter pins VRam
-	// at 16384 KiB with one head, which at 32 bits per pixel covers HD (3.7 MiB) and FHD
+	// at 16384 KiB with one head, which at 32 bits per pixel covers HD (3.5 MiB) and FHD
 	// (8 MiB), only just fits QHD (14 MiB) and cannot hold UHD (32 MiB). So that field
 	// sizes vram as well as the pod, and both stop being constants together.
 	SpiceStaticOverhead  = "35Mi"
@@ -157,17 +158,12 @@ func (k *KvmHypervisorBackend) GetMemoryOverhead(vmi *v1.VirtualMachineInstance,
 	// underestimate here is not swapping but an OOM kill of the launcher pod together
 	// with the VM.
 	//
-	// Measured on a graphical guest (Windows, virtio-gpu, 1280x800), RSS of the qemu
-	// process minus the guest RAM region:
-	//   - the display, sound, four redirection slots and the vdagent channel present
-	//     but no client connected: +17.3 and +17.9 MiB on two different VM sizes,
-	//     with a spread of 8 MiB between identical runs, hence 25Mi;
-	//   - one active session with the display channel open: +44 MiB. The earlier
-	//     estimate of 50 to 90 MiB was too pessimistic.
+	// The two constants and the measurements behind them are documented next to their
+	// definitions above.
 	//
-	// One session is budgeted. SPICE does not limit the number of clients the way VNC
-	// does, so a second concurrent session is not covered here; limiting the sessions
-	// is the honest fix, budgeting for the worst case would waste the scheduler.
+	// One session is budgeted, and one is all there can be: SPICEHandler hands the
+	// display to a single client at a time and evicts the previous one, so a second
+	// concurrent session does not exist to be covered.
 	if vmi.Annotations[v1.SpiceAnnotation] == "true" {
 		overhead.Add(resource.MustParse(SpiceStaticOverhead))
 		overhead.Add(resource.MustParse(SpiceSessionOverhead))
