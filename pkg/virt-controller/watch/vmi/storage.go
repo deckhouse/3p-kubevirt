@@ -217,7 +217,10 @@ func (c *Controller) processHotplugVolumeStatus(
 		// causing the new volume to inherit HotplugVolumeDetaching status from the previous
 		// hotplug instead of being reset. We reset the phase based on PVC status so it can
 		// properly transition through the normal attach flow on the next reconcile.
-		if statusCopy.Phase == virtv1.HotplugVolumeDetaching {
+		// The same applies to HotplugVolumeUnMounted: virt-handler sets it while the
+		// volume is out of the spec, and a re-add can land before this controller
+		// converts it to HotplugVolumeDetaching.
+		if statusCopy.Phase == virtv1.HotplugVolumeDetaching || statusCopy.Phase == virtv1.HotplugVolumeUnMounted {
 			usePVCStatus = true
 		}
 	}
