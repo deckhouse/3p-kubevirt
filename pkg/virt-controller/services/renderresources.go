@@ -559,17 +559,12 @@ func GetMemoryOverhead(vmi *v1.VirtualMachineInstance, cpuArch string, additiona
 	// underestimate here is not swapping but an OOM kill of the launcher pod together
 	// with the VM.
 	//
-	// Measured on a graphical guest (Windows, virtio-gpu, 1280x800), RSS of the qemu
-	// process minus the guest RAM region:
-	//   - the display, sound, four redirection slots and the vdagent channel present
-	//     but no client connected: +17.3 and +17.9 MiB on two different VM sizes,
-	//     with a spread of 8 MiB between identical runs, hence 25Mi;
-	//   - one active session with the display channel open: +44 MiB. The earlier
-	//     estimate of 50 to 90 MiB was too pessimistic.
+	// The two constants and the measurements behind them are documented next to their
+	// definitions in template.go.
 	//
-	// One session is budgeted. SPICE does not limit the number of clients the way VNC
-	// does, so a second concurrent session is not covered here; limiting the sessions
-	// is the honest fix, budgeting for the worst case would waste the scheduler.
+	// One session is budgeted, and one is all there can be: SPICEHandler hands the
+	// display to a single client at a time and evicts the previous one, so a second
+	// concurrent session does not exist to be covered.
 	if vmi.Annotations[v1.SpiceAnnotation] == "true" {
 		overhead.Add(resource.MustParse(SpiceStaticOverhead))
 		overhead.Add(resource.MustParse(SpiceSessionOverhead))

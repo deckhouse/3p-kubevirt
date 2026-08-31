@@ -149,9 +149,10 @@ const (
 	//
 	// Session — one connected client: +10 MiB on the Windows guest sitting idle, +13
 	// MiB on a Linux guest redrawing the screen continuously. Far below the 44Mi
-	// budgeted here, which is kept on purpose: SPICE does not limit the number of
-	// clients, and at this price the reservation covers three or four of them instead
-	// of exactly one.
+	// budgeted here, which is kept on purpose: the figures come from two guests at one
+	// resolution and an underestimate costs the VM, not a swap. One session is all that
+	// needs covering — acquireSpiceSession in pkg/virt-handler/rest/console.go hands the
+	// display to one client at a time and evicts the one before it.
 	//
 	// Both numbers describe one resolution: 1280x800. Nobody has run the same guest at
 	// two resolutions and compared, so the scaling is unknown by measurement. Reading
@@ -164,7 +165,7 @@ const (
 	//
 	// The knob is planned as spec.spice.resolution in DVP, taking named presets — HD, FHD,
 	// QHD, UHD. Video memory bounds them long before the pod does: the converter pins VRam
-	// at 16384 KiB with one head, which at 32 bits per pixel covers HD (3.7 MiB) and FHD
+	// at 16384 KiB with one head, which at 32 bits per pixel covers HD (3.5 MiB) and FHD
 	// (8 MiB), only just fits QHD (14 MiB) and cannot hold UHD (32 MiB). So that field
 	// sizes vram as well as the pod, and both stop being constants together.
 	SpiceStaticOverhead  = "35Mi"
