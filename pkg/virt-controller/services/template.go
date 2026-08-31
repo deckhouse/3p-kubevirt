@@ -676,6 +676,25 @@ func (t *templateService) renderLaunchManifest(vmi *v1.VirtualMachineInstance, i
 	setReadOnlyRootFilesystem(initContainers)
 	setReadOnlyRootFilesystem(containers)
 
+	// The pod-level profile is inherited by the containers at runtime, but a container
+	// that does not carry it explicitly still reads as unconfined in a manifest audit.
+	setSeccompProfile := func(ctrs []k8sv1.Container) {
+		if podSeccompProfile == nil {
+			return
+		}
+		for i := range ctrs {
+			ctr := &ctrs[i]
+			if ctr.SecurityContext == nil {
+				ctr.SecurityContext = &k8sv1.SecurityContext{}
+			}
+			if ctr.SecurityContext.SeccompProfile == nil {
+				ctr.SecurityContext.SeccompProfile = podSeccompProfile.DeepCopy()
+			}
+		}
+	}
+	setSeccompProfile(initContainers)
+	setSeccompProfile(containers)
+
 	pod := k8sv1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			GenerateName: "d8v-vm-" + domain + "-",
