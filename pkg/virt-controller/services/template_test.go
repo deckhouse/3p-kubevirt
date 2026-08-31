@@ -261,6 +261,9 @@ var _ = Describe("Template", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			Expect(pod.Spec.SecurityContext.SeccompProfile).To(BeNil())
+			for _, ctr := range append(pod.Spec.InitContainers, pod.Spec.Containers...) {
+				Expect(ctr.SecurityContext.SeccompProfile).To(BeNil(), "container %s", ctr.Name)
+			}
 		})
 
 		It("should set seccomp profile when configured", func() {
@@ -283,7 +286,9 @@ var _ = Describe("Template", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			Expect(pod.Spec.SecurityContext.SeccompProfile).To(BeEquivalentTo(expectedProfile))
-
+			for _, ctr := range append(pod.Spec.InitContainers, pod.Spec.Containers...) {
+				Expect(ctr.SecurityContext.SeccompProfile).To(BeEquivalentTo(expectedProfile), "container %s", ctr.Name)
+			}
 		})
 
 		Context("with NonRoot feature-gate", func() {
