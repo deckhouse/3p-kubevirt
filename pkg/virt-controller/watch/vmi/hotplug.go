@@ -19,6 +19,10 @@ import (
 	"kubevirt.io/kubevirt/pkg/virt-controller/watch/common"
 )
 
+// attachmentPodQuietPeriod is the minimum quiet window between attachment pod
+// generations. It is a variable so tests can zero it out.
+var attachmentPodQuietPeriod = 3 * time.Second
+
 func needsHandleVolumeOrResourceClaimHotplug(hotplugVolumes []*v1.Volume, hotplugResourceClaims []*v1.ResourceClaim, hotplugAttachmentPods []*k8sv1.Pod) bool {
 	return needsHandleVolumeHotplug(hotplugVolumes, hotplugAttachmentPods) || needsHandleResourceClaimHotplug(hotplugResourceClaims, hotplugAttachmentPods)
 }
@@ -40,26 +44,25 @@ func (c *Controller) handleHotplugs(hotplugVolumes []*v1.Volume, hotplugResource
 	})
 
 	if currentPod == nil && !hasPendingPods(oldPods) && (len(readyHotplugVolumes) > 0 || len(readyResourceClaims) > 0) && selinuxContextResolved(vmi) {
-		// The threshold defines how long we should delay requeueing based on the number
-		// of ready hotplug volumes and resource claims.
+		// The threshold defines how long to wait after the newest existing
+		// attachment pod before creating its replacement.
 		//
-		// The delay scales linearly:
-		//   total = len(readyHotplugVolumes) + len(readyResourceClaims)
-		//   a threshold = (total / 10) seconds
+		// A single user-visible change (e.g. one patch adding several disks)
+		// reaches this controller as a series of VMI updates — one per volume —
+		// plus late PVC bindings (WaitForFirstConsumer). Without a quiet window
+		// every intermediate volume set materializes its own attachment pod,
+		// created and deleted within seconds, which churns volumes attached to
+		// the guest. The window lets the series settle into a single
+		// replacement pod.
 		//
-		// Note: integer division is used, so the delay increases only for each
-		// group of 10 objects:
-		//   0–9   -> 0s
-		//   10–19 -> 1s
-		//   20–29 -> 2s
+		// The window only delays replacements: the first attachment pod of a
+		// VMI (no existing pods) is created immediately. For large sets the
+		// delay scales linearly, (total / 10) seconds per group of 10 objects.
 		//
-		// The rate limit is applied only if the oldest pod was created less than
-		// `threshold` ago. In that case, reconciliation is requeued for the
-		// remaining time within that window.
-		//
-		// This provides a simple rate limiting mechanism to avoid excessive
-		// reconcile retries when many attachments are being processed
-		threshold := time.Duration((len(readyHotplugVolumes)+len(readyResourceClaims))/10) * time.Second
+		// The rate limit is applied only if the newest pod was created less
+		// than `threshold` ago. In that case, reconciliation is requeued for
+		// the remaining time within that window.
+		threshold := max(attachmentPodQuietPeriod, time.Duration((len(readyHotplugVolumes)+len(readyResourceClaims))/10)*time.Second)
 		if rateLimited, waitTime := c.requeueAfter(oldPods, threshold); rateLimited {
 			key, err := controller.KeyFunc(vmi)
 			if err != nil {
@@ -115,8 +118,12 @@ func (c *Controller) cleanupAttachmentPods(currentPod *k8sv1.Pod, oldPods []*k8s
 		}
 	}
 
+	inSpecVolumeStatusMap := make(map[string]v1.VolumeStatus)
 	for _, vmiVolume := range vmi.Spec.Volumes {
 		if storagetypes.IsHotplugVolume(&vmiVolume) {
+			if vs, ok := volumeStatusMap[vmiVolume.Name]; ok {
+				inSpecVolumeStatusMap[vmiVolume.Name] = vs
+			}
 			delete(volumeStatusMap, vmiVolume.Name)
 		}
 	}
@@ -156,6 +163,31 @@ func (c *Controller) cleanupAttachmentPods(currentPod *k8sv1.Pod, oldPods []*k8s
 
 		if volumesNotReadyForDelete > 0 {
 			log.Log.Object(vmi).V(3).Infof("Not deleting attachment pod %s, because there are still %d volumes to be unmounted", attachmentPod.Name, volumesNotReadyForDelete)
+			continue
+		}
+
+		// A volume that is still in the VMI spec must never lose its last carrier pod:
+		// an old pod is deletable only once the current pod carries the volume and the
+		// volume is served through it. Otherwise the volume silently disappears from
+		// the guest with no error surfaced anywhere.
+		volumesNotHandedOver := 0
+
+		for _, podVolume := range attachmentPod.Spec.Volumes {
+			volumeStatus, ok := inSpecVolumeStatusMap[podVolume.Name]
+			if !ok {
+				continue
+			}
+			if currentPod == nil ||
+				currentPod.Status.Phase != k8sv1.PodRunning ||
+				!podHasVolume(currentPod, podVolume.Name) ||
+				volumeStatus.HotplugVolume.AttachPodUID != currentPod.UID ||
+				volumeReadyForPodDelete(volumeStatus.Phase) {
+				volumesNotHandedOver++
+			}
+		}
+
+		if volumesNotHandedOver > 0 {
+			log.Log.Object(vmi).V(3).Infof("Not deleting attachment pod %s, because %d of its volumes are not served by the current pod yet", attachmentPod.Name, volumesNotHandedOver)
 			continue
 		}
 
@@ -310,6 +342,15 @@ func (c *Controller) deleteAttachmentPod(vmi *v1.VirtualMachineInstance, attachm
 	}
 	c.recorder.Eventf(vmi, k8sv1.EventTypeNormal, controller.SuccessfulDeletePodReason, "Deleted attachment pod %s", attachmentPod.Name)
 	return nil
+}
+
+func podHasVolume(pod *k8sv1.Pod, volumeName string) bool {
+	for _, podVolume := range pod.Spec.Volumes {
+		if podVolume.Name == volumeName {
+			return true
+		}
+	}
+	return false
 }
 
 func hasPendingPods(pods []*k8sv1.Pod) bool {

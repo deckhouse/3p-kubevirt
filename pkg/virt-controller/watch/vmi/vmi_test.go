@@ -188,6 +188,8 @@ var _ = Describe("VirtualMachineInstance watcher", func() {
 	sanityExecute := func() {}
 
 	BeforeEach(func() {
+		attachmentPodQuietPeriod = 0
+
 		virtClient := kubecli.NewMockKubevirtClient(gomock.NewController(GinkgoT()))
 		virtClientset = kubevirtfake.NewSimpleClientset()
 
@@ -2998,6 +3000,82 @@ var _ = Describe("VirtualMachineInstance watcher", func() {
 				nil),
 		)
 
+		It("handleHotplugs should not replace a fresh attachment pod within the quiet period", func() {
+			attachmentPodQuietPeriod = 3 * time.Second
+			vmi := newPendingVirtualMachine("testvmi")
+			virtlauncherPod := newPodForVirtualMachine(vmi, k8sv1.PodRunning)
+			preparePVC(0, 1)
+			addVirtualMachine(vmi)
+			addPod(virtlauncherPod)
+			oldPod := makePods(0)[0]
+			oldPod.CreationTimestamp = metav1.Now()
+
+			syncError := controller.handleHotplugs(makeVolumes(0, 1), nil, []*k8sv1.Pod{oldPod}, vmi, virtlauncherPod, nil)
+			Expect(syncError).ToNot(HaveOccurred())
+			Expect(recorder.Events).To(BeEmpty())
+		})
+
+		makeHotpluggableVolumes := func(indexes ...int) []virtv1.Volume {
+			res := make([]virtv1.Volume, 0)
+			for _, index := range indexes {
+				res = append(res, virtv1.Volume{
+					Name: fmt.Sprintf("volume%d", index),
+					VolumeSource: virtv1.VolumeSource{
+						PersistentVolumeClaim: &virtv1.PersistentVolumeClaimVolumeSource{
+							PersistentVolumeClaimVolumeSource: k8sv1.PersistentVolumeClaimVolumeSource{
+								ClaimName: fmt.Sprintf("claim%d", index),
+							},
+							Hotpluggable: true,
+						},
+					},
+				})
+			}
+			return res
+		}
+
+		DescribeTable("cleanupAttachmentPods with an in-spec volume carried by an old pod", func(statusAttachPodUID string, expectedEvents []string) {
+			vmi := newPendingVirtualMachine("testvmi")
+			vmi.Spec.Volumes = makeHotpluggableVolumes(0)
+			vmi.Status.VolumeStatus = []virtv1.VolumeStatus{{
+				Name:  "volume0",
+				Phase: virtv1.VolumeReady,
+				HotplugVolume: &virtv1.HotplugVolumeStatus{
+					AttachPodName: "old-pod",
+					AttachPodUID:  types.UID(statusAttachPodUID),
+				},
+			}}
+			virtlauncherPod := newPodForVirtualMachine(vmi, k8sv1.PodRunning)
+			addVirtualMachine(vmi)
+			addPod(virtlauncherPod)
+			hotplugVolume := k8sv1.Volume{
+				Name: "volume0",
+				VolumeSource: k8sv1.VolumeSource{
+					PersistentVolumeClaim: &k8sv1.PersistentVolumeClaimVolumeSource{
+						ClaimName: "claim0",
+					},
+				},
+			}
+			oldPod := newPodForVirtlauncher(virtlauncherPod, "old-pod", "old-uid", k8sv1.PodRunning)
+			oldPod.Spec.Volumes = append(oldPod.Spec.Volumes, hotplugVolume)
+			currentPod := newPodForVirtlauncher(virtlauncherPod, "new-pod", "new-uid", k8sv1.PodRunning)
+			currentPod.Spec.Volumes = append(currentPod.Spec.Volumes, hotplugVolume)
+			addPod(oldPod)
+			addPod(currentPod)
+
+			syncError := controller.cleanupAttachmentPods(currentPod, []*k8sv1.Pod{oldPod}, vmi, 1, 0)
+			Expect(syncError).ToNot(HaveOccurred())
+			if len(expectedEvents) == 0 {
+				Expect(recorder.Events).To(BeEmpty())
+			} else {
+				testutils.ExpectEvents(recorder, expectedEvents...)
+			}
+		},
+			Entry("keeps the old pod while the volume is not served by the current pod",
+				"old-uid", []string{}),
+			Entry("deletes the old pod once the volume is served by the current pod",
+				"new-uid", []string{kvcontroller.SuccessfulDeletePodReason}),
+		)
+
 		DescribeTable("needsHandleVolumeHotplug", func(hotplugVolumes []*virtv1.Volume, hotplugAttachmentPods []*k8sv1.Pod, expected bool) {
 			res := needsHandleVolumeHotplug(hotplugVolumes, hotplugAttachmentPods)
 			Expect(res).To(Equal(expected))
@@ -3121,6 +3199,14 @@ var _ = Describe("VirtualMachineInstance watcher", func() {
 			return makeVolumeStatusesForUpdateWithMessage("test-pod", "abcd", virtv1.HotplugVolumeAttachedToNode, "Created hotplug attachment pod test-pod, for volume volume%d", kvcontroller.SuccessfulCreatePodReason, indexes...)
 		}
 
+		makeDetachVolumeStatus := func(indexes ...int) []virtv1.VolumeStatus {
+			return makeVolumeStatusesForUpdateWithMessage("test-pod", "abcd", virtv1.HotplugVolumeDetaching, "Deleted hotplug attachment pod test-pod, for volume%d", kvcontroller.SuccessfulDeletePodReason, indexes...)
+		}
+
+		makeUnmountedVolumeStatus := func(indexes ...int) []virtv1.VolumeStatus {
+			return makeVolumeStatusesForUpdateWithMessage("test-pod", "abcd", virtv1.HotplugVolumeUnMounted, "Volume volume%d has been unmounted from virt-launcher pod", "VolumeUnMountedFromPod", indexes...)
+		}
+
 		DescribeTable("updateVolumeStatus", func(oldStatus []virtv1.VolumeStatus, specVolumes []*virtv1.Volume, podIndexes []int, pvcIndexes []int, expectedStatus []virtv1.VolumeStatus, expectedEvents []string) {
 			vmi := newPendingVirtualMachine("testvmi")
 			volumes := make([]virtv1.Volume, 0)
@@ -3181,6 +3267,20 @@ var _ = Describe("VirtualMachineInstance watcher", func() {
 				[]int{0},
 				makeVolumeStatusesForUpdateWithMessage("test-pod", "abcd", virtv1.HotplugVolumeDetaching, "Deleted hotplug attachment pod test-pod, for volume volume0", kvcontroller.SuccessfulDeletePodReason, 0),
 				[]string{kvcontroller.SuccessfulDeletePodReason}),
+			Entry("should update volume status, if volume gets stuck in Detaching state due to it being removed and re-added",
+				makeDetachVolumeStatus(0),
+				makeVolumes(0),
+				[]int{0},
+				[]int{0},
+				makeVolumeStatusesForUpdateWithMessage("test-pod", "abcd", virtv1.VolumeBound, "PVC is in phase Bound", kvcontroller.PVCNotReadyReason, 0),
+				[]string{}),
+			Entry("should update volume status, if volume gets stuck in UnMountedFromPod state due to it being removed and re-added",
+				makeUnmountedVolumeStatus(0),
+				makeVolumes(0),
+				[]int{0},
+				[]int{0},
+				makeVolumeStatusesForUpdateWithMessage("test-pod", "abcd", virtv1.VolumeBound, "PVC is in phase Bound", kvcontroller.PVCNotReadyReason, 0),
+				[]string{}),
 			Entry("should keep status and not update phase if volume is still Ready",
 				makeVolumeStatusesForUpdateWithMessage("", "", virtv1.VolumeReady, "", "", 0),
 				makeVolumes(),
