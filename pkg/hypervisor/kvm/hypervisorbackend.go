@@ -40,6 +40,38 @@ const (
 	VirtlogdOverhead            = "25Mi"  // The `ps` RSS for virtlogd
 	VirtqemudOverhead           = "40Mi"  // The `ps` RSS for virtqemud
 	QemuOverhead                = "30Mi"  // The `ps` RSS for qemu, minus the RAM of its (stressed) guest, minus the virtual page table
+	// SPICE, measured on DVP as the RSS of qemu minus its guest RAM mappings, on the
+	// same virtual machine before and after the display was turned on, each figure
+	// taken once the process had settled.
+	//
+	// Static — the display, the sound card, the redirection slots and the vdagent
+	// channel with nobody connected: +28 MiB on Windows 11 at 1280x800 with 4 GiB of
+	// RAM (54 -> 82), +15 MiB on a Linux guest with 1 GiB (46 -> 61). The earlier 25Mi
+	// was measured before vp8 and opus were built in and undershot the larger guest,
+	// so the value follows the worse case with room on top.
+	//
+	// Session — one connected client: +10 MiB on the Windows guest sitting idle, +13
+	// MiB on a Linux guest redrawing the screen continuously. Far below the 44Mi
+	// budgeted here, which is kept on purpose: SPICE does not limit the number of
+	// clients, and at this price the reservation covers three or four of them instead
+	// of exactly one.
+	//
+	// Both numbers describe one resolution: 1280x800. Nobody has run the same guest at
+	// two resolutions and compared, so the scaling is unknown by measurement. Reading
+	// the server says the static part should not follow the pixel count, while the
+	// session part follows the area that changes: the GLZ dictionary is sized once when
+	// the channel opens and the image cache is a fixed 1024-entry table. Should the API
+	// ever gain a resolution field, that reading is the first thing to verify — and if
+	// it does not hold, these two constants stop being constants and become functions of
+	// the requested resolution.
+	//
+	// The knob is planned as spec.spice.resolution in DVP, taking named presets — HD, FHD,
+	// QHD, UHD. Video memory bounds them long before the pod does: the converter pins VRam
+	// at 16384 KiB with one head, which at 32 bits per pixel covers HD (3.7 MiB) and FHD
+	// (8 MiB), only just fits QHD (14 MiB) and cannot hold UHD (32 MiB). So that field
+	// sizes vram as well as the pod, and both stop being constants together.
+	SpiceStaticOverhead  = "35Mi"
+	SpiceSessionOverhead = "44Mi"
 
 	kvmHypervisorDevice = "kvm"
 	kvmVirtType         = "kvm"
@@ -118,6 +150,27 @@ func (k *KvmHypervisorBackend) GetMemoryOverhead(vmi *v1.VirtualMachineInstance,
 	// Add video RAM overhead
 	if domain.Devices.AutoattachGraphicsDevice == nil || *domain.Devices.AutoattachGraphicsDevice == true {
 		overhead.Add(resource.MustParse("32Mi"))
+	}
+
+	// SPICE is reserved whether a client is connected or not, and the 32Mi above knows
+	// nothing about it. Guaranteed QoS makes the request equal the limit, so an
+	// underestimate here is not swapping but an OOM kill of the launcher pod together
+	// with the VM.
+	//
+	// Measured on a graphical guest (Windows, virtio-gpu, 1280x800), RSS of the qemu
+	// process minus the guest RAM region:
+	//   - the display, sound, four redirection slots and the vdagent channel present
+	//     but no client connected: +17.3 and +17.9 MiB on two different VM sizes,
+	//     with a spread of 8 MiB between identical runs, hence 25Mi;
+	//   - one active session with the display channel open: +44 MiB. The earlier
+	//     estimate of 50 to 90 MiB was too pessimistic.
+	//
+	// One session is budgeted. SPICE does not limit the number of clients the way VNC
+	// does, so a second concurrent session is not covered here; limiting the sessions
+	// is the honest fix, budgeting for the worst case would waste the scheduler.
+	if vmi.Annotations[v1.SpiceAnnotation] == "true" {
+		overhead.Add(resource.MustParse(SpiceStaticOverhead))
+		overhead.Add(resource.MustParse(SpiceSessionOverhead))
 	}
 
 	// When use uefi boot on aarch64 with edk2 package, qemu will create 2 pflash(64Mi each, 128Mi in total)

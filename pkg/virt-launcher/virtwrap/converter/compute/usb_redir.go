@@ -41,12 +41,22 @@ func (_ UsbRedirectDeviceDomainConfigurator) Configure(vmi *v1.VirtualMachineIns
 	// so we simply create the maximum allowed dictated by v1.UsbClientPassthroughMaxNumberOf
 	redirectDevices := make([]api.RedirectedDevice, v1.UsbClientPassthroughMaxNumberOf)
 
+	// With SPICE enabled the redirected devices are wired to the SPICE channels, so a
+	// SPICE client redirects USB on its own. Otherwise they stay on unix sockets, which
+	// is what `virtctl usbredir` connects to.
 	for i := 0; i < v1.UsbClientPassthroughMaxNumberOf; i++ {
+		if SpiceEnabled(vmi) {
+			redirectDevices[i] = api.RedirectedDevice{
+				Type: "spicevmc",
+				Bus:  "usb",
+			}
+			continue
+		}
 		path := fmt.Sprintf("/var/run/kubevirt-private/%s/virt-usbredir-%d", vmi.ObjectMeta.UID, i)
 		redirectDevices[i] = api.RedirectedDevice{
 			Type: "unix",
 			Bus:  "usb",
-			Source: api.RedirectedDeviceSource{
+			Source: &api.RedirectedDeviceSource{
 				Mode: "bind",
 				Path: path,
 			},
@@ -54,4 +64,11 @@ func (_ UsbRedirectDeviceDomainConfigurator) Configure(vmi *v1.VirtualMachineIns
 	}
 	domain.Spec.Devices.Redirs = redirectDevices
 	return nil
+}
+
+// SpiceEnabled reports whether the SPICE display is requested on this VMI.
+func SpiceEnabled(vmi *v1.VirtualMachineInstance) bool {
+	// The annotation constant lives in the api package: the same value is read by the
+	// memory overhead calculation in virt-controller.
+	return vmi.Annotations[v1.SpiceAnnotation] == "true"
 }

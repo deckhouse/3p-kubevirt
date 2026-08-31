@@ -68,7 +68,7 @@ var _ = Describe("USB Redirect Device Domain Configurator", func() {
 				expectedDomain.Spec.Devices.Redirs[i] = api.RedirectedDevice{
 					Type: "unix",
 					Bus:  "usb",
-					Source: api.RedirectedDeviceSource{
+					Source: &api.RedirectedDeviceSource{
 						Mode: "bind",
 						Path: path,
 					},

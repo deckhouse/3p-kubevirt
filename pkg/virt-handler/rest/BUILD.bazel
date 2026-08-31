@@ -39,6 +39,7 @@ go_library(
 go_test(
     name = "go_default_test",
     srcs = [
+        "console_spice_test.go",
         "console_test.go",
         "rest_suite_test.go",
         "vmstats_test.go",

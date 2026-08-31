@@ -69,6 +69,26 @@ func (g GraphicsDomainConfigurator) Configure(vmi *v1.VirtualMachineInstance, do
 			Type: "vnc",
 		},
 	}
+	if SpiceEnabled(vmi) {
+		// The tuning is fixed instead of configurable: the client always arrives over
+		// a unix socket behind proxies, so the server never treats the connection as
+		// WAN and every "auto" heuristic inside SPICE stays dormant. auto_glz is the
+		// lossless image codec, JPEG adds lossy compression of photo-like areas and
+		// zlib deflates what is left; "filter" keeps video-area detection on without
+		// forcing a stream for every update.
+		domain.Spec.Devices.Graphics = append(domain.Spec.Devices.Graphics, api.Graphics{
+			Listen: &api.GraphicsListen{
+				Type:   "socket",
+				Socket: fmt.Sprintf("/var/run/kubevirt-private/%s/virt-spice", vmi.ObjectMeta.UID),
+			},
+			Type:      "spice",
+			Image:     &api.GraphicsImage{Compression: "auto_glz"},
+			JPEG:      &api.GraphicsJPEG{Compression: "always"},
+			Zlib:      &api.GraphicsZlib{Compression: "always"},
+			Streaming: &api.GraphicsStreaming{Mode: "filter"},
+			Playback:  &api.GraphicsPlayback{Compression: "on"},
+		})
+	}
 
 	g.configureVideoDevice(vmi, domain)
 

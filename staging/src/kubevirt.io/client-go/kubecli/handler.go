@@ -23,6 +23,7 @@ const (
 	consoleTemplateURI            = "wss://%s:%v/v1/namespaces/%s/virtualmachineinstances/%s/console"
 	usbredirTemplateURI           = "wss://%s:%v/v1/namespaces/%s/virtualmachineinstances/%s/usbredir"
 	vncTemplateURI                = "wss://%s:%v/v1/namespaces/%s/virtualmachineinstances/%s/vnc"
+	spiceTemplateURI              = "wss://%s:%v/v1/namespaces/%s/virtualmachineinstances/%s/spice"
 	vsockTemplateURI              = "wss://%s:%v/v1/namespaces/%s/virtualmachineinstances/%s/vsock"
 	pauseTemplateURI              = "https://%s:%v/v1/namespaces/%s/virtualmachineinstances/%s/pause"
 	unpauseTemplateURI            = "https://%s:%v/v1/namespaces/%s/virtualmachineinstances/%s/unpause"
@@ -63,6 +64,7 @@ type VirtHandlerConn interface {
 	USBRedirURI(vmi *virtv1.VirtualMachineInstance) (string, error)
 	VNCURI(vmi *virtv1.VirtualMachineInstance, preserveSession bool) (string, error)
 	ScreenshotURI(vmi *virtv1.VirtualMachineInstance) (string, error)
+	SPICEURI(vmi *virtv1.VirtualMachineInstance) (string, error)
 	VSOCKURI(vmi *virtv1.VirtualMachineInstance, port string, tls string) (string, error)
 	PauseURI(vmi *virtv1.VirtualMachineInstance) (string, error)
 	UnpauseURI(vmi *virtv1.VirtualMachineInstance) (string, error)
@@ -208,6 +210,10 @@ func (v *virtHandlerConn) VNCURI(vmi *virtv1.VirtualMachineInstance, preserveSes
 
 func (v *virtHandlerConn) ScreenshotURI(vmi *virtv1.VirtualMachineInstance) (string, error) {
 	return v.formatURI(screenshotTemplateURI, vmi)
+}
+
+func (v *virtHandlerConn) SPICEURI(vmi *virtv1.VirtualMachineInstance) (string, error) {
+	return v.formatURI(spiceTemplateURI, vmi)
 }
 
 func (v *virtHandlerConn) VSOCKURI(vmi *virtv1.VirtualMachineInstance, port string, tls string) (string, error) {

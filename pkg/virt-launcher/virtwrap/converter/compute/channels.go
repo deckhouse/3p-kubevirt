@@ -35,6 +35,20 @@ func (c ChannelsDomainConfigurator) Configure(vmi *v1.VirtualMachineInstance, do
 		domain.Spec.Devices.Channels = append(domain.Spec.Devices.Channels, newDownwardMetricsChannel())
 	}
 
+	if SpiceEnabled(vmi) {
+		// spice-vdagent in the guest talks over this virtio-serial port. Without it the
+		// agent cannot run at all, and with it come client-side mouse (the pointer is
+		// drawn locally instead of making a round trip), automatic resize to the client
+		// window and clipboard sharing.
+		domain.Spec.Devices.Channels = append(domain.Spec.Devices.Channels, api.Channel{
+			Type: "spicevmc",
+			Target: &api.ChannelTarget{
+				Type: "virtio",
+				Name: "com.redhat.spice.0",
+			},
+		})
+	}
+
 	return nil
 }
 
