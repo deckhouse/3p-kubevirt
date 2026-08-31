@@ -554,6 +554,27 @@ func GetMemoryOverhead(vmi *v1.VirtualMachineInstance, cpuArch string, additiona
 		overhead.Add(resource.MustParse("32Mi"))
 	}
 
+	// SPICE is reserved whether a client is connected or not, and the 32Mi above knows
+	// nothing about it. Guaranteed QoS makes the request equal the limit, so an
+	// underestimate here is not swapping but an OOM kill of the launcher pod together
+	// with the VM.
+	//
+	// Measured on a graphical guest (Windows, virtio-gpu, 1280x800), RSS of the qemu
+	// process minus the guest RAM region:
+	//   - the display, sound, four redirection slots and the vdagent channel present
+	//     but no client connected: +17.3 and +17.9 MiB on two different VM sizes,
+	//     with a spread of 8 MiB between identical runs, hence 25Mi;
+	//   - one active session with the display channel open: +44 MiB. The earlier
+	//     estimate of 50 to 90 MiB was too pessimistic.
+	//
+	// One session is budgeted. SPICE does not limit the number of clients the way VNC
+	// does, so a second concurrent session is not covered here; limiting the sessions
+	// is the honest fix, budgeting for the worst case would waste the scheduler.
+	if vmi.Annotations[v1.SpiceAnnotation] == "true" {
+		overhead.Add(resource.MustParse(SpiceStaticOverhead))
+		overhead.Add(resource.MustParse(SpiceSessionOverhead))
+	}
+
 	// When use uefi boot on aarch64 with edk2 package, qemu will create 2 pflash(64Mi each, 128Mi in total)
 	// it should be considered for memory overhead
 	// Additional information can be found here: https://github.com/qemu/qemu/blob/master/hw/arm/virt.c#L120

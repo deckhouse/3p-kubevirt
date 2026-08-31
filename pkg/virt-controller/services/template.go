@@ -137,6 +137,38 @@ const (
 	VirtlogdOverhead            = "25Mi"  // The `ps` RSS for virtlogd
 	VirtqemudOverhead           = "40Mi"  // The `ps` RSS for virtqemud
 	QemuOverhead                = "30Mi"  // The `ps` RSS for qemu, minus the RAM of its (stressed) guest, minus the virtual page table
+	// SPICE, measured on DVP as the RSS of qemu minus its guest RAM mappings, on the
+	// same virtual machine before and after the display was turned on, each figure
+	// taken once the process had settled.
+	//
+	// Static — the display, the sound card, the redirection slots and the vdagent
+	// channel with nobody connected: +28 MiB on Windows 11 at 1280x800 with 4 GiB of
+	// RAM (54 -> 82), +15 MiB on a Linux guest with 1 GiB (46 -> 61). The earlier 25Mi
+	// was measured before vp8 and opus were built in and undershot the larger guest,
+	// so the value follows the worse case with room on top.
+	//
+	// Session — one connected client: +10 MiB on the Windows guest sitting idle, +13
+	// MiB on a Linux guest redrawing the screen continuously. Far below the 44Mi
+	// budgeted here, which is kept on purpose: SPICE does not limit the number of
+	// clients, and at this price the reservation covers three or four of them instead
+	// of exactly one.
+	//
+	// Both numbers describe one resolution: 1280x800. Nobody has run the same guest at
+	// two resolutions and compared, so the scaling is unknown by measurement. Reading
+	// the server says the static part should not follow the pixel count, while the
+	// session part follows the area that changes: the GLZ dictionary is sized once when
+	// the channel opens and the image cache is a fixed 1024-entry table. Should the API
+	// ever gain a resolution field, that reading is the first thing to verify — and if
+	// it does not hold, these two constants stop being constants and become functions of
+	// the requested resolution.
+	//
+	// The knob is planned as spec.spice.resolution in DVP, taking named presets — HD, FHD,
+	// QHD, UHD. Video memory bounds them long before the pod does: the converter pins VRam
+	// at 16384 KiB with one head, which at 32 bits per pixel covers HD (3.7 MiB) and FHD
+	// (8 MiB), only just fits QHD (14 MiB) and cannot hold UHD (32 MiB). So that field
+	// sizes vram as well as the pod, and both stop being constants together.
+	SpiceStaticOverhead  = "35Mi"
+	SpiceSessionOverhead = "44Mi"
 	// Default: limits.memory = 2*requests.memory
 	DefaultMemoryLimitOverheadRatio = float64(2.0)
 

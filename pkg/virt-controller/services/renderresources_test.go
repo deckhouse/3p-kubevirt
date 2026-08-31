@@ -619,6 +619,29 @@ var _ = Describe("GetMemoryOverhead calculation", func() {
 		})
 	})
 
+	When("the vmi has SPICE enabled", func() {
+		It("should add the static and the session overhead on top of the base", func() {
+			// Without this the launcher pod is sized as if SPICE were absent, while the
+			// memory is reserved anyway; at Guaranteed QoS that is an OOM kill of the pod
+			// together with the VM, not swapping.
+			expected := resource.NewScaledQuantity(0, resource.Kilo)
+			expected.Add(*baseOverhead)
+			expected.Add(*staticOverhead)
+			expected.Add(*videoRAMOverhead)
+			expected.Add(*coresOverhead)
+			expected.Add(*disksOverhead)
+			// Values spelled out, not taken from the constants: they come from
+			// measurements on a graphical guest, and changing them silently is exactly
+			// what this test is here to catch.
+			expected.Add(resource.MustParse("35Mi"))
+			expected.Add(resource.MustParse("44Mi"))
+
+			vmi.Annotations = map[string]string{v1.SpiceAnnotation: "true"}
+			overhead := GetMemoryOverhead(vmi, "amd64", nil)
+			Expect(overhead.Value()).To(BeEquivalentTo(expected.Value()))
+		})
+	})
+
 	When("the vmi requests the specific cpu", func() {
 		BeforeEach(func() {
 			vmi.Spec.Domain.CPU = &v1.CPU{

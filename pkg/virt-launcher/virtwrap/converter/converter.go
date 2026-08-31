@@ -957,6 +957,13 @@ func Convert_v1_Rng_To_api_Rng(_ *v1.Rng, rng *api.Rng, c *ConverterContext) err
 	return nil
 }
 
+// spiceEnabled reports whether the SPICE display is requested on this VMI.
+func spiceEnabled(vmi *v1.VirtualMachineInstance) bool {
+	// The annotation constant lives in the api package: the same value is read by the
+	// memory overhead calculation in virt-controller.
+	return vmi.Annotations[v1.SpiceAnnotation] == "true"
+}
+
 func Convert_v1_Usbredir_To_api_Usbredir(vmi *v1.VirtualMachineInstance, domainDevices *api.Devices, _ *ConverterContext) error {
 	clientDevices := vmi.Spec.Domain.Devices.ClientPassthrough
 
@@ -969,12 +976,22 @@ func Convert_v1_Usbredir_To_api_Usbredir(vmi *v1.VirtualMachineInstance, domainD
 	// so we simply create the maximum allowed dictated by v1.UsbClientPassthroughMaxNumberOf
 	redirectDevices := make([]api.RedirectedDevice, v1.UsbClientPassthroughMaxNumberOf)
 
+	// With SPICE enabled the redirected devices are wired to the SPICE channels, so a
+	// SPICE client redirects USB on its own. Otherwise they stay on unix sockets, which
+	// is what `virtctl usbredir` connects to.
 	for i := 0; i < v1.UsbClientPassthroughMaxNumberOf; i++ {
+		if spiceEnabled(vmi) {
+			redirectDevices[i] = api.RedirectedDevice{
+				Type: "spicevmc",
+				Bus:  "usb",
+			}
+			continue
+		}
 		path := fmt.Sprintf("/var/run/kubevirt-private/%s/virt-usbredir-%d", vmi.ObjectMeta.UID, i)
 		redirectDevices[i] = api.RedirectedDevice{
 			Type: "unix",
 			Bus:  "usb",
-			Source: api.RedirectedDeviceSource{
+			Source: &api.RedirectedDeviceSource{
 				Mode: "bind",
 				Path: path,
 			},
@@ -1560,6 +1577,20 @@ func Convert_v1_VirtualMachineInstance_To_api_Domain(vmi *v1.VirtualMachineInsta
 		domain.Spec.Devices.Channels = append(domain.Spec.Devices.Channels, convertDownwardMetricsChannel())
 	}
 
+	if spiceEnabled(vmi) {
+		// spice-vdagent in the guest talks over this virtio-serial port. Without it the
+		// agent cannot run at all, and with it come client-side mouse (the pointer is
+		// drawn locally instead of making a round trip), automatic resize to the client
+		// window and clipboard sharing.
+		domain.Spec.Devices.Channels = append(domain.Spec.Devices.Channels, api.Channel{
+			Type: "spicevmc",
+			Target: &api.ChannelTarget{
+				Type: "virtio",
+				Name: "com.redhat.spice.0",
+			},
+		})
+	}
+
 	domain.Spec.SysInfo = &api.SysInfo{}
 
 	err = Convert_v1_Firmware_To_related_apis(vmi, domain, c)
@@ -1991,6 +2022,26 @@ func Convert_v1_VirtualMachineInstance_To_api_Domain(vmi *v1.VirtualMachineInsta
 				},
 				Type: "vnc",
 			},
+		}
+		if spiceEnabled(vmi) {
+			// The tuning is fixed instead of configurable: the client always arrives over
+			// a unix socket behind proxies, so the server never treats the connection as
+			// WAN and every "auto" heuristic inside SPICE stays dormant. auto_glz is the
+			// lossless image codec, JPEG adds lossy compression of photo-like areas and
+			// zlib deflates what is left; "filter" keeps video-area detection on without
+			// forcing a stream for every update.
+			domain.Spec.Devices.Graphics = append(domain.Spec.Devices.Graphics, api.Graphics{
+				Listen: &api.GraphicsListen{
+					Type:   "socket",
+					Socket: fmt.Sprintf("/var/run/kubevirt-private/%s/virt-spice", vmi.ObjectMeta.UID),
+				},
+				Type:      "spice",
+				Image:     &api.GraphicsImage{Compression: "auto_glz"},
+				JPEG:      &api.GraphicsJPEG{Compression: "always"},
+				Zlib:      &api.GraphicsZlib{Compression: "always"},
+				Streaming: &api.GraphicsStreaming{Mode: "filter"},
+				Playback:  &api.GraphicsPlayback{Compression: "on"},
+			})
 		}
 	}
 
