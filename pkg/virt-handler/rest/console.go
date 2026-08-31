@@ -21,6 +21,7 @@ package rest
 
 import (
 	"crypto/tls"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -51,8 +52,10 @@ type ConsoleHandler struct {
 	podIsolationDetector isolation.PodIsolationDetector
 	serialStopChans      map[types.UID]chan struct{}
 	vncStopChans         map[types.UID]chan struct{}
+	spiceSessions        map[types.UID]*spiceSession
 	serialLock           *sync.Mutex
 	vncLock              *sync.Mutex
+	spiceLock            *sync.Mutex
 	vmiStore             cache.Store
 	usbredir             map[types.UID]UsbredirHandlerVMI
 	usbredirLock         *sync.Mutex
@@ -63,13 +66,34 @@ type UsbredirHandlerVMI struct {
 	stopChans map[int]chan struct{}
 }
 
+// spiceSession is one SPICE client, not one connection. A client opens a channel per
+// function - main, display, inputs, cursor, playback, record and one per usbredir slot -
+// and every one of them is a separate connection to the same socket. They share a stop
+// channel so that evicting the client tears down the whole set at once, and refs counts
+// how many are still open: the session is gone when the last channel closes, not the first.
+type spiceSession struct {
+	stopCh chan struct{}
+	refs   int
+}
+
+const (
+	// SpiceLinkHeader: magic, major, minor, size. SpiceLinkMess follows, and its first
+	// field is the connection id, which is all this code needs.
+	spiceLinkMagic        = "REDQ"
+	spiceLinkHeaderSize   = 16
+	spiceConnectionIDSize = 4
+	spiceLinkPrefixSize   = spiceLinkHeaderSize + spiceConnectionIDSize
+)
+
 func NewConsoleHandler(podIsolationDetector isolation.PodIsolationDetector, vmiStore cache.Store, certManager certificate.Manager) *ConsoleHandler {
 	return &ConsoleHandler{
 		podIsolationDetector: podIsolationDetector,
 		serialStopChans:      make(map[types.UID]chan struct{}),
 		vncStopChans:         make(map[types.UID]chan struct{}),
+		spiceSessions:        make(map[types.UID]*spiceSession),
 		serialLock:           &sync.Mutex{},
 		vncLock:              &sync.Mutex{},
+		spiceLock:            &sync.Mutex{},
 		usbredirLock:         &sync.Mutex{},
 		vmiStore:             vmiStore,
 		usbredir:             make(map[types.UID]UsbredirHandlerVMI),
@@ -159,6 +183,57 @@ func (t *ConsoleHandler) VNCHandler(request *restful.Request, response *restful.
 	t.stream(vmi, request, response, unixSocketDialer(vmi, unixSocketPath), stopChn)
 }
 
+// spiceConnectionID reads the connection id out of the SPICE link message that opens
+// every channel. Zero means the client is starting a session and does not know its id
+// yet; the server assigns one on the main channel and the client repeats it on all the
+// others. That is the only thing in the protocol that tells a new client apart from
+// another channel of the client already connected.
+func spiceConnectionID(prefix []byte) (uint32, bool) {
+	if len(prefix) < spiceLinkPrefixSize || string(prefix[:len(spiceLinkMagic)]) != spiceLinkMagic {
+		return 0, false
+	}
+	return binary.LittleEndian.Uint32(prefix[spiceLinkHeaderSize:spiceLinkPrefixSize]), true
+}
+
+// acquireSpiceSession hands out the stop channel this connection belongs to. A connection
+// id of zero starts a session and evicts the one before it, closing every channel that
+// client had open; any other id joins the session in progress. An unreadable link message
+// is treated as a new session: a client that does not speak SPICE gets no free pass.
+func (t *ConsoleHandler) acquireSpiceSession(uid types.UID, connectionID uint32, newSession bool) chan struct{} {
+	t.spiceLock.Lock()
+	defer t.spiceLock.Unlock()
+
+	current, ok := t.spiceSessions[uid]
+	if ok && !newSession && connectionID != 0 {
+		current.refs++
+		return current.stopCh
+	}
+
+	if ok {
+		close(current.stopCh)
+	}
+	session := &spiceSession{stopCh: make(chan struct{}), refs: 1}
+	t.spiceSessions[uid] = session
+	return session.stopCh
+}
+
+// releaseSpiceSession drops one channel. The session outlives its channels closing one by
+// one - a client reconnects usbredir slots while it works - so it is only forgotten once
+// nothing is left of it, and never when it has already been replaced by a newer one.
+func (t *ConsoleHandler) releaseSpiceSession(uid types.UID, stopCh chan struct{}) {
+	t.spiceLock.Lock()
+	defer t.spiceLock.Unlock()
+
+	current, ok := t.spiceSessions[uid]
+	if !ok || current.stopCh != stopCh {
+		return
+	}
+	current.refs--
+	if current.refs <= 0 {
+		delete(t.spiceSessions, uid)
+	}
+}
+
 func (t *ConsoleHandler) SPICEHandler(request *restful.Request, response *restful.Response) {
 	vmi, code, err := getVMI(request, t.vmiStore)
 	if err != nil || vmi == nil {
@@ -172,12 +247,82 @@ func (t *ConsoleHandler) SPICEHandler(request *restful.Request, response *restfu
 		response.WriteError(http.StatusBadRequest, err)
 		return
 	}
-	// Unlike VNC, this connection is deliberately not registered in the shared map:
-	// SPICE is multi-channel and opens 4-11 parallel connections to the same socket
-	// (main, display, inputs, cursor, playback, record, usbredir x4). Evicting the
-	// previous connection, the way newStopChan does in VNCHandler, would tear down
-	// channels of the very same session and leave the protocol unusable.
-	t.stream(vmi, request, response, unixSocketDialer(vmi, unixSocketPath), make(chan struct{}))
+	// The display is exclusive the way VNC is, but the unit of exclusivity is the client,
+	// not the connection: SPICE opens 4-11 of them per session. Evicting per connection,
+	// the way newStopChan does in VNCHandler, would tear down channels of the very same
+	// client. Which one it is, is read off the link message - see acquireSpiceSession.
+	t.streamSPICE(vmi, request, response, unixSocketDialer(vmi, unixSocketPath))
+}
+
+// streamSPICE proxies one SPICE channel. It does what stream does, with one thing in
+// between: the link message that opens the channel is read first, because the stop channel
+// this connection gets depends on whether it starts a session or joins one. The bytes are
+// handed over to the socket afterwards, so the server sees the stream it expects.
+func (t *ConsoleHandler) streamSPICE(vmi *v1.VirtualMachineInstance, request *restful.Request, response *restful.Response, dial func() (net.Conn, error)) {
+	var upgrader = kvcorev1.NewUpgrader()
+	clientSocket, err := upgrader.Upgrade(response.ResponseWriter, request.Request, nil)
+	if err != nil {
+		log.Log.Object(vmi).Reason(err).Error("Failed to upgrade client websocket connection")
+		response.WriteError(http.StatusInternalServerError, err)
+		return
+	}
+	defer clientSocket.Close()
+
+	conn, err := dial()
+	if err != nil {
+		response.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	defer conn.Close()
+
+	prefix, err := readSpiceLinkPrefix(clientSocket)
+	if err != nil {
+		log.Log.Object(vmi).Reason(err).Error("Failed reading the SPICE link message")
+		return
+	}
+	connectionID, parsed := spiceConnectionID(prefix)
+	stopCh := t.acquireSpiceSession(vmi.GetUID(), connectionID, !parsed)
+	defer t.releaseSpiceSession(vmi.GetUID(), stopCh)
+
+	if _, err := conn.Write(prefix); err != nil {
+		log.Log.Object(vmi).Reason(err).Error("Failed forwarding the SPICE link message")
+		return
+	}
+
+	errCh := make(chan error, 2)
+	go func() {
+		_, err := kvcorev1.CopyTo(clientSocket, conn)
+		errCh <- err
+	}()
+	go func() {
+		_, err := kvcorev1.CopyFrom(conn, clientSocket)
+		errCh <- err
+	}()
+
+	select {
+	case <-stopCh:
+		clientSocket.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseGoingAway, "close by another connection"))
+	case err := <-errCh:
+		if err != nil && err != io.EOF {
+			log.Log.Object(vmi).Reason(err).Error("Error in proxing websocket and unix socket")
+			response.WriteHeader(http.StatusInternalServerError)
+		}
+	}
+}
+
+// readSpiceLinkPrefix collects the first bytes of a channel up to the connection id.
+// A websocket frame boundary has nothing to do with the protocol's own framing, so the
+// message can arrive split; whatever is read is returned in full and forwarded as is.
+func readSpiceLinkPrefix(clientSocket *websocket.Conn) ([]byte, error) {
+	var prefix []byte
+	for len(prefix) < spiceLinkPrefixSize {
+		_, data, err := clientSocket.ReadMessage()
+		if err != nil {
+			return prefix, err
+		}
+		prefix = append(prefix, data...)
+	}
+	return prefix, nil
 }
 
 func (t *ConsoleHandler) SerialHandler(request *restful.Request, response *restful.Response) {
