@@ -152,6 +152,21 @@ const (
 	// budgeted here, which is kept on purpose: SPICE does not limit the number of
 	// clients, and at this price the reservation covers three or four of them instead
 	// of exactly one.
+	//
+	// Both numbers describe one resolution: 1280x800. Nobody has run the same guest at
+	// two resolutions and compared, so the scaling is unknown by measurement. Reading
+	// the server says the static part should not follow the pixel count, while the
+	// session part follows the area that changes: the GLZ dictionary is sized once when
+	// the channel opens and the image cache is a fixed 1024-entry table. Should the API
+	// ever gain a resolution field, that reading is the first thing to verify — and if
+	// it does not hold, these two constants stop being constants and become functions of
+	// the requested resolution.
+	//
+	// The knob is planned as spec.spice.resolution in DVP, taking named presets — HD, FHD,
+	// QHD, UHD. Video memory bounds them long before the pod does: the converter pins VRam
+	// at 16384 KiB with one head, which at 32 bits per pixel covers HD (3.7 MiB) and FHD
+	// (8 MiB), only just fits QHD (14 MiB) and cannot hold UHD (32 MiB). So that field
+	// sizes vram as well as the pod, and both stop being constants together.
 	SpiceStaticOverhead  = "35Mi"
 	SpiceSessionOverhead = "44Mi"
 	// Default: limits.memory = 2*requests.memory
