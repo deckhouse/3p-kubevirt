@@ -21,6 +21,7 @@ package migrationproxy
 
 import (
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -29,6 +30,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"kubevirt.io/client-go/log"
 
@@ -37,6 +39,10 @@ import (
 	"kubevirt.io/kubevirt/pkg/util/net/ip"
 	virtconfig "kubevirt.io/kubevirt/pkg/virt-config"
 )
+
+var ErrPreviousProxyActive = errors.New("previous virt-handler still serving the migration proxy on this node")
+
+const previousProxyProbeTimeout = 200 * time.Millisecond
 
 const (
 	LibvirtDirectMigrationPort = 49152
@@ -346,6 +352,13 @@ func (m *migrationProxyManager) StartSourceListener(key string, targetAddress st
 		targetFullAddr := net.JoinHostPort(targetAddress, destPort)
 		filePath := SourceUnixFile(baseDir, proxyKey)
 
+		if isPreviousProxyActive(filePath) {
+			for _, curProxy := range proxiesList {
+				curProxy.Stop()
+			}
+			return ErrPreviousProxyActive
+		}
+
 		os.RemoveAll(filePath)
 
 		proxy := NewSourceProxy(filePath, targetFullAddr, serverTLSConfig, clientTLSConfig, key)
@@ -364,6 +377,18 @@ func (m *migrationProxyManager) StartSourceListener(key string, targetAddress st
 	}
 	m.sourceProxies[key] = proxiesList
 	return nil
+}
+
+func isPreviousProxyActive(path string) bool {
+	if _, err := os.Stat(path); err != nil {
+		return false
+	}
+	conn, err := net.DialTimeout("unix", path, previousProxyProbeTimeout)
+	if err != nil {
+		return false
+	}
+	_ = conn.Close()
+	return true
 }
 
 func (m *migrationProxyManager) StopSourceListener(key string) {
