@@ -2641,7 +2641,7 @@ var _ = Describe("Template", func() {
 		})
 
 		Context("with hotplug volumes", func() {
-			It("should render without any hotplug volumes listed in volumeStatus or having `Hotpluggable` flag", func() {
+			It("should render without volumes listed as hotplug in volumeStatus", func() {
 				config, kvStore, svc = configFactory(defaultArch)
 				permanentVolumeName := "permanent-vol"
 				hotplugFromSpecName := "hotplug-from-spec"
@@ -2695,7 +2695,8 @@ var _ = Describe("Template", func() {
 					volumeMountNames = append(volumeMountNames, volumeMount.Name)
 				}
 				Expect(volumeMountNames).To(ContainElement(permanentVolumeName))
-				Expect(volumeMountNames).ToNot(ContainElements(hotplugFromSpecName, hotplugFromStatusName))
+				Expect(volumeMountNames).To(ContainElement(hotplugFromSpecName))
+				Expect(volumeMountNames).ToNot(ContainElement(hotplugFromStatusName))
 			})
 		})
 
