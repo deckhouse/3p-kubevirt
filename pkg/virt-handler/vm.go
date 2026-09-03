@@ -2242,6 +2242,14 @@ func (c *VirtualMachineController) checkVolumesForMigration(vmi *v1.VirtualMachi
 			if !shared {
 				return true, fmt.Errorf("cannot migrate VMI with non-shared HostDisk")
 			}
+		} else if volSrc.ContainerDisk != nil {
+			// Container disks are always mounted read-only in this fork and the
+			// migration source never copies them (they are classified as shared),
+			// so they must not force block migration: the NON_SHARED_INC flag
+			// without a disk to copy makes libvirt demand an NBD URI and fail.
+			// A non-CD-ROM container disk is attached as a plain disk whose spec
+			// carries no read-only marker, so isReadOnlyDisk cannot filter it out.
+			continue
 		} else {
 			if _, ok := filesystems[volume.Name]; ok {
 				log.Log.Object(vmi).Infof("Volume %s is shared with virtiofs, allow live migration", volume.Name)
