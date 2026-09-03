@@ -2071,6 +2071,34 @@ var _ = Describe("VirtualMachineInstance", func() {
 			Expect(blockMigrate).To(BeTrue())
 			Expect(err).ToNot(HaveOccurred())
 		})
+		It("should not require block migration for a hotplugged container disk", func() {
+			vmi := api2.NewMinimalVMI("testvmi")
+			vmi.Spec.Domain.Devices.Disks = []v1.Disk{
+				{
+					Name: "hotplug-cd",
+					DiskDevice: v1.DiskDevice{
+						Disk: &v1.DiskTarget{
+							Bus: v1.DiskBusSCSI,
+						},
+					},
+				},
+			}
+			vmi.Spec.Volumes = []v1.Volume{
+				{
+					Name: "hotplug-cd",
+					VolumeSource: v1.VolumeSource{
+						ContainerDisk: &v1.ContainerDiskSource{
+							Image:        "registry.example.com/image:latest",
+							Hotpluggable: true,
+						},
+					},
+				},
+			}
+
+			blockMigrate, err := controller.checkVolumesForMigration(vmi)
+			Expect(blockMigrate).To(BeFalse())
+			Expect(err).ToNot(HaveOccurred())
+		})
 		It("should migrate shared disks without blockMigration flag", func() {
 
 			vmi := api2.NewMinimalVMI("testvmi")
@@ -2844,7 +2872,8 @@ var _ = Describe("VirtualMachineInstance", func() {
 			},
 				Entry("CDROM", getCDRomDisk(nil), getContainerDiskVolume(), v1.LiveMigration),
 				Entry("CDROM with read-only=true", getCDRomDisk(pointer.P(true)), getContainerDiskVolume(), v1.LiveMigration),
-				Entry("CDROM with read-only=false", getCDRomDisk(pointer.P(false)), getContainerDiskVolume(), v1.BlockMigration),
+				// The fork always mounts container disks read-only and never copies them.
+				Entry("CDROM with read-only=false", getCDRomDisk(pointer.P(false)), getContainerDiskVolume(), v1.LiveMigration),
 			)
 		})
 
