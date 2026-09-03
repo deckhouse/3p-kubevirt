@@ -1846,6 +1846,13 @@ func shouldExpandOnline(dom cli.VirDomain, disk api.Disk) bool {
 		return false
 	}
 	guestSize := blockInfo.Capacity
+	if guestSize == 0 {
+		// A zero-capacity device was never sized by its backing storage (e.g. an
+		// unsized diskless DRBD attach): growing it cannot succeed, and failing the
+		// sync over it would block the whole VMI reconcile until the device reopens.
+		log.DefaultLogger().Errorf("Disk %s device reports zero capacity, not attempting online expansion", getSourceFile(disk))
+		return false
+	}
 	possibleGuestSize, ok := possibleGuestSize(disk)
 	if !ok || possibleGuestSize <= int64(guestSize) {
 		return false

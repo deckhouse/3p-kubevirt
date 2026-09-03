@@ -859,7 +859,34 @@ func (m *volumeMounter) UnmountAll(vmi *v1.VirtualMachineInstance, cgroupManager
 		record, err := m.getMountTargetRecord(vmi)
 		if err != nil {
 			return err
-		} else if record == nil {
+		}
+
+		// The record alone cannot be trusted here: it can lose entries — a
+		// cleanup pass deletes the record while a volume migration re-mounts
+		// volumes into the pod — and a mount missing from the record blocks
+		// the kubelet from tearing down the pod directory forever. Merge the
+		// record with what actually exists under the hotplug-disks directories
+		// of the VMI's pods on this node.
+		seenTargets := map[string]struct{}{}
+		var mountTargetEntries []vmiMountTargetEntry
+		if record != nil {
+			for _, entry := range record.MountTargetEntries {
+				if _, seen := seenTargets[entry.TargetFile]; seen {
+					continue
+				}
+				seenTargets[entry.TargetFile] = struct{}{}
+				mountTargetEntries = append(mountTargetEntries, entry)
+			}
+		}
+		for _, entry := range m.getHotplugTargetEntriesInWorld(vmi) {
+			if _, seen := seenTargets[entry.TargetFile]; seen {
+				continue
+			}
+			seenTargets[entry.TargetFile] = struct{}{}
+			mountTargetEntries = append(mountTargetEntries, entry)
+		}
+
+		if len(mountTargetEntries) == 0 {
 			// no entries to unmount
 			logger.Info("No hotplug volumes found to unmount")
 			return nil
@@ -869,7 +896,7 @@ func (m *volumeMounter) UnmountAll(vmi *v1.VirtualMachineInstance, cgroupManager
 		var deviceRules []*devices.Rule
 		var unmountErrors []error
 
-		for _, entry := range record.MountTargetEntries {
+		for _, entry := range mountTargetEntries {
 			diskPath, err := safepath.NewFileNoFollow(entry.TargetFile)
 			if err != nil {
 				if errors.Is(err, os.ErrNotExist) {
@@ -882,7 +909,23 @@ func (m *volumeMounter) UnmountAll(vmi *v1.VirtualMachineInstance, cgroupManager
 				continue
 			}
 			diskPath.Close()
-			if isBlock, err := isBlockDevice(diskPath.Path()); err != nil {
+			if isBlock, err := isBlockDevice(diskPath.Path()); errors.Is(err, syscall.ESTALE) {
+				// A stale NFS file handle means the export backing this mount
+				// is already gone: every stat through the mount fails, but the
+				// mount itself is still in place and keeps blocking the kubelet
+				// from tearing down the pod directory. A block device node
+				// cannot be stale, so unmount it as a filesystem mount without
+				// further checks.
+				logger.Infof("unmounting stale hotplug volume mount at path %s", diskPath)
+				if out, unmountErr := unmountCommand(diskPath.Path()); unmountErr != nil {
+					unmountErr = fmt.Errorf("failed to unmount stale hotplug disk %v: %v: %w", diskPath, string(out), unmountErr)
+					logger.Warningf("Unable to unmount volume at path %s: %v", diskPath, unmountErr)
+					unmountErrors = append(unmountErrors, unmountErr)
+				} else if unlinkErr := safepath.UnlinkAtNoFollow(diskPath.Path()); unlinkErr != nil {
+					logger.Warningf("Unable to remove stale hotplug disk file at path %s: %v", diskPath, unlinkErr)
+					unmountErrors = append(unmountErrors, unlinkErr)
+				}
+			} else if err != nil {
 				logger.Warningf("Unable to unmount volume at path %s: %v", diskPath, err)
 				unmountErrors = append(unmountErrors, err)
 			} else if isBlock {
@@ -923,12 +966,41 @@ func (m *volumeMounter) UnmountAll(vmi *v1.VirtualMachineInstance, cgroupManager
 			return fmt.Errorf("failed to unmount all hotplug volumes: %w", errors.Join(unmountErrors...))
 		}
 
-		err = m.deleteMountTargetRecord(vmi)
-		if err != nil {
-			return err
+		if record != nil {
+			err = m.deleteMountTargetRecord(vmi)
+			if err != nil {
+				return err
+			}
 		}
 	}
 	return nil
+}
+
+// getHotplugTargetEntriesInWorld lists the entries that exist under the
+// hotplug-disks directories of the VMI's pods on this node, independently of
+// the mount target record content. Pods of the VMI on other nodes have no
+// directory here and are skipped naturally.
+func (m *volumeMounter) getHotplugTargetEntriesInWorld(vmi *v1.VirtualMachineInstance) []vmiMountTargetEntry {
+	var entries []vmiMountTargetEntry
+	for podUID := range vmi.Status.ActivePods {
+		podPath, err := m.hotplugDiskManager.GetHotplugTargetPodPathOnHost(podUID)
+		if err != nil {
+			continue
+		}
+		dirEntries, err := os.ReadDir(unsafepath.UnsafeAbsolute(podPath.Raw()))
+		if err != nil {
+			continue
+		}
+		for _, dirEntry := range dirEntries {
+			if dirEntry.IsDir() {
+				continue
+			}
+			entries = append(entries, vmiMountTargetEntry{
+				TargetFile: filepath.Join(unsafepath.UnsafeAbsolute(podPath.Raw()), dirEntry.Name()),
+			})
+		}
+	}
+	return entries
 }
 
 // CleanupOrphanedCheckpoints unmounts hotplug volumes and deletes the mount

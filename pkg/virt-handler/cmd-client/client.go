@@ -186,6 +186,31 @@ func MarkSocketUnresponsive(socket string) error {
 	return err
 }
 
+// ClearSocketUnresponsive removes the mark left by MarkSocketUnresponsive.
+// The mark is a file, so without this a transient outage would condemn the
+// launcher for the rest of its pod's life.
+func ClearSocketUnresponsive(socket string) error {
+	dir, err := safepath.NewPathNoFollow(filepath.Dir(socket))
+	if err != nil {
+		if errors.Is(err, unix.ENOENT) {
+			return nil
+		}
+		return err
+	}
+	mark, err := safepath.JoinNoFollow(dir, StandardLauncherUnresponsiveFileName)
+	if err != nil {
+		if errors.Is(err, unix.ENOENT) {
+			return nil
+		}
+		return err
+	}
+	err = safepath.UnlinkAtNoFollow(mark)
+	if errors.Is(err, unix.ENOENT) {
+		return nil
+	}
+	return err
+}
+
 func SocketDirectoryOnHost(podUID string) string {
 	return filepath.Clean(fmt.Sprintf("/%s/%s/volumes/kubernetes.io~empty-dir/sockets", podsBaseDir, podUID))
 }

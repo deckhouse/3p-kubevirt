@@ -960,6 +960,70 @@ var _ = Describe("HotplugVolume", func() {
 			Expect(err).To(HaveOccurred(), "block device volume still exists %s", blockVolume)
 		})
 
+		It("UnmountAll should unmount a mount with a stale file handle", func() {
+			// The export backing the mount is destroyed while the mount is
+			// still in place: every stat through the mount fails with ESTALE,
+			// but the mount still blocks the kubelet from tearing down the
+			// pod directory, so it must be unmounted anyway.
+			stalePath, err := newFile(targetPodPath, "stalevolume.img")
+			Expect(err).ToNot(HaveOccurred())
+			stalePathAbs := unsafepath.UnsafeAbsolute(stalePath.Raw())
+
+			Expect(m.setMountTargetRecord(vmi, &vmiMountTargetRecord{
+				UsesSafePaths:      true,
+				MountTargetEntries: []vmiMountTargetEntry{{TargetFile: stalePathAbs}},
+			})).To(Succeed())
+
+			isBlockDevice = func(path *safepath.Path) (bool, error) {
+				return false, fmt.Errorf("error checking for block device: %w", syscall.ESTALE)
+			}
+			unmountCalled := false
+			unmountCommand = func(diskPath *safepath.Path) ([]byte, error) {
+				Expect(unsafepath.UnsafeAbsolute(diskPath.Raw())).To(Equal(stalePathAbs))
+				unmountCalled = true
+				return []byte("Success"), nil
+			}
+
+			Expect(m.UnmountAll(vmi, cgroupManagerMock)).To(Succeed())
+			Expect(unmountCalled).To(BeTrue())
+
+			_, err = os.Stat(stalePathAbs)
+			Expect(err).To(HaveOccurred(), "stale volume file still exists %s", stalePathAbs)
+			_, err = os.Stat(filepath.Join(tempDir, string(vmi.UID)))
+			Expect(err).To(HaveOccurred(), "the record should have been deleted")
+		})
+
+		It("UnmountAll should unmount a mount missing from the mount target record", func() {
+			// The record can lose entries: a cleanup pass deletes it while a
+			// volume migration re-mounts volumes into the pod. A mount that is
+			// not in the record must still be found through the pod directory
+			// and unmounted, otherwise the kubelet can never tear the pod down.
+			leakedPath, err := newFile(targetPodPath, "leakedvolume.img")
+			Expect(err).ToNot(HaveOccurred())
+			leakedAbs := unsafepath.UnsafeAbsolute(leakedPath.Raw())
+
+			// No mount target record exists at all.
+			isBlockDevice = func(path *safepath.Path) (bool, error) {
+				return false, nil
+			}
+			isMounted = func(path *safepath.Path) (bool, error) {
+				Expect(unsafepath.UnsafeAbsolute(path.Raw())).To(Equal(leakedAbs))
+				return true, nil
+			}
+			unmountCalled := false
+			unmountCommand = func(diskPath *safepath.Path) ([]byte, error) {
+				Expect(unsafepath.UnsafeAbsolute(diskPath.Raw())).To(Equal(leakedAbs))
+				unmountCalled = true
+				return []byte("Success"), nil
+			}
+
+			Expect(m.UnmountAll(vmi, cgroupManagerMock)).To(Succeed())
+			Expect(unmountCalled).To(BeTrue())
+
+			_, err = os.Stat(leakedAbs)
+			Expect(err).To(HaveOccurred(), "leaked volume file still exists %s", leakedAbs)
+		})
+
 		It("Should skip hotplug volumes missing from spec", func() {
 			block := k8sv1.PersistentVolumeBlock
 			vmi.Status.VolumeStatus = []v1.VolumeStatus{

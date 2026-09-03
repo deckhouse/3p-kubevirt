@@ -2265,7 +2265,7 @@ var _ = Describe("Manager", func() {
 			manager, _ := newLibvirtDomainManagerDefault()
 			Expect(manager.PrepareMigrationTarget(vmi, true, &cmdv1.VirtualMachineOptions{})).To(Succeed())
 
-			bootFailed, exists := manager.metadataCache.BootFailed.Load()
+			bootFailed, exists := metadataCache.BootFailed.Load()
 			Expect(exists).To(BeTrue())
 			Expect(bootFailed).To(BeTrue())
 		})
@@ -3640,6 +3640,35 @@ var _ = Describe("Manager helper functions", func() {
 				disk.FilesystemOverhead = &fakePercent
 				return disk
 			}),
+		)
+
+	})
+
+	Context("shouldExpandOnline", func() {
+
+		var disk api.Disk
+
+		BeforeEach(func() {
+			zeroPercent := v1.Percent("0")
+			capacity := int64(10 * 1024 * 1024 * 1024)
+			disk = api.Disk{
+				ExpandDisksEnabled: true,
+				FilesystemOverhead: &zeroPercent,
+				Capacity:           &capacity,
+				Source:             api.DiskSource{Dev: "/dev/hotplug"},
+			}
+		})
+
+		DescribeTable("should decide by the device capacity", func(deviceCapacity uint64, expected bool) {
+			ml := testing.NewLibvirt(gomock.NewController(GinkgoT()))
+			ml.DomainEXPECT().GetBlockInfo(gomock.Any(), gomock.Any()).Return(&libvirt.DomainBlockInfo{Capacity: deviceCapacity}, nil)
+			Expect(shouldExpandOnline(ml.VirtDomain, disk)).To(Equal(expected))
+		},
+			// A never-sized device must not be grown: the resize can only fail and
+			// the failed sync would block the whole VMI reconcile.
+			Entry("zero-capacity device is skipped", uint64(0), false),
+			Entry("device smaller than the PVC is expanded", uint64(5*1024*1024*1024), true),
+			Entry("device already at the PVC size is left alone", uint64(10*1024*1024*1024), false),
 		)
 
 	})
