@@ -12,6 +12,8 @@ import (
 
 	v1 "kubevirt.io/api/core/v1"
 
+	k8sv1 "k8s.io/api/core/v1"
+
 	"kubevirt.io/kubevirt/pkg/safepath"
 	"kubevirt.io/kubevirt/pkg/virt-handler/isolation"
 )
@@ -222,6 +224,62 @@ var _ = Describe("generateDeviceRulesForVMI", func() {
 	It("should not fail when /dev/bus/usb exists but is empty", func() {
 		Expect(os.MkdirAll(filepath.Join(tempDir, "dev", "bus", "usb"), 0755)).To(Succeed())
 		rules, err := generateDeviceRulesForVMI(&v1.VirtualMachineInstance{}, newMockIsolationWithMountRoot(), "")
+		Expect(err).ToNot(HaveOccurred())
+		Expect(rules).To(BeEmpty())
+	})
+})
+
+var _ = Describe("generateDeviceRulesForAttachedHotplugDevices", func() {
+	const volumeName = "hotplug-vol"
+
+	var (
+		ctrl    *gomock.Controller
+		tempDir string
+		vmi     *v1.VirtualMachineInstance
+	)
+
+	BeforeEach(func() {
+		ctrl = gomock.NewController(GinkgoT())
+		var err error
+		tempDir, err = os.MkdirTemp("", "cgroup-hotplug-device-rules")
+		Expect(err).ToNot(HaveOccurred())
+		DeferCleanup(os.RemoveAll, tempDir)
+
+		// Mimic a launcher rootfs where /var/run is a symlink to /run, as injected by some container runtimes.
+		Expect(os.MkdirAll(filepath.Join(tempDir, "run", "kubevirt", "hotplug-disks"), 0755)).To(Succeed())
+		Expect(os.MkdirAll(filepath.Join(tempDir, "var"), 0755)).To(Succeed())
+		Expect(os.Symlink("../run", filepath.Join(tempDir, "var", "run"))).To(Succeed())
+
+		blockMode := k8sv1.PersistentVolumeBlock
+		vmi = &v1.VirtualMachineInstance{
+			Status: v1.VirtualMachineInstanceStatus{
+				VolumeStatus: []v1.VolumeStatus{{
+					Name:                      volumeName,
+					HotplugVolume:             &v1.HotplugVolumeStatus{},
+					PersistentVolumeClaimInfo: &v1.PersistentVolumeClaimInfo{VolumeMode: &blockMode},
+				}},
+			},
+		}
+	})
+
+	newMockIsolationWithMountRoot := func() *isolation.MockIsolationResult {
+		mountRoot, err := safepath.JoinAndResolveWithRelativeRoot(tempDir)
+		Expect(err).ToNot(HaveOccurred())
+		isolationRes := isolation.NewMockIsolationResult(ctrl)
+		isolationRes.EXPECT().MountRoot().Return(mountRoot, nil).AnyTimes()
+		return isolationRes
+	}
+
+	It("should skip a hotplug volume that is not attached yet behind a symlinked /var/run", func() {
+		rules, err := generateDeviceRulesForAttachedHotplugDevices(vmi, newMockIsolationWithMountRoot())
+		Expect(err).ToNot(HaveOccurred())
+		Expect(rules).To(BeEmpty())
+	})
+
+	It("should resolve the hotplug volume path behind a symlinked /var/run", func() {
+		// A regular file is not a device node, so no rule is expected, but the path must be traversed without error.
+		Expect(os.WriteFile(filepath.Join(tempDir, "run", "kubevirt", "hotplug-disks", volumeName), nil, 0644)).To(Succeed())
+		rules, err := generateDeviceRulesForAttachedHotplugDevices(vmi, newMockIsolationWithMountRoot())
 		Expect(err).ToNot(HaveOccurred())
 		Expect(rules).To(BeEmpty())
 	})

@@ -24,6 +24,7 @@ import (
 
 	"kubevirt.io/kubevirt/pkg/safepath"
 	storagetypes "kubevirt.io/kubevirt/pkg/storage/types"
+	"kubevirt.io/kubevirt/pkg/unsafepath"
 	"kubevirt.io/kubevirt/pkg/virt-handler/isolation"
 )
 
@@ -189,8 +190,12 @@ func generateDeviceRulesForAttachedHotplugDevices(vmi *v1.VirtualMachineInstance
 	// resolveRule returns an allow-rule for the device node at relPath (relative to the pod mount root), or nil if
 	// the node is not present yet (device not attached) - in that case the corresponding mount/attach flow will add
 	// it later, so there is nothing to seed.
+	//
+	// Symlinks are resolved relative to the pod mount root instead of being rejected: the launcher rootfs may have
+	// /var/run as a symlink to /run (e.g. injected by the container runtime), and JoinNoFollow would fail with ENOTDIR
+	// on it, blocking VMI synchronization.
 	resolveRule := func(relPath string) (*devices.Rule, error) {
-		devicePath, err := safepath.JoinNoFollow(mountRoot, relPath)
+		devicePath, err := safepath.JoinAndResolveWithRelativeRoot(unsafepath.UnsafeAbsolute(mountRoot.Raw()), relPath)
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
 				return nil, nil
