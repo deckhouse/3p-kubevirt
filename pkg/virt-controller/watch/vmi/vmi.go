@@ -171,6 +171,13 @@ func NewController(templateService services.TemplateService,
 		return nil, err
 	}
 
+	_, err = vmInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+		UpdateFunc: c.updateVirtualMachinePlacementRules,
+	})
+	if err != nil {
+		return nil, err
+	}
+
 	return c, nil
 }
 
@@ -498,6 +505,31 @@ func (c *Controller) updateNode(old, cur interface{}) {
 		return
 	}
 	c.enqueueRunningVirtualMachineInstances()
+}
+
+// updateVirtualMachinePlacementRules wakes the VirtualMachineInstance when the placement rules the
+// VirtualMachine publishes for the search of a migration target change. Nothing else brings that
+// change in: the annotation lives on the VirtualMachine while the condition is calculated from the
+// VirtualMachineInstance, and the resync of the informers is measured in hours.
+func (c *Controller) updateVirtualMachinePlacementRules(old, cur interface{}) {
+	oldVM, ok := old.(*virtv1.VirtualMachine)
+	if !ok {
+		return
+	}
+	curVM, ok := cur.(*virtv1.VirtualMachine)
+	if !ok {
+		return
+	}
+	if oldVM.Annotations[migrationNodeAffinityTermsAnn] == curVM.Annotations[migrationNodeAffinityTermsAnn] {
+		return
+	}
+
+	// The VirtualMachineInstance carries the name of its VirtualMachine.
+	obj, exists, err := c.vmiIndexer.GetByKey(controller.NamespacedKey(curVM.Namespace, curVM.Name))
+	if err != nil || !exists {
+		return
+	}
+	c.enqueueVirtualMachine(obj)
 }
 
 func (c *Controller) enqueueRunningVirtualMachineInstances() {

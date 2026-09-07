@@ -644,10 +644,9 @@ func (c *Controller) updateStatus(vmi *virtv1.VirtualMachineInstance, pod *k8sv1
 
 func (c *Controller) syncNodePlacementCondition(vmi *virtv1.VirtualMachineInstance, pod *k8sv1.Pod) error {
 	status := k8sv1.ConditionFalse
-	templatePod, err := c.templateService.RenderLaunchManifest(vmi)
-	if err != nil {
-		return fmt.Errorf("failed to render pod manifest: %w", err)
-	}
+	// isChangedNodePlacement compares the node selector and the node affinity and nothing else, so
+	// the placement alone is rendered instead of the whole manifest.
+	templatePod := services.RenderPodPlacement(c.clusterConfig, vmi)
 	if c.isChangedNodePlacement(pod, templatePod) {
 		node, err := c.getNode(pod.Spec.NodeName)
 		if err != nil {

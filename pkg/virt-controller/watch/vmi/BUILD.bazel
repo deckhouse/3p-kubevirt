@@ -56,6 +56,7 @@ go_library(
 go_test(
     name = "go_default_test",
     srcs = [
+        "migration_target_bench_test.go",
         "resourceclaim-hotplug_test.go",
         "vmi_suite_test.go",
         "vmi_test.go",

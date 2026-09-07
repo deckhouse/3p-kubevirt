@@ -4588,6 +4588,182 @@ var _ = Describe("VirtualMachineInstance watcher", func() {
 
 			expectVMIWithMatcherConditions(vmi.Namespace, vmi.Name, availableMatcher)
 		})
+
+		// A VirtualMachineInstance whose only obstacle to a live migration is its volumes carries the
+		// node those volumes live on in its own node affinity, and the terms that keep holding once it
+		// has been migrated come from the annotation of the VirtualMachine.
+		Context("of a VirtualMachineInstance whose volumes travel along", func() {
+			const (
+				pinKey       = "topology.sds-local-volume-csi/node"
+				sourceNode   = "node-01"
+				noOwnTerms   = "[]"
+				brokenTerms  = "[{"
+				sourceTerms  = `[{"matchExpressions":[{"key":"kubernetes.io/hostname","operator":"In","values":["node-01"]}]}]`
+				anywhereTerm = `[{"matchExpressions":[{"key":"kubernetes.io/hostname","operator":"Exists"}]}]`
+			)
+
+			// Every node carries the topology label of the local volume provisioner, so the pin of the
+			// volumes matches the node they live on and nothing else.
+			localVolumeNode := func(name string) *k8sv1.Node {
+				node := schedulableNode(name)
+				node.Labels[pinKey] = name
+				node.Labels[k8sv1.LabelHostname] = name
+				return node
+			}
+
+			pinnedTo := func(nodeName string) *k8sv1.Affinity {
+				return &k8sv1.Affinity{NodeAffinity: &k8sv1.NodeAffinity{
+					RequiredDuringSchedulingIgnoredDuringExecution: &k8sv1.NodeSelector{
+						NodeSelectorTerms: []k8sv1.NodeSelectorTerm{{
+							MatchExpressions: []k8sv1.NodeSelectorRequirement{{
+								Key:      pinKey,
+								Operator: k8sv1.NodeSelectorOpIn,
+								Values:   []string{nodeName},
+							}},
+						}},
+					},
+				}}
+			}
+
+			DescribeTable("should sync the condition", func(
+				terms *string,
+				mutateVMI func(*virtv1.VirtualMachineInstance),
+				mutateTargetNode func(*k8sv1.Node),
+				matcher gomegaTypes.GomegaMatcher,
+			) {
+				vmi := newPendingVirtualMachine("testvmi")
+				vmi.Status.Phase = virtv1.Running
+
+				pod := newPodForVirtualMachine(vmi, k8sv1.PodRunning)
+				Expect(pod.Spec.NodeName).To(Equal(sourceNode))
+				vmi.Status.NodeName = pod.Spec.NodeName
+				vmi.Spec.Affinity = pinnedTo(pod.Spec.NodeName)
+				vmi.Status.Conditions = append(vmi.Status.Conditions,
+					virtv1.VirtualMachineInstanceCondition{
+						Type:   virtv1.VirtualMachineInstanceIsStorageLiveMigratable,
+						Status: k8sv1.ConditionTrue,
+					},
+					virtv1.VirtualMachineInstanceCondition{
+						Type:   virtv1.VirtualMachineInstanceIsMigratable,
+						Status: k8sv1.ConditionFalse,
+						Reason: virtv1.VirtualMachineInstanceReasonDisksNotMigratable,
+					},
+				)
+				if mutateVMI != nil {
+					mutateVMI(vmi)
+				}
+
+				vm := &virtv1.VirtualMachine{
+					ObjectMeta: metav1.ObjectMeta{Name: vmi.Name, Namespace: vmi.Namespace},
+					// The indexers of the informer walk the volumes of the template.
+					Spec: virtv1.VirtualMachineSpec{
+						Template: &virtv1.VirtualMachineInstanceTemplateSpec{},
+					},
+				}
+				if terms != nil {
+					vm.Annotations = map[string]string{migrationNodeAffinityTermsAnn: *terms}
+				}
+				Expect(controller.vmStore.Add(vm)).To(Succeed())
+
+				addActivePods(vmi, pod.UID, pod.Spec.NodeName)
+				addVirtualMachine(vmi)
+				addPod(pod)
+
+				targetNode := localVolumeNode(targetNodeName)
+				if mutateTargetNode != nil {
+					mutateTargetNode(targetNode)
+				}
+				Expect(nodeInformer.GetIndexer().Add(localVolumeNode(pod.Spec.NodeName))).To(Succeed())
+				Expect(nodeInformer.GetIndexer().Add(targetNode)).To(Succeed())
+
+				sanityExecute()
+
+				expectVMIWithMatcherConditions(vmi.Namespace, vmi.Name, matcher)
+			},
+				Entry("to True when the machine has no placement rules of its own",
+					pointer.P(noOwnTerms), nil, nil, availableMatcher),
+				Entry("to True when the placement rules of the machine allow the other node",
+					pointer.P(anywhereTerm), nil, nil, availableMatcher),
+				// The pin of the volumes is not the answer about such a machine, its own rules are.
+				Entry("to False when the placement rules of the machine leave no other node",
+					pointer.P(sourceTerms), nil, nil, notAvailableMatcher(noNodeMatchesPlacementMessage)),
+				Entry("to False when the VirtualMachine carries no such annotation",
+					nil, nil, nil, notAvailableMatcher(noNodeMatchesPlacementMessage)),
+				Entry("to False when the annotation cannot be parsed",
+					pointer.P(brokenTerms), nil, nil, notAvailableMatcher(noNodeMatchesPlacementMessage)),
+				Entry("to False when the volumes are not the only obstacle to a migration",
+					pointer.P(noOwnTerms),
+					func(vmi *virtv1.VirtualMachineInstance) {
+						kvcontroller.NewVirtualMachineInstanceConditionManager().
+							RemoveCondition(vmi, virtv1.VirtualMachineInstanceIsStorageLiveMigratable)
+					},
+					nil,
+					notAvailableMatcher(noNodeMatchesPlacementMessage)),
+				// The render of the placement rejects a node whose host model is obsolete, and that
+				// holds after a migration as much as before it, so the published terms replace the
+				// terms of the machine and not the whole node affinity.
+				Entry("to False when the only other node carries an obsolete host model",
+					pointer.P(anywhereTerm),
+					func(vmi *virtv1.VirtualMachineInstance) {
+						vmi.Spec.Domain.CPU = &virtv1.CPU{Model: virtv1.CPUModeHostModel}
+					},
+					func(node *k8sv1.Node) {
+						node.Labels[virtv1.NodeHostModelIsObsoleteLabel] = "true"
+					},
+					notAvailableMatcher(noNodeMatchesPlacementMessage)),
+			)
+		})
+	})
+
+	Context("placement rules published by the VirtualMachine", func() {
+		vmWithTerms := func(terms string) *virtv1.VirtualMachine {
+			vm := &virtv1.VirtualMachine{
+				ObjectMeta: metav1.ObjectMeta{Name: "testvmi", Namespace: k8sv1.NamespaceDefault},
+				Spec: virtv1.VirtualMachineSpec{
+					Template: &virtv1.VirtualMachineInstanceTemplateSpec{},
+				},
+			}
+			if terms != "" {
+				vm.Annotations = map[string]string{migrationNodeAffinityTermsAnn: terms}
+			}
+			return vm
+		}
+
+		// The annotation lives on the VirtualMachine while the condition is calculated from the
+		// VirtualMachineInstance, and the resync of the informers is measured in hours, so without
+		// this the answer about a migration target stays stale for as long.
+		// The VirtualMachineInstance is put into the store directly: addVirtualMachine enqueues it
+		// on its own, which would hide whether the handler under test did anything.
+		knownVMI := func() {
+			vmi := newPendingVirtualMachine("testvmi")
+			vmi.Status.Phase = virtv1.Running
+			Expect(controller.vmiIndexer.Add(vmi)).To(Succeed())
+			Expect(mockQueue.Len()).To(Equal(0))
+		}
+
+		It("should wake the VirtualMachineInstance when they change", func() {
+			knownVMI()
+
+			controller.updateVirtualMachinePlacementRules(vmWithTerms(""), vmWithTerms("[]"))
+
+			Expect(mockQueue.Len()).To(Equal(1))
+		})
+
+		It("should not wake it when nothing else about the VirtualMachine matters", func() {
+			knownVMI()
+
+			unrelated := vmWithTerms("[]")
+			unrelated.Labels = map[string]string{"changed": "yes"}
+			controller.updateVirtualMachinePlacementRules(vmWithTerms("[]"), unrelated)
+
+			Expect(mockQueue.Len()).To(Equal(0))
+		})
+
+		It("should not wake a VirtualMachineInstance that does not exist", func() {
+			controller.updateVirtualMachinePlacementRules(vmWithTerms(""), vmWithTerms("[]"))
+
+			Expect(mockQueue.Len()).To(Equal(0))
+		})
 	})
 
 	Context("Automatic Migration Requirement", func() {
