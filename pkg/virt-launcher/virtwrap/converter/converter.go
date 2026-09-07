@@ -1113,6 +1113,7 @@ func Convert_v1_VirtualMachineInstance_To_api_Domain(vmi *v1.VirtualMachineInsta
 		compute.NewIOThreadsDomainConfigurator(uint(ioThreadCount)),
 		compute.MemoryConfigurator{},
 		compute.RebootPolicyDomainConfigurator{},
+		compute.VIOMMUDomainConfigurator{},
 		compute.NewIOMMUFDConfigurator(c.IOMMUFDEnabled),
 	}
 

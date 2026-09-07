@@ -26,6 +26,7 @@ go_library(
         "sysinfo.go",
         "tpm.go",
         "usb_redir.go",
+        "viommu.go",
         "vsock.go",
         "watchdog.go",
     ],
