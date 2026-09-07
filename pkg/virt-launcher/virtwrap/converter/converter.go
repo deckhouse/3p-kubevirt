@@ -1887,6 +1887,22 @@ func Convert_v1_VirtualMachineInstance_To_api_Domain(vmi *v1.VirtualMachineInsta
 		domain.Spec.OS.Type.Machine = machine.Type
 	}
 
+	if vmi.Annotations[v1.EnableVIOMMUAnnotation] == "true" {
+		if domain.Spec.Features == nil {
+			domain.Spec.Features = &api.Features{}
+		}
+		// intremap requires the split irqchip provided by the qemu ioapic;
+		// caching_mode is required for VFIO to track guest DMA mappings.
+		domain.Spec.Features.IOAPIC = &api.FeatureIOAPIC{Driver: "qemu"}
+		domain.Spec.Devices.IOMMU = &api.IOMMUDevice{
+			Model: "intel",
+			Driver: &api.IOMMUDriver{
+				IntRemap:    "on",
+				CachingMode: "on",
+			},
+		}
+	}
+
 	if vmi.Spec.Domain.CPU != nil {
 		// Set VM CPU model and vendor
 		if vmi.Spec.Domain.CPU.Model != "" {

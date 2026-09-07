@@ -1208,6 +1208,30 @@ var _ = Describe("Converter", func() {
 			Entry("should be nil for arm64", arm64, BeNil()),
 		)
 
+		Context("when the vIOMMU annotation is set", func() {
+			It("should add the emulated intel iommu and the qemu ioapic", func() {
+				v1.SetObjectDefaults_VirtualMachineInstance(vmi)
+				vmi.Annotations = map[string]string{v1.EnableVIOMMUAnnotation: "true"}
+				domain := vmiToDomain(vmi, c)
+
+				Expect(domain.Spec.Devices.IOMMU).To(Equal(&api.IOMMUDevice{
+					Model: "intel",
+					Driver: &api.IOMMUDriver{
+						IntRemap:    "on",
+						CachingMode: "on",
+					},
+				}))
+				Expect(domain.Spec.Features.IOAPIC).To(Equal(&api.FeatureIOAPIC{Driver: "qemu"}))
+			})
+
+			It("should not add the iommu device without the annotation", func() {
+				v1.SetObjectDefaults_VirtualMachineInstance(vmi)
+				domain := vmiToDomain(vmi, c)
+
+				Expect(domain.Spec.Devices.IOMMU).To(BeNil())
+			})
+		})
+
 		Context("when downwardMetrics are exposed via virtio-serial", func() {
 			It("should set socket options", func() {
 				v1.SetObjectDefaults_VirtualMachineInstance(vmi)

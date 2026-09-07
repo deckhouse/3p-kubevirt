@@ -77,6 +77,12 @@ const (
 	StartStrategyPaused StartStrategy = "Paused"
 )
 
+// EnableVIOMMUAnnotation enables an emulated Intel IOMMU (vIOMMU) in the guest
+// when set to "true" on the VMI. The guest then builds real IOMMU groups, so
+// VFIO-based device passthrough works inside the virtual machine (nested
+// virtualization test stands). Requires the q35 machine type.
+const EnableVIOMMUAnnotation = "virtualization.deckhouse.io/enable-viommu"
+
 type USBMigrationStrategy string
 
 const (

@@ -313,6 +313,11 @@ type Features struct {
 	PVSpinlock *FeaturePVSpinlock `xml:"pvspinlock,omitempty"`
 	PMU        *FeatureState      `xml:"pmu,omitempty"`
 	VMPort     *FeatureState      `xml:"vmport,omitempty"`
+	IOAPIC     *FeatureIOAPIC     `xml:"ioapic,omitempty"`
+}
+
+type FeatureIOAPIC struct {
+	Driver string `xml:"driver,attr"`
 }
 
 const HypervModePassthrough = "passthrough"
@@ -537,6 +542,17 @@ type Devices struct {
 	TPMs         []TPM              `xml:"tpm,omitempty"`
 	VSOCK        *VSOCK             `xml:"vsock,omitempty"`
 	Memory       *MemoryDevice      `xml:"memory,omitempty"`
+	IOMMU        *IOMMUDevice       `xml:"iommu,omitempty"`
+}
+
+type IOMMUDevice struct {
+	Model  string       `xml:"model,attr"`
+	Driver *IOMMUDriver `xml:"driver,omitempty"`
+}
+
+type IOMMUDriver struct {
+	IntRemap    string `xml:"intremap,attr,omitempty"`
+	CachingMode string `xml:"caching_mode,attr,omitempty"`
 }
 
 type PanicDevice struct {
