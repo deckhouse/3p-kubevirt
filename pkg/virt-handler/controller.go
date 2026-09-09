@@ -78,6 +78,8 @@ const (
 	VMICrashed = "The VirtualMachineInstance crashed."
 	//VMIAbortingMigration is the reason set when migration is being aborted
 	VMIAbortingMigration = "VirtualMachineInstance is aborting migration."
+	// VMIMigrationAbortedBeforeStart is the event message when a migration is aborted before its libvirt job was created.
+	VMIMigrationAbortedBeforeStart = "VirtualMachineInstance migration aborted before it started."
 	//VMIMigrating in the reason set when the VMI is migrating
 	VMIMigrating = "VirtualMachineInstance is migrating."
 	//VMIMigrationTargetPrepared is the reason set when the migration target has been prepared

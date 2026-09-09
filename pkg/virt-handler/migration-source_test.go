@@ -58,6 +58,7 @@ import (
 	"kubevirt.io/kubevirt/pkg/pointer"
 	"kubevirt.io/kubevirt/pkg/safepath"
 	"kubevirt.io/kubevirt/pkg/testutils"
+	"kubevirt.io/kubevirt/pkg/util/migrations"
 	virtconfig "kubevirt.io/kubevirt/pkg/virt-config"
 	"kubevirt.io/kubevirt/pkg/virt-config/featuregate"
 	virtcache "kubevirt.io/kubevirt/pkg/virt-handler/cache"
@@ -448,6 +449,34 @@ var _ = Describe("VirtualMachineInstance migration target", func() {
 					}))))
 			client.EXPECT().CancelVirtualMachineMigration(vmi).Return(fmt.Errorf(errMsg))
 			Expect(controller.handleMigrationAbort(vmi, client)).To(MatchError(errMsg))
+		})
+
+		It("should finalize the migration as aborted when the launcher has no job for it yet", func() {
+			// virt-controller requests the abort right after the hand-off; when it lands
+			// before migrateVMI kicked the job off, nothing else will ever finish this
+			// migration, so the handler records the abort itself.
+			vmi := libvmi.New(libvmi.WithUID(vmiTestUUID),
+				libvmistatus.WithStatus(libvmistatus.New(
+					libvmistatus.WithMigrationState(v1.VirtualMachineInstanceMigrationState{
+						MigrationUID:   "123",
+						AbortRequested: true,
+					}))))
+			// The error arrives wrapped by the launcher client, not as the bare message.
+			client.EXPECT().CancelVirtualMachineMigration(vmi).Return(fmt.Errorf("server error. command CancelMigration failed: %q", migrations.CancelMigrationFailedVmiNotMigratingErr))
+
+			Expect(controller.handleMigrationAbort(vmi, client)).To(Succeed())
+			testutils.ExpectEvent(recorder, VMIMigrationAbortedBeforeStart)
+
+			Expect(vmi.Status.MigrationState).To(PointTo(MatchFields(IgnoreExtras, Fields{
+				"MigrationUID":   BeEquivalentTo("123"),
+				"AbortRequested": BeTrue(),
+				"AbortStatus":    Equal(v1.MigrationAbortSucceeded),
+				"Failed":         BeTrue(),
+				"Completed":      BeFalse(),
+				"FailureReason":  Equal(migrationAbortedBeforeStartReason),
+				"StartTimestamp": Not(BeNil()),
+				"EndTimestamp":   Not(BeNil()),
+			})))
 		})
 
 		It("should abort vmi migration vmi when migration object indicates deletion", func() {

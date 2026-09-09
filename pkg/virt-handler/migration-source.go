@@ -25,6 +25,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"libvirt.org/go/libvirtxml"
@@ -737,21 +738,49 @@ func (c *MigrationSourceController) updateDomainFunc(_, new interface{}) {
 	}
 }
 
+// migrationAbortedBeforeStartReason is the failure reason recorded for a migration
+// aborted before virt-launcher created its libvirt job.
+const migrationAbortedBeforeStartReason = "Live migration aborted before it started"
+
 func (c *MigrationSourceController) handleMigrationAbort(vmi *v1.VirtualMachineInstance, client cmdclient.LauncherClient) error {
 	if vmi.Status.MigrationState.AbortStatus == v1.MigrationAbortInProgress || vmi.Status.MigrationState.AbortStatus == v1.MigrationAbortSucceeded {
 		return nil
 	}
 
 	if err := client.CancelVirtualMachineMigration(vmi); err != nil {
-		if err.Error() == migrations.CancelMigrationFailedVmiNotMigratingErr {
-			// If migration did not even start there is no need to cancel it
-			log.Log.Object(vmi).Infof("skipping migration cancellation since vmi is not migrating")
+		// The launcher client wraps the response into `server error. command
+		// CancelMigration failed: "<message>"`, so the message is matched as a
+		// substring; an exact comparison never matches.
+		if strings.Contains(err.Error(), migrations.CancelMigrationFailedVmiNotMigratingErr) {
+			// The launcher has no job for this migration: the abort arrived before it
+			// was kicked off, and migrateVMI never starts a migration with an abort
+			// requested. Nothing else is going to finalize it, so it is finalized here
+			// as aborted, the same way a cancelled libvirt job would be.
+			log.Log.Object(vmi).Infof("migration %s aborted before it started", vmi.Status.MigrationState.MigrationUID)
+			finalizeMigrationAbortedBeforeStart(vmi.Status.MigrationState)
+			c.recorder.Event(vmi, k8sv1.EventTypeNormal, v1.Migrating.String(), VMIMigrationAbortedBeforeStart)
+			return nil
 		}
 		return err
 	}
 
 	c.recorder.Event(vmi, k8sv1.EventTypeNormal, v1.Migrating.String(), VMIAbortingMigration)
 	return nil
+}
+
+// finalizeMigrationAbortedBeforeStart records an abort of a migration whose libvirt
+// job was never created, in the shape virt-launcher reports a cancelled job: failed,
+// with an abort status and an end timestamp, so both virt-controller and the
+// migration target see a finished migration.
+func finalizeMigrationAbortedBeforeStart(state *v1.VirtualMachineInstanceMigrationState) {
+	now := metav1.Now()
+	if state.StartTimestamp == nil {
+		state.StartTimestamp = &now
+	}
+	state.EndTimestamp = &now
+	state.Failed = true
+	state.AbortStatus = v1.MigrationAbortSucceeded
+	state.FailureReason = migrationAbortedBeforeStartReason
 }
 
 func configureParallelMigrationThreads(options *cmdclient.MigrationOptions, vm *v1.VirtualMachineInstance) {

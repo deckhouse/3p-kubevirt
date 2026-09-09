@@ -1357,6 +1357,52 @@ var _ = Describe("VirtualMachineInstance", func() {
 				mockHotplugVolumeMounter.EXPECT().UnmountAll(gomock.Any(), mockCgroupManager).Return(nil)
 				controller.processVmCleanup(vmi)
 			})
+
+			It("should perform local cleanup for a vmi that migrated away from this node", func() {
+				// After the handoff the VMI is owned by the target node, but the
+				// source node may still hold hotplug volume mounts of the completed
+				// source virt-launcher pod. While the VMI object exists this is the
+				// only reconcile path the former source takes, so it must clean up,
+				// otherwise the leaked mounts block the pod teardown and the VMI
+				// deletion deadlocks.
+				now := metav1.Now()
+				vmi := api2.NewMinimalVMI("testvmi")
+				vmi.UID = vmiTestUUID
+				vmi.Status.Phase = v1.Succeeded
+				vmi.Status.NodeName = "target-node"
+				vmi.Labels = map[string]string{v1.NodeNameLabel: "target-node"}
+				vmi.Status.MigrationState = &v1.VirtualMachineInstanceMigrationState{
+					Completed:    true,
+					EndTimestamp: &now,
+					SourceNode:   host,
+					TargetNode:   "target-node",
+				}
+				Expect(virtcache.GhostRecordGlobalStore.Add(vmi.Namespace, vmi.Name, "/some/socket", vmi.UID)).To(Succeed())
+
+				createVMI(vmi)
+
+				client.EXPECT().MigrationProxy(cmdclient.MigrationProxyAction(cmdclient.MigrationProxyActionStop)).Return(nil)
+				mockHotplugVolumeMounter.EXPECT().UnmountAll(gomock.Any(), mockCgroupManager).Return(nil)
+				sanityExecute()
+			})
+
+			It("should not clean up a migrated-away vmi before the handoff is recorded", func() {
+				vmi := api2.NewMinimalVMI("testvmi")
+				vmi.UID = vmiTestUUID
+				vmi.Status.Phase = v1.Running
+				vmi.Status.NodeName = "target-node"
+				vmi.Labels = map[string]string{v1.NodeNameLabel: "target-node"}
+				vmi.Status.MigrationState = &v1.VirtualMachineInstanceMigrationState{
+					SourceNode: host,
+					TargetNode: "target-node",
+				}
+				Expect(virtcache.GhostRecordGlobalStore.Add(vmi.Namespace, vmi.Name, "/some/socket", vmi.UID)).To(Succeed())
+
+				createVMI(vmi)
+
+				// no UnmountAll expected: the handoff is not recorded on the VMI
+				sanityExecute()
+			})
 		})
 
 		Context("hotplug status events", func() {
@@ -1817,6 +1863,34 @@ var _ = Describe("VirtualMachineInstance", func() {
 
 			blockMigrate, err := controller.checkVolumesForMigration(vmi)
 			Expect(blockMigrate).To(BeTrue())
+			Expect(err).ToNot(HaveOccurred())
+		})
+		It("should not require block migration for a hotplugged container disk", func() {
+			vmi := api2.NewMinimalVMI("testvmi")
+			vmi.Spec.Domain.Devices.Disks = []v1.Disk{
+				{
+					Name: "hotplug-cd",
+					DiskDevice: v1.DiskDevice{
+						Disk: &v1.DiskTarget{
+							Bus: v1.DiskBusSCSI,
+						},
+					},
+				},
+			}
+			vmi.Spec.Volumes = []v1.Volume{
+				{
+					Name: "hotplug-cd",
+					VolumeSource: v1.VolumeSource{
+						ContainerDisk: &v1.ContainerDiskSource{
+							Image:        "registry.example.com/image:latest",
+							Hotpluggable: true,
+						},
+					},
+				},
+			}
+
+			blockMigrate, err := controller.checkVolumesForMigration(vmi)
+			Expect(blockMigrate).To(BeFalse())
 			Expect(err).ToNot(HaveOccurred())
 		})
 		It("should migrate shared disks without blockMigration flag", func() {

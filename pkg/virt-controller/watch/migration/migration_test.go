@@ -2196,24 +2196,14 @@ var _ = Describe("Migration watcher", func() {
 
 		// Without this the phases keep progressing and the abort is only issued in
 		// MigrationRunning, which virt-handler reaches by starting the migration first.
-		DescribeTable("should finalize the migration on the VMI before it can start", func(phase virtv1.VirtualMachineInstanceMigrationPhase) {
-			handOff(phase, nil)
-
-			sanityExecute()
-
-			testutils.ExpectEvent(recorder, virtcontroller.FailedMigrationReason)
-			expectVirtualMachineInstanceMigrationState(vmi.Namespace, vmi.Name, PointTo(MatchFields(IgnoreExtras, Fields{
-				"MigrationUID": Equal(migration.UID),
-				"Failed":       BeTrue(),
-				"Completed":    BeTrue(),
-			})))
-		},
-			Entry("while preparing the target", virtv1.MigrationPreparingTarget),
-			Entry("once the target is ready", virtv1.MigrationTargetReady),
-		)
-
-		DescribeTable("should request an abort once the migration has started", func(phase virtv1.VirtualMachineInstanceMigrationPhase) {
-			handOff(phase, pointer.P(metav1.Now()))
+		//
+		// The controller must not fail the migration itself when startTimestamp is
+		// still nil: virt-handler fills it in asynchronously after the libvirt job has
+		// already been kicked off, so the controller cannot tell a not-yet-started
+		// migration from a just-started one. It only requests the abort, virt-handler
+		// finalizes it in both cases.
+		DescribeTable("should request an abort and leave the outcome to virt-handler", func(phase virtv1.VirtualMachineInstanceMigrationPhase, startTimestamp *metav1.Time) {
+			handOff(phase, startTimestamp)
 
 			sanityExecute()
 
@@ -2222,10 +2212,13 @@ var _ = Describe("Migration watcher", func() {
 				"MigrationUID":   Equal(migration.UID),
 				"AbortRequested": BeTrue(),
 				"Failed":         BeFalse(),
+				"Completed":      BeFalse(),
 			})))
 		},
-			Entry("while preparing the target", virtv1.MigrationPreparingTarget),
-			Entry("once the target is ready", virtv1.MigrationTargetReady),
+			Entry("while preparing the target, before the start is recorded", virtv1.MigrationPreparingTarget, nil),
+			Entry("once the target is ready, before the start is recorded", virtv1.MigrationTargetReady, nil),
+			Entry("while preparing the target, once the migration has started", virtv1.MigrationPreparingTarget, pointer.P(metav1.Now())),
+			Entry("once the target is ready, once the migration has started", virtv1.MigrationTargetReady, pointer.P(metav1.Now())),
 		)
 	})
 

@@ -109,7 +109,7 @@ func IsMounted(mountPoint *safepath.Path) (isMounted bool, err error) {
 func IsBlockDevice(path *safepath.Path) (bool, error) {
 	fileInfo, err := safepath.StatAtNoFollow(path)
 	if err != nil {
-		return false, fmt.Errorf("error checking for block device: %v", err)
+		return false, fmt.Errorf("error checking for block device: %w", err)
 	}
 	if fileInfo.IsDir() || (fileInfo.Mode()&os.ModeDevice) == 0 {
 		return false, nil

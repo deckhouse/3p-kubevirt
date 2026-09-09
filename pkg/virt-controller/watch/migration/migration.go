@@ -1758,17 +1758,20 @@ func (c *Controller) sync(key string, migration *virtv1.VirtualMachineInstanceMi
 		// the phases keep progressing and the abort is only issued in MigrationRunning,
 		// which is reached once virt-handler has already started the migration. In other
 		// words, canceling would require the migration to run first.
+		//
+		// The abort is only requested, never finalized here: a nil startTimestamp does
+		// not prove the migration has not started, virt-handler copies it from the
+		// launcher metadata asynchronously after the libvirt job is already running.
+		// Failing the migration from the controller in that window makes the source
+		// handler tear down its migration proxy under a live job, which then dies with
+		// "client socket is closed" and never reports an abort status. virt-handler
+		// knows whether the job exists and finalizes the abort either way.
 		if migration.DeletionTimestamp != nil && !migration.IsFinal() &&
-			vmi.Status.MigrationState != nil &&
+			vmi.IsMigrationSynchronized(migration) &&
 			!vmi.Status.MigrationState.Failed &&
-			!vmi.Status.MigrationState.Completed {
-			if vmi.Status.MigrationState.StartTimestamp == nil {
-				// virt-handler never kicked it off, so the controller owns the outcome.
-				return c.handleMarkMigrationFailedOnVMI(migration, vmi)
-			}
-			if vmi.IsMigrationSynchronized(migration) {
-				return c.markMigrationAbortInVmiStatus(migration, vmi)
-			}
+			!vmi.Status.MigrationState.Completed &&
+			!vmi.Status.MigrationState.AbortRequested {
+			return c.markMigrationAbortInVmiStatus(migration, vmi)
 		}
 
 		if migration.IsLocalOrDecentralizedTarget() && (!targetPodExists || controller.PodIsDown(pod)) &&
