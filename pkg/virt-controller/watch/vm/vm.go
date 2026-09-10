@@ -3291,6 +3291,17 @@ func (c *Controller) addRestartRequiredIfNeeded(lastSeenVMSpec *virtv1.VirtualMa
 		lastSeenVM.Spec.Template.Spec.Domain.Firmware.UUID = currentVM.Spec.Template.Spec.Domain.Firmware.UUID
 	}
 
+	// NOTE: DVP renamed the generic CPU model used by the Discovery type of VMClass from "kvm64" to
+	// "qemu64". Virtual machines started before that switch keep "kvm64" in their last-seen spec, so the
+	// first update of such a virtual machine would be reported as a non-live-updatable CPU change and the
+	// virtual machine would be restarted only to end up with an equivalent CPU model. Treat both names as
+	// equal.
+	if lastSeenVM.Spec.Template.Spec.Domain.CPU != nil && currentVM.Spec.Template.Spec.Domain.CPU != nil &&
+		lastSeenVM.Spec.Template.Spec.Domain.CPU.Model == legacyGenericCPUModel &&
+		currentVM.Spec.Template.Spec.Domain.CPU.Model == genericCPUModel {
+		lastSeenVM.Spec.Template.Spec.Domain.CPU.Model = currentVM.Spec.Template.Spec.Domain.CPU.Model
+	}
+
 	if !equality.Semantic.DeepEqual(lastSeenVM.Spec.Template.Spec, currentVM.Spec.Template.Spec) {
 		message := "a non-live-updatable field was changed in the template spec"
 		if diff := templateSpecDiff(&lastSeenVM.Spec.Template.Spec, &currentVM.Spec.Template.Spec); diff != "" {
@@ -3343,6 +3354,13 @@ func templateSpecDiff(lastSeen, current *virtv1.VirtualMachineInstanceSpec) stri
 
 // bpfBridgeBindingName is the network binding plugin DVP connects bridge interfaces through.
 const bpfBridgeBindingName = "bpfbridge"
+
+// genericCPUModel and legacyGenericCPUModel are the current and the former names of the generic CPU model
+// DVP uses for the Discovery type of VMClass.
+const (
+	genericCPUModel       = "qemu64"
+	legacyGenericCPUModel = "kvm64"
+)
 
 // alignBridgeWithBpfBridgeBinding rewrites .Bridge interfaces in ifaces to the bpfbridge binding, but only
 // for interfaces that desiredIfaces binds that way. Both forms describe the same bridge connection, so the
