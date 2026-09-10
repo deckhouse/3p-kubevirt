@@ -195,6 +195,14 @@ type DomainJobInfo struct {
 	Iteration               uint32
 	AutoConvergeThrottleSet bool
 	AutoConvergeThrottle    uint32
+	// Downtime is how long the guest was actually paused, in milliseconds, and
+	// DowntimeNet the same without the time spent transferring over the network.
+	// Both are only known once a migration has finished, and only on the node the
+	// guest arrived at: the source domain is gone by then.
+	DowntimeSet    bool
+	Downtime       uint64
+	DowntimeNetSet bool
+	DowntimeNet    uint64
 }
 
 type DomainStatsDirtyRate struct {

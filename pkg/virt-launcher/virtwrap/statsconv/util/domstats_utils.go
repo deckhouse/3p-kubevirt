@@ -205,7 +205,11 @@ var Testdataexpected = `{
      "IterationSet": false,
      "Iteration": 0,
      "AutoConvergeThrottleSet": false,
-     "AutoConvergeThrottle": 0
+     "AutoConvergeThrottle": 0,
+     "DowntimeSet": false,
+     "Downtime": 0,
+     "DowntimeNetSet": false,
+     "DowntimeNet": 0
    },
    "Name": "testName", 
    "Net": [

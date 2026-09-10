@@ -420,6 +420,14 @@ type MigrationMetadata struct {
 	FailureReason  string           `xml:"failureReason,omitempty"`
 	AbortStatus    string           `xml:"abortStatus,omitempty"`
 	Mode           v1.MigrationMode `xml:"mode,omitempty"`
+	// Downtime is how long the migration stopped the guest, in milliseconds, and
+	// DowntimeNet the part of it that was not spent transferring over the network.
+	// Only the destination has these: a successful migration takes the source
+	// domain with it, and the record goes along. They are named after what the
+	// hypervisor calls them, because that is what this struct mirrors; the unit
+	// belongs in the field name of the API this feeds, not here.
+	Downtime    *uint64 `xml:"downtime,omitempty"`
+	DowntimeNet *uint64 `xml:"downtimeNet,omitempty"`
 }
 
 type GracePeriodMetadata struct {

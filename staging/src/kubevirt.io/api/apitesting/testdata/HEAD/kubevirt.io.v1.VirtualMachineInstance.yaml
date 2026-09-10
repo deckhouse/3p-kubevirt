@@ -714,6 +714,8 @@ status:
     abortRequested: true
     abortStatus: abortStatusValue
     completed: true
+    downtimeMilliseconds: 18446744073709551596
+    downtimeWithoutNetworkMilliseconds: 18446744073709551582
     endTimestamp: "1988-01-01T01:01:01Z"
     failed: true
     failureReason: failureReasonValue

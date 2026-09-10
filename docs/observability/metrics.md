@@ -56,6 +56,8 @@
 | kubevirt_vmi_migration_data_total_bytes | Metric | Counter | The total Guest OS data to be migrated to the new VM. |
 | kubevirt_vmi_migration_dirty_memory_rate_bytes | Metric | Gauge | The rate of memory being dirty in the Guest OS. |
 | kubevirt_vmi_migration_disk_transfer_rate_bytes | Metric | Gauge | The rate at which the memory is being transferred. |
+| kubevirt_vmi_migration_downtime_seconds | Metric | Gauge | How long the guest was actually paused by the migration it arrived on. This is the outcome a downtime target is set against. A migration that failed or was aborted leaves no value behind. |
+| kubevirt_vmi_migration_downtime_without_network_seconds | Metric | Gauge | The paused time excluding what was spent transferring over the network. The gap to the total downtime is the part a faster or less congested path would remove. |
 | kubevirt_vmi_migration_end_time_seconds | Metric | Gauge | The time at which the migration ended. |
 | kubevirt_vmi_migration_failed | Metric | Gauge | Indicates if the VMI migration failed. |
 | kubevirt_vmi_migration_phase_transition_time_from_creation_seconds | Metric | Histogram | Histogram of VM migration phase transitions duration from creation time in seconds. |

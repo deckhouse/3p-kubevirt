@@ -2861,6 +2861,16 @@ func (in *MigrationMetadata) DeepCopyInto(out *MigrationMetadata) {
 		in, out := &in.EndTimestamp, &out.EndTimestamp
 		*out = (*in).DeepCopy()
 	}
+	if in.Downtime != nil {
+		in, out := &in.Downtime, &out.Downtime
+		*out = new(uint64)
+		**out = **in
+	}
+	if in.DowntimeNet != nil {
+		in, out := &in.DowntimeNet, &out.DowntimeNet
+		*out = new(uint64)
+		**out = **in
+	}
 	return
 }
 

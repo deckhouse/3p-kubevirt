@@ -51,6 +51,7 @@ import (
 	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/api"
 	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/cli"
 	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/converter"
+	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/statsconv"
 )
 
 const (
@@ -378,6 +379,7 @@ func (m *TargetMigrationMonitor) StartMonitor() {
 				}
 				if jobInfo.Type == libvirt.DOMAIN_JOB_NONE || jobInfo.Operation != libvirt.DOMAIN_JOB_OPERATION_MIGRATION_IN {
 					// No migration job is currently running
+					m.recordMigrationDowntime(dom)
 					return true, nil
 				}
 				log.Log.Object(m.vmi).V(4).Infof("Incoming migration job active (type %d)", jobInfo.Type)
@@ -399,6 +401,49 @@ func (m *TargetMigrationMonitor) StartMonitor() {
 		m.notifier.SendEvent(event)
 		m.notifier.UpdateEvents(event)
 	}()
+}
+
+// recordMigrationDowntime puts how long the migration this guest arrived on
+// stopped it into the migration metadata of the domain.
+//
+// This tick is the only moment the figure can be had. Only the destination has a
+// record of the finished job at all — a successful migration takes the source
+// domain with it, and libvirt's record goes along — and libvirt keeps that record
+// only until the next job runs on the domain. Jobs follow immediately: the
+// finalization of the migration, and the dirty-rate calculation behind every
+// scrape of the domain statistics.
+//
+// It is also written before the end timestamp, so that virt-handler, which acts
+// on the end timestamp, never sees the one without the other.
+func (m *TargetMigrationMonitor) recordMigrationDowntime(dom cli.VirDomain) {
+	// KEEP_COMPLETED is not an optimisation. Without it libvirt hands the record
+	// over once and forgets it, so the first reader would consume the downtime and
+	// every later one would see nothing. Any new reader of these stats has to pass
+	// the flag as well.
+	info, err := dom.GetJobStats(libvirt.DOMAIN_JOB_STATS_COMPLETED | libvirt.DOMAIN_JOB_STATS_KEEP_COMPLETED)
+	if err != nil {
+		log.Log.Object(m.vmi).Reason(err).Warning("Failed to read the record of the completed migration")
+		return
+	}
+
+	jobStats := statsconv.Convert_libvirt_DomainJobInfo_To_stats_DomainJobInfo(info)
+	if info.Type != libvirt.DOMAIN_JOB_COMPLETED || (!jobStats.DowntimeSet && !jobStats.DowntimeNetSet) {
+		log.Log.Object(m.vmi).Infof("The record of the completed migration carries no downtime (job type %d)", info.Type)
+		return
+	}
+
+	m.metadataCache.Migration.WithSafeBlock(func(migrationMetadata *api.MigrationMetadata, _ bool) {
+		if jobStats.DowntimeSet {
+			migrationMetadata.Downtime = pointer.P(jobStats.Downtime)
+		}
+		if jobStats.DowntimeNetSet {
+			migrationMetadata.DowntimeNet = pointer.P(jobStats.DowntimeNet)
+		}
+	})
+
+	if jobStats.DowntimeSet {
+		log.Log.Object(m.vmi).Infof("The migration this guest arrived on paused it for %d ms", jobStats.Downtime)
+	}
 }
 
 func setEndTimestamp(metadataCache *metadata.Cache) {

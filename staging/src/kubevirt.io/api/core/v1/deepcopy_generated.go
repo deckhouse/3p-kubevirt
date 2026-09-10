@@ -5802,6 +5802,16 @@ func (in *VirtualMachineInstanceMigrationState) DeepCopyInto(out *VirtualMachine
 		*out = new(VirtualMachineInstanceMigrationTargetState)
 		(*in).DeepCopyInto(*out)
 	}
+	if in.DowntimeMilliseconds != nil {
+		in, out := &in.DowntimeMilliseconds, &out.DowntimeMilliseconds
+		*out = new(uint64)
+		**out = **in
+	}
+	if in.DowntimeWithoutNetworkMilliseconds != nil {
+		in, out := &in.DowntimeWithoutNetworkMilliseconds, &out.DowntimeWithoutNetworkMilliseconds
+		*out = new(uint64)
+		**out = **in
+	}
 	return
 }
 

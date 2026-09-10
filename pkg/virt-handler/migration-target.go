@@ -246,6 +246,12 @@ func domainIsActiveOnTarget(domain *api.Domain) bool {
 func (c *MigrationTargetController) ackMigrationCompletion(vmi *v1.VirtualMachineInstance, domain *api.Domain) {
 	migrationMetadata := domain.Spec.Metadata.KubeVirt.Migration
 	vmi.Status.MigrationState.EndTimestamp = migrationMetadata.EndTimestamp
+	// What the migration cost the guest is known only here: a successful migration
+	// takes the source domain with it, and libvirt's record of the finished job
+	// goes along. Left unset when the hypervisor did not report it, so that a zero
+	// is never mistaken for "the guest was not paused".
+	vmi.Status.MigrationState.DowntimeMilliseconds = migrationMetadata.Downtime
+	vmi.Status.MigrationState.DowntimeWithoutNetworkMilliseconds = migrationMetadata.DowntimeNet
 	// The source samples StartTimestamp from the domain on resync, so a
 	// migration that finishes within one resync interval leaves it nil, while
 	// the TargetReady -> Running transition and migrationNeedsFinalization

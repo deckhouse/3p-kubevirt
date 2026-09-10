@@ -1187,6 +1187,18 @@ type VirtualMachineInstanceMigrationState struct {
 	TargetState *VirtualMachineInstanceMigrationTargetState `json:"targetState,omitempty"`
 	// The type of migration network, either 'pod' or 'migration'
 	MigrationNetworkType MigrationNetworkType `json:"migrationNetworkType,omitempty"`
+
+	// DowntimeMilliseconds is how long the guest was actually paused by this
+	// migration, as reported by the destination once it completed. It is the
+	// outcome a downtime target is set against.
+	//
+	// A migration that failed or was aborted leaves it unset rather than zero: a
+	// reported zero would read as "the guest was never paused".
+	DowntimeMilliseconds *uint64 `json:"downtimeMilliseconds,omitempty"`
+	// DowntimeWithoutNetworkMilliseconds is the paused time excluding what was
+	// spent transferring over the network. The gap to the total downtime is the
+	// part a faster or less congested path would remove.
+	DowntimeWithoutNetworkMilliseconds *uint64 `json:"downtimeWithoutNetworkMilliseconds,omitempty"`
 }
 
 type MigrationAbortStatus string

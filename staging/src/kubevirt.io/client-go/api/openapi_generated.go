@@ -27321,6 +27321,20 @@ func schema_kubevirtio_api_core_v1_VirtualMachineInstanceMigrationState(ref comm
 							Format:      "",
 						},
 					},
+					"downtimeMilliseconds": {
+						SchemaProps: spec.SchemaProps{
+							Description: "DowntimeMilliseconds is how long the guest was actually paused by this migration, as reported by the destination once it completed. It is the outcome a downtime target is set against.\n\nA migration that failed or was aborted leaves it unset rather than zero: a reported zero would read as \"the guest was never paused\".",
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+					"downtimeWithoutNetworkMilliseconds": {
+						SchemaProps: spec.SchemaProps{
+							Description: "DowntimeWithoutNetworkMilliseconds is the paused time excluding what was spent transferring over the network. The gap to the total downtime is the part a faster or less congested path would remove.",
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
 				},
 			},
 		},

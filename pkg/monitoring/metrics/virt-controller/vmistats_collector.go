@@ -58,6 +58,8 @@ var (
 			vmiAddresses,
 			vmiMigrationStartTime,
 			vmiMigrationEndTime,
+			vmiMigrationDowntime,
+			vmiMigrationDowntimeWithoutNetwork,
 			vmiVnicInfo,
 		},
 		CollectCallback: vmiStatsCollectorCallback,
@@ -116,6 +118,25 @@ var (
 			Help: "The time at which the migration ended.",
 		},
 		[]string{"node", "namespace", "name", "migration_name", "status"},
+	)
+
+	vmiMigrationDowntime = operatormetrics.NewGaugeVec(
+		operatormetrics.MetricOpts{
+			Name: "kubevirt_vmi_migration_downtime_seconds",
+			Help: "How long the guest was actually paused by the migration it arrived on. This is " +
+				"the outcome a downtime target is set against. A migration that failed or was " +
+				"aborted leaves no value behind.",
+		},
+		[]string{"node", "namespace", "name", "migration_name"},
+	)
+
+	vmiMigrationDowntimeWithoutNetwork = operatormetrics.NewGaugeVec(
+		operatormetrics.MetricOpts{
+			Name: "kubevirt_vmi_migration_downtime_without_network_seconds",
+			Help: "The paused time excluding what was spent transferring over the network. The gap " +
+				"to the total downtime is the part a faster or less congested path would remove.",
+		},
+		[]string{"node", "namespace", "name", "migration_name"},
 	)
 
 	vmiVnicInfo = operatormetrics.NewGaugeVec(
@@ -401,6 +422,26 @@ func collectVMIMigrationTime(vmi *k6tv1.VirtualMachineInstance) []operatormetric
 			Labels: []string{vmi.Status.NodeName, vmi.Namespace, vmi.Name, migrationName,
 				calculateMigrationStatus(vmi.Status.MigrationState),
 			},
+		})
+	}
+
+	// The downtime is reported in seconds because metrics are in base units, while
+	// the status keeps the milliseconds the hypervisor reports. Both fields are
+	// left unset by a migration that did not complete, and an unset field must not
+	// become a zero here: that would read as "the guest was never paused".
+	labels := []string{vmi.Status.NodeName, vmi.Namespace, vmi.Name, migrationName}
+	if downtime := vmi.Status.MigrationState.DowntimeMilliseconds; downtime != nil {
+		cr = append(cr, operatormetrics.CollectorResult{
+			Metric: vmiMigrationDowntime,
+			Value:  float64(*downtime) / 1000,
+			Labels: labels,
+		})
+	}
+	if downtime := vmi.Status.MigrationState.DowntimeWithoutNetworkMilliseconds; downtime != nil {
+		cr = append(cr, operatormetrics.CollectorResult{
+			Metric: vmiMigrationDowntimeWithoutNetwork,
+			Value:  float64(*downtime) / 1000,
+			Labels: labels,
 		})
 	}
 

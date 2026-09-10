@@ -72,6 +72,13 @@ var _ = Describe("client", func() {
 				Operation: domainJobOperation,
 			}, domainJobError
 		}).AnyTimes()
+		mockLibvirt.DomainEXPECT().GetJobStats(gomock.Any()).Return(&libvirt.DomainJobInfo{
+			Type:           libvirt.DOMAIN_JOB_COMPLETED,
+			DowntimeSet:    true,
+			Downtime:       412,
+			DowntimeNetSet: true,
+			DowntimeNet:    87,
+		}, nil).AnyTimes()
 		mockLibvirt.DomainEXPECT().Free().Return(nil).AnyTimes()
 		eventChan := make(chan watch.Event, 100)
 		vmi := api2.NewMinimalVMI("fake-vmi")
@@ -99,6 +106,11 @@ var _ = Describe("client", func() {
 			migrationMetadata, exists := metadataCache.Migration.Load()
 			return exists && migrationMetadata.EndTimestamp != nil
 		}).WithPolling(200 * time.Millisecond).WithTimeout(2 * time.Second).Should(BeTrue())
+
+		By("Ensuring the downtime the migration cost the guest is recorded along with it")
+		migrationMetadata, _ := metadataCache.Migration.Load()
+		Expect(migrationMetadata.Downtime).To(HaveValue(BeEquivalentTo(412)))
+		Expect(migrationMetadata.DowntimeNet).To(HaveValue(BeEquivalentTo(87)))
 	},
 		Entry("with a migration then no migration", libvirt.DOMAIN_JOB_BOUNDED, libvirt.DOMAIN_JOB_NONE,
 			libvirt.DOMAIN_JOB_OPERATION_MIGRATION_IN, libvirt.DOMAIN_JOB_OPERATION_UNKNOWN,
@@ -112,4 +124,34 @@ var _ = Describe("client", func() {
 		Entry("with an error then another operation", libvirt.DOMAIN_JOB_NONE, libvirt.DOMAIN_JOB_BOUNDED,
 			libvirt.DOMAIN_JOB_OPERATION_UNKNOWN, libvirt.DOMAIN_JOB_OPERATION_BACKUP,
 			fmt.Errorf("error")))
+
+	It("Should end the migration without a downtime when libvirt kept no record of the job", func() {
+		ctrl := gomock.NewController(GinkgoT())
+		mockLibvirt := testing.NewLibvirt(ctrl)
+		mockLibvirt.ConnectionEXPECT().LookupDomainByName(gomock.Any()).Return(mockLibvirt.VirtDomain, nil).AnyTimes()
+		mockLibvirt.DomainEXPECT().GetJobInfo().Return(&libvirt.DomainJobInfo{
+			Type:      libvirt.DOMAIN_JOB_NONE,
+			Operation: libvirt.DOMAIN_JOB_OPERATION_UNKNOWN,
+		}, nil).AnyTimes()
+		mockLibvirt.DomainEXPECT().GetJobStats(gomock.Any()).Return(&libvirt.DomainJobInfo{
+			Type: libvirt.DOMAIN_JOB_NONE,
+		}, nil).AnyTimes()
+		mockLibvirt.DomainEXPECT().Free().Return(nil).AnyTimes()
+
+		metadataCache := metadata.NewCache()
+		monitor := NewTargetMigrationMonitor(mockLibvirt.VirtConnection, make(chan watch.Event, 100),
+			api2.NewMinimalVMI("fake-vmi"), api.NewMinimalDomain("test"), metadataCache, &eventNotifier{})
+		monitor.StartMonitor()
+
+		By("Ensuring the migration is still ended")
+		Eventually(func() bool {
+			migrationMetadata, exists := metadataCache.Migration.Load()
+			return exists && migrationMetadata.EndTimestamp != nil
+		}).WithPolling(200 * time.Millisecond).WithTimeout(2 * time.Second).Should(BeTrue())
+
+		By("Ensuring no downtime is reported, so that a zero is never read as an unpaused guest")
+		migrationMetadata, _ := metadataCache.Migration.Load()
+		Expect(migrationMetadata.Downtime).To(BeNil())
+		Expect(migrationMetadata.DowntimeNet).To(BeNil())
+	})
 })

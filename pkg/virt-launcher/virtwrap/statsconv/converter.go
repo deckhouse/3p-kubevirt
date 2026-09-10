@@ -237,6 +237,10 @@ func Convert_libvirt_DomainJobInfo_To_stats_DomainJobInfo(info *libvirt.DomainJo
 		Iteration:               uint32(info.MemIteration),
 		AutoConvergeThrottleSet: info.AutoConvergeThrottleSet,
 		AutoConvergeThrottle:    uint32(info.AutoConvergeThrottle),
+		DowntimeSet:             info.DowntimeSet,
+		Downtime:                info.Downtime,
+		DowntimeNetSet:          info.DowntimeNetSet,
+		DowntimeNet:             info.DowntimeNet,
 	}
 }
 
