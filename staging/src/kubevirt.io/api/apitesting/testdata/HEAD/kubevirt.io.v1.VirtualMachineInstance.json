@@ -1084,7 +1084,9 @@
         "nodeTopology": "nodeTopologyValue"
       },
       "migrationNetworkType": "migrationNetworkTypeValue",
-      "targetMemoryOverhead": "0"
+      "targetMemoryOverhead": "0",
+      "downtimeMilliseconds": 18446744073709551596,
+      "downtimeWithoutNetworkMilliseconds": 18446744073709551582
     },
     "migrationMethod": "migrationMethodValue",
     "migrationTransport": "migrationTransportValue",
