@@ -22,6 +22,8 @@ package conntrack
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -89,6 +91,133 @@ var _ = Describe("Conntrack Sync", func() {
 			encoded := []byte{1, 0, 0, 0, 10, 1, 2, 3}
 			_, err := DecodeSyncMessage(bytes.NewReader(encoded))
 			Expect(err).To(HaveOccurred())
+		})
+
+		It("should reject a declared length above the limit before reading", func() {
+			// Five bytes claiming 4 GiB of payload: rejected on the header, so
+			// nothing past it is read and no payload buffer is allocated.
+			r := &countingReader{Reader: bytes.NewReader(append([]byte{1, 0xff, 0xff, 0xff, 0xff}, make([]byte, 1024)...))}
+			_, err := DecodeSyncMessage(r)
+			Expect(err).To(MatchError(ContainSubstring("exceeds the limit")))
+			Expect(r.read).To(Equal(5))
+		})
+
+		It("should reject one byte over the limit and accept the limit itself", func() {
+			header := func(dataLen uint32) []byte {
+				buf := []byte{1, 0, 0, 0, 0}
+				binary.BigEndian.PutUint32(buf[1:5], dataLen)
+				return buf
+			}
+
+			_, err := DecodeSyncMessage(bytes.NewReader(header(maxMessageSize + 1)))
+			Expect(err).To(MatchError(ContainSubstring("exceeds the limit")))
+
+			// At the limit the header passes and only the missing payload fails,
+			// which proves the limit itself is not rejected.
+			_, err = DecodeSyncMessage(bytes.NewReader(header(maxMessageSize)))
+			Expect(err).To(MatchError(ContainSubstring("data length mismatch")))
+		})
+
+		It("should not allocate by declared length below the limit", func() {
+			// A header claiming the full limit with no payload behind it: the
+			// buffer only grows with bytes that actually arrive.
+			encoded := []byte{1, 0x20, 0, 0, 0}
+			_, err := DecodeSyncMessage(bytes.NewReader(encoded))
+			Expect(err).To(MatchError(ContainSubstring("data length mismatch")))
+		})
+
+		It("should leave bytes that follow the message in the stream", func() {
+			first := (&SyncMessage{Version: 1, Data: []byte("aa")}).Encode()
+			second := (&SyncMessage{Version: 2, Data: []byte("bbbb")}).Encode()
+			r := bytes.NewReader(append(first, second...))
+
+			decoded, err := DecodeSyncMessage(r)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(decoded.Data).To(Equal([]byte("aa")))
+
+			decoded, err = DecodeSyncMessage(r)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(decoded.Version).To(Equal(byte(2)))
+			Expect(decoded.Data).To(Equal([]byte("bbbb")))
+		})
+
+		It("should read no more than the declared length", func() {
+			// The reader holds 1 MiB, but decoding must consume only the 5
+			// header bytes and the 2 declared payload bytes.
+			r := &countingReader{Reader: bytes.NewReader(append([]byte{1, 0, 0, 0, 2}, make([]byte, 1024*1024)...))}
+			_, err := DecodeSyncMessage(r)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(r.read).To(Equal(5 + 2))
+		})
+
+		It("should not wait for EOF after a complete message", func() {
+			// The migration proxy does not propagate the close of the source
+			// connection, so EOF never reaches the target decoder.
+			sender, receiver := net.Pipe()
+			defer sender.Close()
+			defer receiver.Close()
+
+			original := &SyncMessage{Version: 1, Data: []byte("conntrack payload")}
+			go func() {
+				defer GinkgoRecover()
+				_, err := sender.Write(original.Encode())
+				Expect(err).ToNot(HaveOccurred())
+			}()
+
+			type result struct {
+				msg *SyncMessage
+				err error
+			}
+			done := make(chan result, 1)
+			go func() {
+				defer GinkgoRecover()
+				msg, err := DecodeSyncMessage(receiver)
+				done <- result{msg, err}
+			}()
+
+			var res result
+			Eventually(done, 2*time.Second).Should(Receive(&res))
+			Expect(res.err).ToNot(HaveOccurred())
+			Expect(res.msg.Data).To(Equal(original.Data))
+		})
+
+		It("should handle data larger than the read chunk", func() {
+			largeData := make([]byte, 2*readChunkSize+1234)
+			for i := range largeData {
+				largeData[i] = byte(i % 256)
+			}
+
+			original := &SyncMessage{Version: 1, Data: largeData}
+			decoded, err := DecodeSyncMessage(bytes.NewReader(original.Encode()))
+			Expect(err).ToNot(HaveOccurred())
+			Expect(decoded.Data).To(Equal(largeData))
+		})
+	})
+
+	Describe("Receive deadline", func() {
+		It("should give up on a stalled source instead of blocking forever", func() {
+			handler := NewTargetHandler(nil)
+			handler.receiveTimeout = 100 * time.Millisecond
+
+			// A truncated message whose sender never closes the connection: the
+			// migration proxy does not propagate the close, so only the deadline
+			// can release the receiving goroutine.
+			sender, receiver := net.Pipe()
+			defer sender.Close()
+			go func() {
+				defer GinkgoRecover()
+				_, err := sender.Write([]byte{1, 0, 0, 0, 10, 1, 2, 3})
+				Expect(err).ToNot(HaveOccurred())
+			}()
+
+			done := make(chan struct{})
+			go func() {
+				defer GinkgoRecover()
+				handler.handleProxyConnection("vmi-uid", receiver)
+				close(done)
+			}()
+
+			Eventually(done, 2*time.Second).Should(BeClosed())
 		})
 	})
 
@@ -316,3 +445,14 @@ var _ = Describe("Conntrack Sync", func() {
 		})
 	})
 })
+
+type countingReader struct {
+	io.Reader
+	read int
+}
+
+func (c *countingReader) Read(p []byte) (int, error) {
+	n, err := c.Reader.Read(p)
+	c.read += n
+	return n, err
+}
