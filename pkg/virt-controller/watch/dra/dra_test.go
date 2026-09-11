@@ -294,6 +294,37 @@ var _ = Describe("DRA Status Controller", func() {
 		)
 	})
 
+	Context("getDeviceInfo", func() {
+		newSliceWithAttributes := func(attrs map[resourcev1.QualifiedName]resourcev1.DeviceAttribute) *resourcev1.ResourceSlice {
+			slice := getTestResourceSlice("resourceslice1", "testnode", "device1", "driver1")
+			slice.Spec.Devices[0].Attributes = attrs
+			return slice
+		}
+
+		It("should prefer the standard pciBusID attribute over pcieRoot", func() {
+			controller := testDRAStatusController(nil, nil, nil, nil,
+				newSliceWithAttributes(map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+					PCIBusIDDeviceAttributeKey:   {StringValue: ptr.To("0000:3b:00.0")},
+					PCIAddressDeviceAttributeKey: {StringValue: ptr.To("pci0000:3b")},
+				}))
+
+			info, err := controller.getDeviceInfo("testnode", "device1", "driver1")
+			Expect(err).ToNot(HaveOccurred())
+			Expect(info.pciAddress).To(Equal("0000:3b:00.0"))
+		})
+
+		It("should fall back to pcieRoot when pciBusID is absent", func() {
+			controller := testDRAStatusController(nil, nil, nil, nil,
+				newSliceWithAttributes(map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+					PCIAddressDeviceAttributeKey: {StringValue: ptr.To("0000:00:01.0")},
+				}))
+
+			info, err := controller.getDeviceInfo("testnode", "device1", "driver1")
+			Expect(err).ToNot(HaveOccurred())
+			Expect(info.pciAddress).To(Equal("0000:00:01.0"))
+		})
+	})
+
 	Context("isAllDRAGPUsReconciled", func() {
 		var vmi *v1.VirtualMachineInstance
 
