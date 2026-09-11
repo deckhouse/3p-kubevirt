@@ -827,6 +827,8 @@ spec:
           resources:
           - pods
           verbs:
+          - get
+          - list
           - patch
         - apiGroups:
           - export.kubevirt.io

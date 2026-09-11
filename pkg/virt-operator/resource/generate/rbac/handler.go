@@ -164,7 +164,7 @@ func newHandlerClusterRole() *rbacv1.ClusterRole {
 					"pods",
 				},
 				Verbs: []string{
-					"patch",
+					"get", "list", "patch",
 				},
 			},
 		},
