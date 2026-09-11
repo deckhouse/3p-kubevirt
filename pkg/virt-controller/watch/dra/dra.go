@@ -61,9 +61,12 @@ const (
 	deleteNotifFailed        = "Failed to process delete notification"
 	tombstoneGetObjectErrFmt = "couldn't get object from tombstone %+v"
 
-	indexByNodeName                         = "byNodeName"
-	PCIAddressDeviceAttributeKey            = "resource.kubernetes.io/pciBusID"
-	MDevUUIDDeviceAttributeKey              = "mDevUUID"
+	indexByNodeName              = "byNodeName"
+	PCIBusIDDeviceAttributeKey   = "resource.kubernetes.io/pciBusID"
+	PCIAddressDeviceAttributeKey = "resource.kubernetes.io/pcieRoot"
+	MDevUUIDDeviceAttributeKey   = "resource.kubernetes.io/mDevUUID"
+	// MDevUUIDKEPDeviceAttributeKey is the unprefixed mdev attribute used by upstream KubeVirt.
+	MDevUUIDKEPDeviceAttributeKey           = "mDevUUID"
 	DeckhouseGPUPCIAddressAttributeKey      = "gpu.deckhouse.io/pciAddress"
 	DeckhouseGPUDeviceTypeAttributeKey      = "gpu.deckhouse.io/deviceType"
 	DeckhouseGPUSharingStrategyAttributeKey = "gpu.deckhouse.io/sharingStrategy"
@@ -707,16 +710,19 @@ func (c *DRAStatusController) getDeviceInfo(nodeName string, deviceName, driverN
 				if device.Name == deviceName {
 					info := deviceInfo{}
 
+					var pcieRoot string
 					for key, value := range device.Attributes {
 						if value.StringValue == nil {
 							continue
 						}
 						switch string(key) {
-						case PCIAddressDeviceAttributeKey:
+						case PCIBusIDDeviceAttributeKey:
 							info.pciAddress = normalizePCIAddress(*value.StringValue)
 						case DeckhouseGPUPCIAddressAttributeKey:
 							info.pciAddress = normalizePCIAddress(*value.StringValue)
-						case MDevUUIDDeviceAttributeKey:
+						case PCIAddressDeviceAttributeKey:
+							pcieRoot = normalizePCIAddress(*value.StringValue)
+						case MDevUUIDDeviceAttributeKey, MDevUUIDKEPDeviceAttributeKey:
 							info.mdevUUID = *value.StringValue
 						case DeckhouseGPUDeviceTypeAttributeKey:
 							info.deviceType = *value.StringValue
@@ -729,8 +735,11 @@ func (c *DRAStatusController) getDeviceInfo(nodeName string, deviceName, driverN
 							}
 						}
 					}
+					if info.pciAddress == "" {
+						info.pciAddress = pcieRoot
+					}
 					if info.pciAddress == "" && info.mdevUUID == "" && info.usbAddress == nil {
-						return deviceInfo{}, fmt.Errorf("neither %s, %s nor %s attribute found for device %s", PCIAddressDeviceAttributeKey, MDevUUIDDeviceAttributeKey, USBAddressAttributeKey, deviceName)
+						return deviceInfo{}, fmt.Errorf("neither %s,%s,%s or %s valid attribute found for device %s", PCIBusIDDeviceAttributeKey, PCIAddressDeviceAttributeKey, MDevUUIDDeviceAttributeKey, USBAddressAttributeKey, deviceName)
 					}
 					info.allowMultipleAllocations = ptr.Deref(device.AllowMultipleAllocations, false)
 					info.bindsToNode = ptr.Deref(device.BindsToNode, false)
