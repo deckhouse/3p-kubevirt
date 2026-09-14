@@ -40,6 +40,12 @@ import (
 
 const SyncTimeout = 200 * time.Millisecond
 
+// defaultReceiveTimeout bounds reading one sync message from the source node.
+// The migration proxy does not propagate the close of the source connection, so
+// without a deadline a source that stalls mid-message, or never sends anything,
+// would block the receiving goroutine for the lifetime of virt-handler.
+const defaultReceiveTimeout = 5 * time.Second
+
 type targetState struct {
 	proxyListener net.Listener
 	hookListener  net.Listener
@@ -48,15 +54,17 @@ type targetState struct {
 }
 
 type TargetHandler struct {
-	ciliumClient ConntrackClient
-	mu           sync.Mutex
-	states       map[types.UID]*targetState
+	ciliumClient   ConntrackClient
+	mu             sync.Mutex
+	states         map[types.UID]*targetState
+	receiveTimeout time.Duration
 }
 
 func NewTargetHandler(ciliumClient ConntrackClient) *TargetHandler {
 	return &TargetHandler{
-		ciliumClient: ciliumClient,
-		states:       make(map[types.UID]*targetState),
+		ciliumClient:   ciliumClient,
+		states:         make(map[types.UID]*targetState),
+		receiveTimeout: defaultReceiveTimeout,
 	}
 }
 
@@ -137,6 +145,10 @@ func (h *TargetHandler) acceptConnection(vmiUID types.UID, listener net.Listener
 
 func (h *TargetHandler) handleProxyConnection(vmiUID types.UID, conn net.Conn) {
 	defer conn.Close()
+
+	if err := conn.SetReadDeadline(time.Now().Add(h.receiveTimeout)); err != nil {
+		log.Log.Warningf("Conntrack sync: failed to set read deadline for VMI %s: %v", vmiUID, err)
+	}
 
 	msg, err := DecodeSyncMessage(conn)
 	if err != nil {
