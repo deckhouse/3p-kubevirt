@@ -60,11 +60,16 @@ func newPhase2PodNIC(vmi *v1.VirtualMachineInstance, network *v1.Network, iface 
 	if err != nil {
 		return nil, err
 	}
+	// A missing pod interface is a transient state, not a valid configuration: on a
+	// migration target the SDN provisions the interface asynchronously, so it can be
+	// absent when the target launcher runs its pre-start hook. Taking an empty name
+	// for it used to let "" travel into the libvirt spec generator, which failed on
+	// LinkByName("") and killed virt-launcher (see PlugPhase2). Reporting it instead
+	// keeps the sync retriable.
 	if ifaceLink == nil {
-		podnic.podInterfaceName = ""
-	} else {
-		podnic.podInterfaceName = ifaceLink.Attrs().Name
+		return nil, fmt.Errorf("pod interface of network %q is not present yet", network.Name)
 	}
+	podnic.podInterfaceName = ifaceLink.Attrs().Name
 
 	log.DefaultLogger().Infof("DHCP configurator is disabled for network %q", network.Name)
 	podnic.dhcpConfigurator = nil
@@ -91,8 +96,13 @@ func newPodNIC(vmi *v1.VirtualMachineInstance, network *v1.Network, iface *v1.In
 func (l *podNIC) PlugPhase2(domain *api.Domain) error {
 	precond.MustNotBeNil(domain)
 
+	// Critical() panics: a generator failure used to take the whole virt-launcher
+	// down, which virt-handler sees as an EOF on the command socket and the pod as
+	// Failed. Returning the error keeps the failure attached to the sync, so it is
+	// reported and retried instead of being fatal.
 	if err := l.domainGenerator.Generate(); err != nil {
-		log.Log.Reason(err).Critical("failed to create libvirt configuration")
+		log.Log.Reason(err).Errorf("failed to create libvirt configuration for %s", l.podInterfaceName)
+		return err
 	}
 
 	if l.dhcpConfigurator != nil {
