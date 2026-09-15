@@ -13,6 +13,7 @@ import (
 	"kubevirt.io/client-go/log"
 
 	"kubevirt.io/kubevirt/pkg/pointer"
+	kutil "kubevirt.io/kubevirt/pkg/util"
 	"kubevirt.io/kubevirt/pkg/virt-operator/resource/generate/components"
 	"kubevirt.io/kubevirt/pkg/virt-operator/resource/placement"
 	"kubevirt.io/kubevirt/pkg/virt-operator/util"
@@ -89,7 +90,15 @@ func (c *KubeVirtController) generateInstallStrategyJob(infraPlacement *v1.Compo
 					ServiceAccountName: "kubevirt-operator",
 					RestartPolicy:      k8sv1.RestartPolicyNever,
 					ImagePullSecrets:   config.GetImagePullSecrets(),
-					Tolerations:        []k8sv1.Toleration{{Operator: k8sv1.TolerationOpExists}},
+					// Same hardening as the virt-operator deployment the job
+					// runs the image of: an unprivileged user, no privilege
+					// escalation, no capabilities and a read-only rootfs.
+					SecurityContext: &k8sv1.PodSecurityContext{
+						RunAsNonRoot: pointer.P(true),
+						RunAsUser:    pointer.P(int64(kutil.NonRootUID)),
+						RunAsGroup:   pointer.P(int64(kutil.NonRootUID)),
+					},
+					Tolerations: []k8sv1.Toleration{{Operator: k8sv1.TolerationOpExists}},
 					Affinity: &k8sv1.Affinity{PodAffinity: &k8sv1.PodAffinity{
 						RequiredDuringSchedulingIgnoredDuringExecution: []k8sv1.PodAffinityTerm{{
 							TopologyKey: "kubernetes.io/hostname",
