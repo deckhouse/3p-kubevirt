@@ -62,6 +62,7 @@ go_test(
         "updatereactor_test.go",
         "vm_suite_test.go",
         "vm_test.go",
+        "volume_migration_finalize_test.go",
     ],
     embed = [":go_default_library"],
     deps = [

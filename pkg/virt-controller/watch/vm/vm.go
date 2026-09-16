@@ -1671,6 +1671,70 @@ func syncStartFailureStatus(vm *virtv1.VirtualMachine, vmi *virtv1.VirtualMachin
 	}
 }
 
+func volumeMigrationFinished(vm *virtv1.VirtualMachine, vmi *virtv1.VirtualMachineInstance) bool {
+	if vm.Spec.UpdateVolumesStrategy == nil || *vm.Spec.UpdateVolumesStrategy != virtv1.UpdateVolumesStrategyMigration {
+		return false
+	}
+	if vm.Status.VolumeUpdateState == nil || vm.Status.VolumeUpdateState.VolumeMigrationState == nil {
+		return false
+	}
+	if vmi == nil || vmi.DeletionTimestamp != nil || !vmi.IsRunning() {
+		return false
+	}
+	if volumemig.IsVolumeMigrating(vmi) || migrations.IsMigrating(vmi) {
+		return false
+	}
+
+	vmVolumes := storagetypes.GetVolumesByName(&vm.Spec.Template.Spec)
+	vmiVolumes := storagetypes.GetVolumesByName(&vmi.Spec)
+	for _, migrated := range vm.Status.VolumeUpdateState.VolumeMigrationState.MigratedVolumes {
+		if migrated.DestinationPVCInfo == nil {
+			return false
+		}
+		vmVolume, ok := vmVolumes[migrated.VolumeName]
+		if !ok || storagetypes.PVCNameFromVirtVolume(vmVolume) != migrated.DestinationPVCInfo.ClaimName {
+			return false
+		}
+		vmiVolume, ok := vmiVolumes[migrated.VolumeName]
+		if !ok || storagetypes.PVCNameFromVirtVolume(vmiVolume) != migrated.DestinationPVCInfo.ClaimName {
+			return false
+		}
+	}
+
+	return true
+}
+
+func (c *Controller) finalizeVolumeMigration(vm *virtv1.VirtualMachine, vmi *virtv1.VirtualMachineInstance) error {
+	if !volumeMigrationFinished(vm, vmi) {
+		return nil
+	}
+
+	revisionName, err := c.createVMRevision(vm)
+	if err != nil {
+		return fmt.Errorf("refresh the revision of the virtual machine: %w", err)
+	}
+
+	if vmi.Status.VirtualMachineRevisionName != revisionName {
+		payload, err := patch.New(
+			patch.WithAdd("/status/virtualMachineRevisionName", revisionName),
+		).GeneratePayload()
+		if err != nil {
+			return err
+		}
+		updatedVMI, err := c.clientset.VirtualMachineInstance(vmi.Namespace).Patch(context.Background(),
+			vmi.Name, types.JSONPatchType, payload, metav1.PatchOptions{})
+		if err != nil {
+			return fmt.Errorf("point the instance at the refreshed revision %s: %w", revisionName, err)
+		}
+		vmi.Status.VirtualMachineRevisionName = updatedVMI.Status.VirtualMachineRevisionName
+	}
+
+	log.Log.Object(vm).Infof("Volume migration finished, refreshed revision %s and dropped the update strategy", revisionName)
+	vm.Spec.UpdateVolumesStrategy = nil
+
+	return nil
+}
+
 func syncVolumeMigration(vm *virtv1.VirtualMachine, vmi *virtv1.VirtualMachineInstance) {
 	if vm.Status.VolumeUpdateState == nil || vm.Status.VolumeUpdateState.VolumeMigrationState == nil {
 		return
@@ -3656,6 +3720,10 @@ func (c *Controller) sync(vm *virtv1.VirtualMachine, vmi *virtv1.VirtualMachineI
 
 		if err := c.handleVolumeUpdateRequest(vmCopy, vmi); err != nil {
 			return vm, vmi, common.NewSyncError(fmt.Errorf("error encountered while handling volumes update requests: %v", err), volumesUpdateErrorReason), nil
+		}
+
+		if err := c.finalizeVolumeMigration(vmCopy, vmi); err != nil {
+			return vm, vmi, common.NewSyncError(fmt.Errorf("error encountered while finalizing a volume migration: %v", err), volumesUpdateErrorReason), nil
 		}
 	}
 
