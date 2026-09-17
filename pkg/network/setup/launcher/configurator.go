@@ -104,7 +104,9 @@ func (n *VMNetworkConfigurator) SetupPodNetworkPhase2(domain *api.Domain, networ
 			return err
 		}
 
-		n.enrichTapDomainInterface(domain, iface, &networks[i], podIfaceName)
+		if err := n.enrichTapDomainInterface(domain, iface, &networks[i], podIfaceName); err != nil {
+			return err
+		}
 
 		if err := n.ensureDHCP(iface, &networks[i], podIfaceName); err != nil {
 			return err
@@ -118,8 +120,14 @@ func (n *VMNetworkConfigurator) discoverPodInterfaceName(network *v1.Network) (s
 	if err != nil {
 		return "", err
 	}
+	// A missing pod interface is a transient state, not a valid configuration: on a
+	// migration target the SDN provisions the interface asynchronously, so it can be
+	// absent when the target launcher runs its pre-start hook. Taking an empty name
+	// for it used to let "" travel into the libvirt spec generator, which failed on
+	// LinkByName("") and killed virt-launcher. Reporting it instead keeps the sync
+	// retriable.
 	if ifaceLink == nil {
-		return "", nil
+		return "", fmt.Errorf("pod interface of network %q is not present yet", network.Name)
 	}
 	return ifaceLink.Attrs().Name, nil
 }
@@ -129,11 +137,17 @@ func (n *VMNetworkConfigurator) enrichTapDomainInterface(
 	iface *v1.Interface,
 	network *v1.Network,
 	podIfaceName string,
-) {
+) error {
 	generator := domainspec.NewTapLibvirtSpecGenerator(iface, *network, domain, podIfaceName, n.handler)
+	// Critical() panics: a generator failure used to take the whole virt-launcher
+	// down, which virt-handler sees as an EOF on the command socket and the pod as
+	// Failed. Returning the error keeps the failure attached to the sync, so it is
+	// reported and retried instead of being fatal.
 	if err := generator.Generate(); err != nil {
-		log.Log.Reason(err).Critical("failed to create libvirt configuration")
+		log.Log.Reason(err).Errorf("failed to create libvirt configuration for %s", podIfaceName)
+		return err
 	}
+	return nil
 }
 
 // internalDHCPDisabled turns off the DHCP server that virt-launcher runs for tap interfaces.

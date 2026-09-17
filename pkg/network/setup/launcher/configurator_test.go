@@ -96,6 +96,20 @@ var _ = Describe("SetupPodNetworkPhase2", func() {
 		), nil),
 	)
 
+	It("should report a pod interface that is not there yet instead of dying", func() {
+		vmi := libvmi.New(
+			libvmi.WithInterface(libvmi.InterfaceDeviceWithBridgeBinding(v1.DefaultPodNetwork().Name)),
+			libvmi.WithNetwork(v1.DefaultPodNetwork()),
+		)
+		configurator := launcher.NewVMNetworkConfigurator(vmi, nil,
+			launcher.WithNetworkHandler(stubNetworkHandler{}),
+			launcher.WithDomainAttachments(map[string]string{v1.DefaultPodNetwork().Name: string(v1.Tap)}),
+		)
+
+		Expect(configurator.SetupPodNetworkPhase2(domainWithDefaultInterface(), vmi.Spec.Networks)).To(
+			MatchError(ContainSubstring("is not present yet")))
+	})
+
 	DescribeTable("should panic when DHCP server fails to start",
 		func(vmi *v1.VirtualMachineInstance) {
 			DeferCleanup(launcher.EnableInternalDHCP())
