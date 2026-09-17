@@ -25,6 +25,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	"github.com/vishvananda/netlink"
 	"go.uber.org/mock/gomock"
 
 	v1 "kubevirt.io/api/core/v1"
@@ -106,6 +107,17 @@ var _ = Describe("podNIC", func() {
 				Expect(func() { _ = podnic.PlugPhase2(domain) }).To(Panic())
 			})
 		})
+		Context("and the libvirt spec generator fails", func() {
+			BeforeEach(func() {
+				podnic.domainGenerator = &fakeLibvirtSpecGenerator{
+					shouldGenerateFail: true,
+				}
+			})
+			It("phase2 should report the error instead of killing virt-launcher", func() {
+				Expect(podnic.PlugPhase2(domain)).To(
+					MatchError(ContainSubstring("Fake LibvirtSpecGenerator.Generate failure")))
+			})
+		})
 		Context("and starting the DHCP server succeed", func() {
 			BeforeEach(func() {
 				dhcpConfig := &cache.DHCPConfig{}
@@ -120,6 +132,56 @@ var _ = Describe("podNIC", func() {
 				Expect(podnic.PlugPhase2(domain)).To(Succeed())
 			})
 
+		})
+	})
+
+	When("a secondary pod network is plugged", func() {
+		const secondaryNetworkName = "veth_n80b42d9f"
+
+		var (
+			vmi    *v1.VirtualMachineInstance
+			domain *api.Domain
+		)
+
+		BeforeEach(func() {
+			domain = NewDomainWithBridgeInterface()
+			vmi = newVMIBridgeInterface("testnamespace", "testVmName")
+			vmi.Spec.Networks = append(vmi.Spec.Networks, v1.Network{
+				Name:          secondaryNetworkName,
+				NetworkSource: v1.NetworkSource{Pod: &v1.PodNetwork{}},
+			})
+			vmi.Spec.Domain.Devices.Interfaces = append(vmi.Spec.Domain.Devices.Interfaces, v1.Interface{
+				Name:    secondaryNetworkName,
+				Binding: &v1.PluginBinding{Name: "bpfbridge"},
+			})
+		})
+
+		newSecondaryPhase2PodNIC := func() (*podNIC, error) {
+			return newPhase2PodNIC(
+				vmi,
+				&vmi.Spec.Networks[1],
+				&vmi.Spec.Domain.Devices.Interfaces[1],
+				mockNetwork,
+				&baseCacheCreator,
+				domain,
+				string(v1.Tap),
+			)
+		}
+
+		It("should fail when the pod interface is not in the pod yet", func() {
+			mockNetwork.EXPECT().LinkByName(secondaryNetworkName).Return(nil, netlink.LinkNotFoundError{})
+
+			_, err := newSecondaryPhase2PodNIC()
+			Expect(err).To(MatchError(ContainSubstring(secondaryNetworkName)))
+		})
+
+		It("should resolve the pod interface name when the link is in the pod", func() {
+			mockNetwork.EXPECT().LinkByName(secondaryNetworkName).Return(
+				&netlink.GenericLink{LinkAttrs: netlink.LinkAttrs{Name: secondaryNetworkName}}, nil)
+
+			podnic, err := newSecondaryPhase2PodNIC()
+			Expect(err).ToNot(HaveOccurred())
+			Expect(podnic.podInterfaceName).To(Equal(secondaryNetworkName))
 		})
 	})
 })
