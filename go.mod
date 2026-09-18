@@ -61,10 +61,10 @@ require (
 	github.com/vishvananda/netlink v1.3.0
 	github.com/wadey/gocovmerge v0.0.0-20160331181800-b5bfa59ec0ad
 	go.uber.org/mock v0.5.1
-	golang.org/x/crypto v0.53.0
-	golang.org/x/net v0.56.0
-	golang.org/x/sync v0.21.0
-	golang.org/x/sys v0.46.0
+	golang.org/x/crypto v0.55.0
+	golang.org/x/net v0.58.0
+	golang.org/x/sync v0.22.0
+	golang.org/x/sys v0.47.0
 	golang.org/x/term v0.44.0
 	golang.org/x/time v0.14.0
 	golang.org/x/tools v0.47.0
@@ -160,7 +160,7 @@ require (
 	golang.org/x/exp/typeparams v0.0.0-20260209203927-2842357ff358 // indirect
 	golang.org/x/mod v0.37.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
-	golang.org/x/text v0.39.0 // indirect
+	golang.org/x/text v0.41.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260526163538-3dc84a4a5aaa // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 	gopkg.in/evanphx/json-patch.v4 v4.12.0 // indirect
@@ -225,7 +225,7 @@ replace (
 	golang.org/x/oauth2 => golang.org/x/oauth2 v0.34.0
 	golang.org/x/sys => golang.org/x/sys v0.46.0 // required by x/net v0.56.0
 	golang.org/x/text => golang.org/x/text v0.39.0 // CVE-2026-56852 (infinite loop on invalid input)
-	google.golang.org/grpc => google.golang.org/grpc v1.83.1 // GHSA-hrxh-6v49-42gf (xDS RBAC / HTTP/2), CVE-2026-84304
+	google.golang.org/grpc => google.golang.org/grpc v1.83.2 // GHSA-hrxh-6v49-42gf (xDS RBAC / HTTP/2), CVE-2026-84304, CVE-2026-84445
 )
 
 tool (
