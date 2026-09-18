@@ -598,6 +598,134 @@ var _ = Describe("Migration watcher", func() {
 		})
 	})
 
+	Context("Migration of a VMI with backend storage", func() {
+		const sourceStatePVC = "persistent-state-for-testvmi-source"
+		const targetStatePVC = "persistent-state-for-testvmi-target"
+
+		newBackendStorageVMI := func() *v1.VirtualMachineInstance {
+			vmi := newVirtualMachine("testvmi", v1.Running)
+			vmi.Spec.Domain.Firmware = &v1.Firmware{
+				Bootloader: &v1.Bootloader{
+					EFI: &v1.EFI{SecureBoot: pointer.P(true), Persistent: pointer.P(true)},
+				},
+			}
+			vmi.Status.VolumeStatus = []v1.VolumeStatus{{
+				Name:                      backendstorage.PVCPrefix + "-" + vmi.Name,
+				PersistentVolumeClaimInfo: &v1.PersistentVolumeClaimInfo{ClaimName: sourceStatePVC},
+			}}
+			return vmi
+		}
+
+		newStatePVC := func(name string, labels map[string]string) *k8sv1.PersistentVolumeClaim {
+			return &k8sv1.PersistentVolumeClaim{
+				ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: k8sv1.NamespaceDefault, Labels: labels},
+			}
+		}
+
+		addPVC := func(pvc *k8sv1.PersistentVolumeClaim) {
+			ExpectWithOffset(1, controller.pvcStore.Add(pvc)).To(Succeed())
+			_, err := kubeClient.CoreV1().PersistentVolumeClaims(pvc.Namespace).Create(context.Background(), pvc, metav1.CreateOptions{})
+			ExpectWithOffset(1, err).ToNot(HaveOccurred())
+		}
+
+		expectRecordedPVCNames := func(namespace, name, source, target string) {
+			updatedVMIM, err := virtClientset.KubevirtV1().VirtualMachineInstanceMigrations(namespace).Get(context.Background(), name, metav1.GetOptions{})
+			ExpectWithOffset(1, err).ToNot(HaveOccurred())
+			ExpectWithOffset(1, updatedVMIM.Status.MigrationState).ToNot(BeNil())
+			ExpectWithOffset(1, updatedVMIM.Status.MigrationState.SourcePersistentStatePVCName).To(Equal(source))
+			ExpectWithOffset(1, updatedVMIM.Status.MigrationState.TargetPersistentStatePVCName).To(Equal(target))
+		}
+
+		It("should record the PVC names without mutating the cached migration", func() {
+			vmi := newBackendStorageVMI()
+			migration := newMigration("testmigration", vmi.Name, v1.MigrationPending)
+
+			addNode(newNode(vmi.Status.NodeName))
+			addPVC(newStatePVC(targetStatePVC, map[string]string{v1.MigrationNameLabel: migration.Name}))
+			addPVC(newStatePVC(sourceStatePVC, map[string]string{backendstorage.PVCPrefix: vmi.Name}))
+			addMigration(migration)
+			addVirtualMachineInstance(vmi)
+			addPod(newSourcePodForVirtualMachine(vmi))
+
+			sanityExecute()
+
+			testutils.ExpectEvents(recorder, virtcontroller.SuccessfulCreatePodReason)
+			expectRecordedPVCNames(migration.Namespace, migration.Name, sourceStatePVC, targetStatePVC)
+		})
+
+		It("should record the PVC names once the target pod already exists", func() {
+			vmi := newBackendStorageVMI()
+			migration := newMigration("testmigration", vmi.Name, v1.MigrationScheduling)
+
+			addPVC(newStatePVC(targetStatePVC, map[string]string{v1.MigrationNameLabel: migration.Name}))
+			addPVC(newStatePVC(sourceStatePVC, map[string]string{backendstorage.PVCPrefix: vmi.Name}))
+			addMigration(migration)
+			addVirtualMachineInstance(vmi)
+			addPod(newSourcePodForVirtualMachine(vmi))
+			addPod(newTargetPodForVirtualMachine(vmi, migration, k8sv1.PodPending))
+
+			sanityExecute()
+
+			expectRecordedPVCNames(migration.Namespace, migration.Name, sourceStatePVC, targetStatePVC)
+		})
+
+		It("should not overwrite PVC names that are already recorded", func() {
+			vmi := newBackendStorageVMI()
+			migration := newMigration("testmigration", vmi.Name, v1.MigrationScheduling)
+			migration.Status.MigrationState = &v1.VirtualMachineInstanceMigrationState{
+				SourcePersistentStatePVCName: "recorded-source",
+				TargetPersistentStatePVCName: "recorded-target",
+			}
+			Expect(controller.pvcStore.Add(newStatePVC(targetStatePVC, map[string]string{v1.MigrationNameLabel: migration.Name}))).To(Succeed())
+			Expect(controller.pvcStore.Add(newStatePVC(sourceStatePVC, map[string]string{backendstorage.PVCPrefix: vmi.Name}))).To(Succeed())
+
+			controller.resolveBackendStoragePVCNames(migration, vmi)
+
+			Expect(migration.Status.MigrationState.SourcePersistentStatePVCName).To(Equal("recorded-source"))
+			Expect(migration.Status.MigrationState.TargetPersistentStatePVCName).To(Equal("recorded-target"))
+		})
+
+		It("should do nothing for a VMI without backend storage", func() {
+			vmi := newVirtualMachine("testvmi", v1.Running)
+			migration := newMigration("testmigration", vmi.Name, v1.MigrationScheduling)
+			Expect(controller.pvcStore.Add(newStatePVC(sourceStatePVC, map[string]string{backendstorage.PVCPrefix: vmi.Name}))).To(Succeed())
+
+			controller.resolveBackendStoragePVCNames(migration, vmi)
+
+			Expect(migration.Status.MigrationState).To(BeNil())
+		})
+
+		It("should do nothing on a decentralized source", func() {
+			vmi := newBackendStorageVMI()
+			migration := newMigration("testmigration", vmi.Name, v1.MigrationScheduling)
+			migration.Spec.SendTo = &v1.VirtualMachineInstanceMigrationSource{MigrationID: "some-id"}
+			Expect(migration.IsLocalOrDecentralizedTarget()).To(BeFalse())
+			Expect(controller.pvcStore.Add(newStatePVC(targetStatePVC, map[string]string{v1.MigrationNameLabel: migration.Name}))).To(Succeed())
+			Expect(controller.pvcStore.Add(newStatePVC(sourceStatePVC, map[string]string{backendstorage.PVCPrefix: vmi.Name}))).To(Succeed())
+
+			controller.resolveBackendStoragePVCNames(migration, vmi)
+
+			Expect(migration.Status.MigrationState).To(BeNil())
+		})
+
+		It("should leave the source PVC name empty on a decentralized target", func() {
+			// No VMI status yet: the decision must come from the migration spec, since the
+			// status arrives asynchronously from the synchronization controller.
+			vmi := newBackendStorageVMI()
+			migration := newMigration("testmigration", vmi.Name, v1.MigrationScheduling)
+			migration.Spec.Receive = &v1.VirtualMachineInstanceMigrationTarget{MigrationID: "some-id"}
+			Expect(vmi.IsDecentralizedMigration()).To(BeFalse(), "status not synchronized yet")
+			Expect(migration.IsLocalOrDecentralizedTarget()).To(BeTrue())
+			Expect(controller.pvcStore.Add(newStatePVC(targetStatePVC, map[string]string{v1.MigrationNameLabel: migration.Name}))).To(Succeed())
+			Expect(controller.pvcStore.Add(newStatePVC(sourceStatePVC, map[string]string{backendstorage.PVCPrefix: vmi.Name}))).To(Succeed())
+
+			controller.resolveBackendStoragePVCNames(migration, vmi)
+
+			Expect(migration.Status.MigrationState.SourcePersistentStatePVCName).To(BeEmpty())
+			Expect(migration.Status.MigrationState.TargetPersistentStatePVCName).To(Equal(targetStatePVC))
+		})
+	})
+
 	Context("Migration object in pending state", func() {
 		const defaultMaxOutboundMigrationsPerNode = 2
 
