@@ -49,6 +49,7 @@ import (
 	"kubevirt.io/kubevirt/pkg/apimachinery/patch"
 	"kubevirt.io/kubevirt/pkg/pointer"
 	"kubevirt.io/kubevirt/pkg/tpm"
+	"kubevirt.io/kubevirt/pkg/util"
 
 	virtconfig "kubevirt.io/kubevirt/pkg/virt-config"
 
@@ -1346,6 +1347,38 @@ func (c *Controller) markMigrationAbortInVmiStatus(migration *virtv1.VirtualMach
 	return nil
 }
 
+func (c *Controller) syncVMIRuntimeUser(vmi *virtv1.VirtualMachineInstance, sourcePod *k8sv1.Pod) (*virtv1.VirtualMachineInstance, error) {
+	runtimeUser := uint64(util.RootUser)
+	if sourcePod.Spec.SecurityContext != nil && sourcePod.Spec.SecurityContext.RunAsUser != nil && *sourcePod.Spec.SecurityContext.RunAsUser != util.RootUser {
+		runtimeUser = util.NonRootUID
+	}
+
+	// Persist the source runtime profile so target pod rendering and virt-handler
+	// agree on libvirt paths, including the EFI NVRAM directory, during upgrades.
+	patches := patch.New()
+	if vmi.Status.RuntimeUser != runtimeUser {
+		patches.AddOption(patch.WithReplace("/status/runtimeUser", runtimeUser))
+	}
+	if runtimeUser == util.RootUser {
+		if _, exists := vmi.Annotations[virtv1.DeprecatedNonRootVMIAnnotation]; exists {
+			patches.AddOption(patch.WithRemove("/metadata/annotations/" + patch.EscapeJSONPointer(virtv1.DeprecatedNonRootVMIAnnotation)))
+		}
+	}
+	if patches.IsEmpty() {
+		return vmi, nil
+	}
+
+	patchBytes, err := patches.GeneratePayload()
+	if err != nil {
+		return nil, err
+	}
+	updatedVMI, err := c.clientset.VirtualMachineInstance(vmi.Namespace).Patch(context.Background(), vmi.Name, types.JSONPatchType, patchBytes, v1.PatchOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to align VMI runtime user with source pod: %w", err)
+	}
+	return updatedVMI, nil
+}
+
 func (c *Controller) handleTargetPodCreation(key string, migration *virtv1.VirtualMachineInstanceMigration, vmi *virtv1.VirtualMachineInstance, sourcePod *k8sv1.Pod) error {
 	c.migrationStartLock.Lock()
 	defer c.migrationStartLock.Unlock()
@@ -1709,6 +1742,10 @@ func (c *Controller) sync(key string, migration *virtv1.VirtualMachineInstanceMi
 				if err != nil {
 					return fmt.Errorf("failed to render fake source pod launch manifest: %v", err)
 				}
+			}
+			vmi, err = c.syncVMIRuntimeUser(vmi, sourcePod)
+			if err != nil {
+				return err
 			}
 			return c.handleTargetPodCreation(key, migration, vmi, sourcePod)
 		} else if controller.IsPodReady(pod) {

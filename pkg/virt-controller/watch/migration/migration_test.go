@@ -61,6 +61,7 @@ import (
 	controllertesting "kubevirt.io/kubevirt/pkg/controller/testing"
 	"kubevirt.io/kubevirt/pkg/pointer"
 	"kubevirt.io/kubevirt/pkg/testutils"
+	"kubevirt.io/kubevirt/pkg/util"
 	virtconfig "kubevirt.io/kubevirt/pkg/virt-config"
 	"kubevirt.io/kubevirt/pkg/virt-controller/services"
 )
@@ -616,6 +617,58 @@ var _ = Describe("Migration watcher", func() {
 	})
 
 	Context("Migration object in pending state", func() {
+		DescribeTable("should preserve the source launcher runtime profile",
+			func(sourceUser int64, runtimeUser uint64, nonRootAnnotation bool) {
+				vmi := newVirtualMachine("testvmi", virtv1.Running)
+				vmi.Status.RuntimeUser = runtimeUser
+				if !nonRootAnnotation {
+					delete(vmi.Annotations, virtv1.DeprecatedNonRootVMIAnnotation)
+				}
+				vmi.Annotations["test.kubevirt.io/keep"] = "true"
+				vmi.Spec.Domain.Firmware = &virtv1.Firmware{
+					Bootloader: &virtv1.Bootloader{EFI: &virtv1.EFI{SecureBoot: pointer.P(false)}},
+				}
+				sourcePod := newSourcePodForVirtualMachine(vmi)
+				sourcePod.Spec.SecurityContext = &k8sv1.PodSecurityContext{RunAsUser: pointer.P(sourceUser)}
+				migration := newMigration("testmigration", vmi.Name, virtv1.MigrationPending)
+				addMigration(migration)
+				addVirtualMachineInstance(vmi)
+				addPod(sourcePod)
+
+				sanityExecute()
+
+				testutils.ExpectEvents(recorder, virtcontroller.SuccessfulCreatePodReason)
+				targetPods, err := kubeClient.CoreV1().Pods(vmi.Namespace).List(context.Background(), metav1.ListOptions{
+					LabelSelector: fmt.Sprintf("%s=%s", virtv1.MigrationJobLabel, migration.UID),
+				})
+				Expect(err).ToNot(HaveOccurred())
+				Expect(targetPods.Items).To(HaveLen(1))
+				targetPod := targetPods.Items[0]
+				Expect(targetPod.Spec.SecurityContext.RunAsUser).To(Equal(pointer.P(sourceUser)))
+				updatedVMI, err := virtClientset.KubevirtV1().VirtualMachineInstances(vmi.Namespace).Get(context.Background(), vmi.Name, metav1.GetOptions{})
+				Expect(err).ToNot(HaveOccurred())
+				Expect(updatedVMI.Status.RuntimeUser).To(Equal(uint64(sourceUser)), "virt-handler must see the same runtime profile as the target pod")
+				Expect(updatedVMI.Annotations).To(HaveKeyWithValue("test.kubevirt.io/keep", "true"))
+				if sourceUser == util.RootUser {
+					Expect(updatedVMI.Annotations).NotTo(HaveKey(virtv1.DeprecatedNonRootVMIAnnotation))
+					Expect(targetPod.Spec.Containers[0].Command).NotTo(ContainElement("--run-as-nonroot"))
+					Expect(services.PathForNVram(updatedVMI)).To(Equal("/var/lib/libvirt/qemu/nvram"))
+				} else {
+					Expect(targetPod.Spec.Containers[0].Command).To(ContainElement("--run-as-nonroot"))
+					Expect(services.PathForNVram(updatedVMI)).To(Equal("/var/run/kubevirt-private/libvirt/qemu/nvram"))
+				}
+				Expect(vmi.Status.RuntimeUser).To(Equal(runtimeUser), "the informer cache must not be mutated")
+				_, cachedAnnotation := vmi.Annotations[virtv1.DeprecatedNonRootVMIAnnotation]
+				Expect(cachedAnnotation).To(Equal(nonRootAnnotation))
+			},
+			Entry("root source with a stale non-root user and annotation", int64(util.RootUser), uint64(util.NonRootUID), true),
+			Entry("root source with a stale non-root annotation", int64(util.RootUser), uint64(util.RootUser), true),
+			Entry("root source with a stale non-root user", int64(util.RootUser), uint64(util.NonRootUID), false),
+			Entry("root source with a matching VMI", int64(util.RootUser), uint64(util.RootUser), false),
+			Entry("non-root source with a stale root user", int64(util.NonRootUID), uint64(util.RootUser), false),
+			Entry("non-root source with a matching VMI", int64(util.NonRootUID), uint64(util.NonRootUID), false),
+		)
+
 		It("should not change VMI RuntimeUser during migration", func() {
 			vmi := newVirtualMachine("testvmi", virtv1.Running)
 			delete(vmi.Annotations, virtv1.DeprecatedNonRootVMIAnnotation)
@@ -2671,6 +2724,10 @@ func newVirtualMachineWithHotplugVolume(name string, phase virtv1.VirtualMachine
 }
 
 func newSourcePodForVirtualMachine(vmi *virtv1.VirtualMachineInstance) *k8sv1.Pod {
+	runtimeUser := int64(util.RootUser)
+	if util.IsNonRootVMI(vmi) {
+		runtimeUser = util.NonRootUID
+	}
 	return &k8sv1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      rand.String(10),
@@ -2692,6 +2749,9 @@ func newSourcePodForVirtualMachine(vmi *virtv1.VirtualMachineInstance) *k8sv1.Po
 		Spec: k8sv1.PodSpec{
 			NodeName: vmi.Status.NodeName,
 			Volumes:  []k8sv1.Volume{},
+			SecurityContext: &k8sv1.PodSecurityContext{
+				RunAsUser: pointer.P(runtimeUser),
+			},
 		},
 	}
 }
