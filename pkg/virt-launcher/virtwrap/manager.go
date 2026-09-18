@@ -964,6 +964,10 @@ func (l *LibvirtDomainManager) preStartHook(vmi *v1.VirtualMachineInstance, doma
 		return domain, fmt.Errorf("preparing the pod network failed: %v", err)
 	}
 
+	if err := ensureUSBFSPlaceholder(usbfsRoot); err != nil {
+		return domain, fmt.Errorf("preparing usbfs for usb host devices failed: %v", err)
+	}
+
 	// Create ephemeral disk for container disks
 	err = containerdisk.CreateEphemeralImages(vmi, l.ephemeralDiskCreator, l.disksInfo)
 	if err != nil {
