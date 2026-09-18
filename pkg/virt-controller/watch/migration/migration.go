@@ -357,17 +357,19 @@ func (c *Controller) execute(key string) error {
 		c.removeHandOffKey(key)
 		return nil
 	}
+	// Informer owned object, do not mutate
 	migration := obj.(*virtv1.VirtualMachineInstanceMigration)
+
+	migrationCopy := migration.DeepCopy()
 	logger := log.Log.Object(migration)
 
 	// this must be first step in execution. Writing the object
 	// when api version changes ensures our api stored version is updated.
 	if !controller.ObservedLatestApiVersionAnnotation(migration) {
-		migration := migration.DeepCopy()
-		controller.SetLatestApiVersionAnnotation(migration)
+		controller.SetLatestApiVersionAnnotation(migrationCopy)
 		// Ensure the migration contains our selector label
-		ensureSelectorLabelPresent(migration)
-		_, err = c.clientset.VirtualMachineInstanceMigration(migration.Namespace).Update(context.Background(), migration, metav1.UpdateOptions{})
+		ensureSelectorLabelPresent(migrationCopy)
+		_, err = c.clientset.VirtualMachineInstanceMigration(migrationCopy.Namespace).Update(context.Background(), migrationCopy, metav1.UpdateOptions{})
 		return err
 	}
 
@@ -385,7 +387,7 @@ func (c *Controller) execute(key string) error {
 		// update so the migration is failed and the finalizer is removed; returning
 		// without it leaves the object in Terminating forever, which wedges namespace
 		// deletion and the owning resources.
-		return c.updateStatus(migration, nil, nil, nil)
+		return c.updateStatus(migration, migrationCopy, nil, nil, nil)
 	}
 
 	vmi = vmiObj.(*virtv1.VirtualMachineInstance)
@@ -401,10 +403,10 @@ func (c *Controller) execute(key string) error {
 	var syncErr error
 
 	if needsSync {
-		syncErr = c.sync(key, migration, vmi, targetPods)
+		syncErr = c.sync(key, migrationCopy, vmi, targetPods)
 	}
 
-	err = c.updateStatus(migration, vmi, targetPods, syncErr)
+	err = c.updateStatus(migration, migrationCopy, vmi, targetPods, syncErr)
 	if err != nil {
 		return err
 	}
@@ -475,11 +477,10 @@ func (c *Controller) interruptMigration(migration *virtv1.VirtualMachineInstance
 	return backendstorage.RecoverFromBrokenMigration(c.clientset, migration, c.pvcStore, vmi, c.templateService.GetLauncherImage())
 }
 
-func (c *Controller) updateStatus(migration *virtv1.VirtualMachineInstanceMigration, vmi *virtv1.VirtualMachineInstance, pods []*k8sv1.Pod, syncError error) error {
+func (c *Controller) updateStatus(migration, migrationCopy *virtv1.VirtualMachineInstanceMigration, vmi *virtv1.VirtualMachineInstance, pods []*k8sv1.Pod, syncError error) error {
 	var pod *k8sv1.Pod = nil
 	var attachmentPod *k8sv1.Pod = nil
 	conditionManager := controller.NewVirtualMachineInstanceMigrationConditionManager()
-	migrationCopy := migration.DeepCopy()
 
 	podExists, attachmentPodExists := len(pods) > 0, false
 	if podExists {
@@ -501,7 +502,7 @@ func (c *Controller) updateStatus(migration *virtv1.VirtualMachineInstanceMigrat
 	// - Interrupt if something unexpectedly disappeared
 	// - Begin progressing migration state based on VMI's MigrationState status.
 	if vmi != nil && vmi.Status.MigrationState != nil && vmi.IsMigrationSynchronized(migration) && migration.UID == vmi.Status.MigrationState.MigrationUID {
-		migrationCopy.Status.MigrationState = vmi.Status.MigrationState
+		migrationCopy.Status.MigrationState = vmi.Status.MigrationState.DeepCopy()
 	}
 
 	if migration.IsFinal() {
@@ -781,7 +782,7 @@ func (c *Controller) processMigrationPhase(
 			_, exists := pod.Annotations[virtv1.MigrationTargetReadyTimestamp]
 			if !exists && vmi.Status.MigrationState.TargetNodeDomainReadyTimestamp != nil {
 				if backendstorage.IsBackendStorageNeededForVMI(&vmi.Spec) {
-					err := backendstorage.MigrationHandoff(c.clientset, c.pvcStore, migration)
+					err := backendstorage.MigrationHandoff(c.clientset, c.pvcStore, migrationCopy)
 					if err != nil {
 						return err
 					}
@@ -1402,6 +1403,29 @@ func (c *Controller) handleTargetPodCreation(key string, migration *virtv1.Virtu
 	return nil
 }
 
+func (c *Controller) resolveBackendStoragePVCNames(migration *virtv1.VirtualMachineInstanceMigration, vmi *virtv1.VirtualMachineInstance) {
+	if !backendstorage.IsBackendStorageNeededForVMI(&vmi.Spec) || !migration.IsLocalOrDecentralizedTarget() {
+		return
+	}
+
+	if migration.Status.MigrationState == nil {
+		migration.Status.MigrationState = &virtv1.VirtualMachineInstanceMigrationState{}
+	}
+	state := migration.Status.MigrationState
+
+	if state.TargetPersistentStatePVCName == "" {
+		if pvc := backendstorage.PVCForMigrationTarget(c.pvcStore, migration); pvc != nil {
+			state.TargetPersistentStatePVCName = pvc.Name
+		}
+	}
+
+	if state.SourcePersistentStatePVCName == "" && !migration.IsDecentralized() {
+		if pvc := backendstorage.PVCForVMI(c.pvcStore, vmi); pvc != nil {
+			state.SourcePersistentStatePVCName = pvc.Name
+		}
+	}
+}
+
 func (c *Controller) handleBackendStorage(migration *virtv1.VirtualMachineInstanceMigration, vmi *virtv1.VirtualMachineInstance) error {
 	if !backendstorage.IsBackendStorageNeededForVMI(&vmi.Spec) {
 		return nil
@@ -1650,6 +1674,8 @@ func (c *Controller) sync(key string, migration *virtv1.VirtualMachineInstanceMi
 	if !canMigrate {
 		return fmt.Errorf("vmi is ineligible for migration because another migration job is running")
 	}
+
+	c.resolveBackendStoragePVCNames(migration, vmi)
 
 	switch migration.Status.Phase {
 	case virtv1.MigrationPending:
