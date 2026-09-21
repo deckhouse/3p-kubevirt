@@ -132,6 +132,8 @@ const (
 
 const defaultMaxCrashLoopBackoffDelaySeconds = 300
 
+const volumeMigrationRecoveryRetry = 5 * time.Second
+
 const (
 	libvirtAnn = "versions.virtualization.deckhouse.io/libvirt-version"
 	qemuAnn    = "versions.virtualization.deckhouse.io/qemu-version"
@@ -914,6 +916,14 @@ func (c *Controller) handleValidationErrors(err error, vmi *virtv1.VirtualMachin
 func (c *Controller) handleVolumeUpdateRequest(vm *virtv1.VirtualMachine, vmi *virtv1.VirtualMachineInstance) error {
 	if vmi == nil {
 		return nil
+	}
+	if recovering, err := volumemig.RecoverRevertedVolumeMigration(c.clientset, vmi, vm); recovering || err != nil {
+		if err == nil {
+			// A pending migration can finish without changing the VMI. This
+			// controller does not watch migrations, so retry recovery explicitly.
+			c.Queue.AddAfter(controller.VirtualMachineKey(vm), volumeMigrationRecoveryRetry)
+		}
+		return err
 	}
 
 	// The pull policy for container disks are only set on the VMI spec and not on the VM spec.

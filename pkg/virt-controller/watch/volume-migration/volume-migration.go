@@ -185,12 +185,136 @@ func ValidateVolumes(vmi *virtv1.VirtualMachineInstance, vm *virtv1.VirtualMachi
 	return nil
 }
 
+// RecoverRevertedVolumeMigration clears a canceled round after both specs and
+// the launcher pods have returned to the source claims. The caller must
+// retry when handled is true: a migration may still be pending, or the informer
+// must observe the cleanup before another volume update is processed.
+func RecoverRevertedVolumeMigration(clientset kubecli.KubevirtClient, vmi *virtv1.VirtualMachineInstance, vm *virtv1.VirtualMachine) (handled bool, err error) {
+	// 1. Ignore missing, terminating, or non-running instances.
+	if vmi == nil || vm == nil || vm.Spec.Template == nil || vmi.DeletionTimestamp != nil || vm.DeletionTimestamp != nil || !vmi.IsRunning() {
+		return false, nil
+	}
+
+	// 2. Require all recorded disks to be back on their source claims.
+	if !areSourcesOnlyInSpec(vmi) {
+		return false, nil
+	}
+	vmVolumes := storagetypes.GetVolumesByName(&vm.Spec.Template.Spec)
+	volumeStatus := make(map[string]string, len(vmi.Status.VolumeStatus))
+	for _, status := range vmi.Status.VolumeStatus {
+		if status.PersistentVolumeClaimInfo != nil {
+			volumeStatus[status.Name] = status.PersistentVolumeClaimInfo.ClaimName
+		}
+	}
+	for _, migrated := range vmi.Status.MigratedVolumes {
+		volume, exists := vmVolumes[migrated.VolumeName]
+		source := migrated.SourcePVCInfo.ClaimName
+		if !exists || storagetypes.PVCNameFromVirtVolume(volume) != source || volumeStatus[migrated.VolumeName] != source {
+			return false, nil
+		}
+	}
+
+	// 3. Wait for the VMI's current migration to finish.
+	if state := vmi.Status.MigrationState; state != nil && !state.Completed && !state.Failed {
+		return true, nil
+	}
+
+	// 4. Also check for Pending migrations not yet recorded on the VMI.
+	// Migration labels may still be missing, so inspect the whole namespace.
+	migrations, err := clientset.VirtualMachineInstanceMigration(vmi.Namespace).List(context.Background(), metav1.ListOptions{})
+	if err != nil {
+		return true, fmt.Errorf("check migrations before recovering reverted volumes: %w", err)
+	}
+	for _, migration := range migrations.Items {
+		if migration.Spec.VMIName == vmi.Name && !migration.IsFinal() {
+			return true, nil
+		}
+	}
+
+	// 5. Verify the source claims are mounted and old destinations are unused.
+	mounted, err := revertedVolumeSourcesMounted(clientset, vmi)
+	if err != nil || !mounted {
+		return true, err
+	}
+
+	// 6. Clear stale state only if the VMI has not changed since it was read.
+	return true, cancelVolumeMigration(clientset, vmi, patch.WithTest("/metadata/resourceVersion", vmi.ResourceVersion))
+}
+
+// VolumeStatus is derived from the VMI spec, so it cannot independently prove
+// which claims back the guest. Check the current launcher and its attachment
+// pods, and wait until no live pod of this VMI references an old destination.
+func revertedVolumeSourcesMounted(clientset kubecli.KubevirtClient, vmi *virtv1.VirtualMachineInstance) (bool, error) {
+	if vmi.Status.NodeName == "" {
+		return false, nil
+	}
+	pods, err := clientset.CoreV1().Pods(vmi.Namespace).List(context.Background(), metav1.ListOptions{})
+	if err != nil {
+		return false, fmt.Errorf("check pods before recovering reverted volumes: %w", err)
+	}
+	launcherUIDs := make(map[types.UID]bool)
+	var currentPod *k8sv1.Pod
+	for i := range pods.Items {
+		pod := &pods.Items[i]
+		if !controller.IsControlledBy(pod, vmi) {
+			continue
+		}
+		launcherUIDs[pod.UID] = true
+		if pod.Spec.NodeName == vmi.Status.NodeName && pod.Status.Phase == k8sv1.PodRunning && pod.DeletionTimestamp == nil {
+			if currentPod != nil {
+				return false, nil
+			}
+			currentPod = pod
+		}
+	}
+	if currentPod == nil {
+		return false, nil
+	}
+	destinations := make(map[string]bool, len(vmi.Status.MigratedVolumes))
+	for _, volume := range vmi.Status.MigratedVolumes {
+		if volume.DestinationPVCInfo != nil {
+			destinations[volume.DestinationPVCInfo.ClaimName] = true
+		}
+	}
+	mountedClaims := make(map[string]bool)
+	for i := range pods.Items {
+		pod := &pods.Items[i]
+		owner := metav1.GetControllerOf(pod)
+		attachment := owner != nil && launcherUIDs[owner.UID]
+		if !launcherUIDs[pod.UID] && !attachment {
+			continue
+		}
+		if pod.Status.Phase == k8sv1.PodFailed || pod.Status.Phase == k8sv1.PodSucceeded {
+			continue
+		}
+		current := pod.UID == currentPod.UID || (attachment && owner.UID == currentPod.UID)
+		for _, volume := range pod.Spec.Volumes {
+			if volume.PersistentVolumeClaim == nil {
+				continue
+			}
+			claim := volume.PersistentVolumeClaim.ClaimName
+			if destinations[claim] {
+				return false, nil
+			}
+			if current && pod.Spec.NodeName == vmi.Status.NodeName && pod.Status.Phase == k8sv1.PodRunning && pod.DeletionTimestamp == nil {
+				mountedClaims[claim] = true
+			}
+		}
+	}
+	for _, volume := range vmi.Status.MigratedVolumes {
+		if !mountedClaims[volume.SourcePVCInfo.ClaimName] {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
 // VolumeMigrationCancel cancels the volume migration
 func VolumeMigrationCancel(clientset kubecli.KubevirtClient, vmi *virtv1.VirtualMachineInstance, vm *virtv1.VirtualMachine) (bool, error) {
 	if !IsVolumeMigrating(vmi) {
 		return false, nil
 	}
-	if migratedVolumesInVMISpecMatchSource(vmi) {
+	if areSourcesOnlyInSpec(vmi) {
 		if migratedVolumesInVMSpecMatchDestination(vmi, vm) {
 			return false, nil
 		}
@@ -211,7 +335,11 @@ func VolumeMigrationCancel(clientset kubecli.KubevirtClient, vmi *virtv1.Virtual
 	return true, fmt.Errorf(InvalidUpdateErrMsg)
 }
 
-func migratedVolumesInVMISpecMatchSource(vmi *virtv1.VirtualMachineInstance) bool {
+// areSourcesOnlyInSpec reports whether every volume recorded in
+// vmi.status.migratedVolumes still carries its source claim in the VMI spec, with
+// no destination left. Volumes outside that record are not considered, and an
+// empty record returns false: there is nothing to compare.
+func areSourcesOnlyInSpec(vmi *virtv1.VirtualMachineInstance) bool {
 	volumes := storagetypes.GetVolumesByName(&vmi.Spec)
 	for _, migVol := range vmi.Status.MigratedVolumes {
 		if migVol.SourcePVCInfo == nil {
@@ -267,7 +395,7 @@ func revertedToOldVolumes(vmi *virtv1.VirtualMachineInstance, vm *virtv1.Virtual
 	return len(updatedVols) == 0
 }
 
-func cancelVolumeMigration(clientset kubecli.KubevirtClient, vmi *virtv1.VirtualMachineInstance) error {
+func cancelVolumeMigration(clientset kubecli.KubevirtClient, vmi *virtv1.VirtualMachineInstance, preconditions ...patch.PatchOption) error {
 	if vmi == nil {
 		return fmt.Errorf("vmi is empty")
 	}
@@ -285,12 +413,14 @@ func cancelVolumeMigration(clientset kubecli.KubevirtClient, vmi *virtv1.Virtual
 		return nil
 	}
 	log.Log.V(2).Object(vmi).Infof("Patch VMI %s status to cancel the volume migration", vmi.Name)
-	p, err := patch.New(
+	patchSet := patch.New(preconditions...)
+	patchSet.AddOption(
 		patch.WithTest("/status/conditions", vmi.Status.Conditions),
 		patch.WithReplace("/status/conditions", vmiCopy.Status.Conditions),
 		patch.WithTest("/status/migratedVolumes", vmi.Status.MigratedVolumes),
 		patch.WithReplace("/status/migratedVolumes", vmiCopy.Status.MigratedVolumes),
-	).GeneratePayload()
+	)
+	p, err := patchSet.GeneratePayload()
 	if err != nil {
 		return err
 	}
