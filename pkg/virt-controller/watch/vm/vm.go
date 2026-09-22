@@ -28,6 +28,7 @@ import (
 	"math"
 	"math/rand"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -3339,16 +3340,17 @@ func (c *Controller) addRestartRequiredIfNeeded(lastSeenVMSpec *virtv1.VirtualMa
 		}
 	}
 
-	// NOTE: DVP connects bridge interfaces through the "bpfbridge" network binding plugin. Virtual machines
-	// started before that switch keep .Bridge set in their VMI and last-seen specs, so the first update of
-	// such a virtual machine would be reported as a non-live-updatable interface change and the virtual
-	// machine would be restarted only to end up with an equivalent binding. Treat both forms as equal.
+	// NOTE: DVP connects bridge interfaces through the "bpfbridge" network binding plugin and assigns an
+	// ACPI index to every interface. Virtual machines started before those changes keep .Bridge set and no
+	// ACPI index in their VMI and last-seen specs, so the first update of such a virtual machine would be
+	// reported as a non-live-updatable interface change and the virtual machine would be restarted only to
+	// end up with an equivalent interface. Treat the old and the new form as equal.
 	desiredIfaces := currentVM.Spec.Template.Spec.Domain.Devices.Interfaces
-	alignBridgeWithBpfBridgeBinding(lastSeenVM.Spec.Template.Spec.Domain.Devices.Interfaces, desiredIfaces)
+	alignLegacyIfaceFields(lastSeenVM.Spec.Template.Spec.Domain.Devices.Interfaces, desiredIfaces)
 	vmiToCompare := vmi
 	if vmi != nil {
 		vmiToCompare = vmi.DeepCopy()
-		alignBridgeWithBpfBridgeBinding(vmiToCompare.Spec.Domain.Devices.Interfaces, desiredIfaces)
+		alignLegacyIfaceFields(vmiToCompare.Spec.Domain.Devices.Interfaces, desiredIfaces)
 	}
 
 	if !netvmliveupdate.IsRestartRequired(currentVM, vmiToCompare) {
@@ -3374,6 +3376,18 @@ func (c *Controller) addRestartRequiredIfNeeded(lastSeenVMSpec *virtv1.VirtualMa
 		lastSeenVM.Spec.Template.Spec.Domain.CPU.Model == legacyGenericCPUModel &&
 		currentVM.Spec.Template.Spec.Domain.CPU.Model == genericCPUModel {
 		lastSeenVM.Spec.Template.Spec.Domain.CPU.Model = currentVM.Spec.Template.Spec.Domain.CPU.Model
+	}
+
+	// NOTE: DVP started to add the svm CPU feature to virtual machines of the Discovery type of VMClass.
+	// Virtual machines started before that change do not have the feature in their last-seen spec, so the
+	// first update of such a virtual machine would be reported as a non-live-updatable CPU change and the
+	// virtual machine would be restarted only to end up with an equivalent CPU. Where the svm feature is
+	// the only difference, take the CPU features as they are now.
+	if lastSeenVM.Spec.Template.Spec.Domain.CPU != nil && currentVM.Spec.Template.Spec.Domain.CPU != nil {
+		lastSeenVM.Spec.Template.Spec.Domain.CPU.Features = alignSVMCPUFeature(
+			lastSeenVM.Spec.Template.Spec.Domain.CPU.Features,
+			currentVM.Spec.Template.Spec.Domain.CPU.Features,
+		)
 	}
 
 	if !equality.Semantic.DeepEqual(lastSeenVM.Spec.Template.Spec, currentVM.Spec.Template.Spec) {
@@ -3436,24 +3450,52 @@ const (
 	legacyGenericCPUModel = "kvm64"
 )
 
-// alignBridgeWithBpfBridgeBinding rewrites .Bridge interfaces in ifaces to the bpfbridge binding, but only
-// for interfaces that desiredIfaces binds that way. Both forms describe the same bridge connection, so the
-// transition must not be seen as an interface change that requires a restart.
-func alignBridgeWithBpfBridgeBinding(ifaces, desiredIfaces []virtv1.Interface) {
+// svmCPUFeature is the CPU feature DVP adds to virtual machines of the Discovery type of VMClass.
+const svmCPUFeature = "svm"
+
+// alignSVMCPUFeature returns desiredFeatures when the svm CPU feature is the only thing that tells the
+// two sets apart, and features as they are otherwise. Whether the feature is listed does not change the
+// CPU of a virtual machine that is already running, so on its own it must not be seen as a
+// non-live-updatable change, while any other difference still is one.
+func alignSVMCPUFeature(features, desiredFeatures []virtv1.CPUFeature) []virtv1.CPUFeature {
+	if equality.Semantic.DeepEqual(withoutSVMCPUFeature(features), withoutSVMCPUFeature(desiredFeatures)) {
+		return desiredFeatures
+	}
+
+	return features
+}
+
+func withoutSVMCPUFeature(features []virtv1.CPUFeature) []virtv1.CPUFeature {
+	return slices.DeleteFunc(slices.Clone(features), func(feature virtv1.CPUFeature) bool {
+		return feature.Name == svmCPUFeature
+	})
+}
+
+// alignLegacyIfaceFields rewrites the fields of ifaces that DVP started to render differently, but only
+// where the value in desiredIfaces describes the very same interface configuration. Such a transition is
+// nominal for an already running virtual machine, so it must not be seen as an interface change that
+// requires a restart.
+func alignLegacyIfaceFields(ifaces, desiredIfaces []virtv1.Interface) {
 	desiredIfacesByName := netvmispec.IndexInterfaceSpecByName(desiredIfaces)
 
 	for i := range ifaces {
-		if ifaces[i].Bridge == nil {
-			continue
-		}
-
 		desiredIface, exists := desiredIfacesByName[ifaces[i].Name]
-		if !exists || desiredIface.Binding == nil || desiredIface.Binding.Name != bpfBridgeBindingName {
+		if !exists {
 			continue
 		}
 
-		ifaces[i].Bridge = nil
-		ifaces[i].Binding = &virtv1.PluginBinding{Name: bpfBridgeBindingName}
+		// The bridge binding method and the bpfbridge binding plugin describe the same bridge connection.
+		if ifaces[i].Bridge != nil && desiredIface.Binding != nil && desiredIface.Binding.Name == bpfBridgeBindingName {
+			ifaces[i].Bridge = nil
+			ifaces[i].Binding = &virtv1.PluginBinding{Name: bpfBridgeBindingName}
+		}
+
+		// DVP assigns an ACPI index to every interface, which it did not do before. The index of an
+		// interface that is already attached to a running virtual machine cannot change, so only adopt
+		// the desired index where none was set at all.
+		if ifaces[i].ACPIIndex == 0 && desiredIface.ACPIIndex != 0 {
+			ifaces[i].ACPIIndex = desiredIface.ACPIIndex
+		}
 	}
 }
 
