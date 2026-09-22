@@ -98,6 +98,9 @@ func NeedVirtioNetDevice(vmi *v1.VirtualMachineInstance, allowEmulation bool) bo
 // wantVirtioNetDevice checks whether a VMI references at least one "virtio" network interface.
 // Note that the reference can be explicit or implicit (unspecified nic models defaults to "virtio").
 func wantVirtioNetDevice(vmi *v1.VirtualMachineInstance) bool {
+	if mayBePluggedAnInterface(vmi) {
+		return true
+	}
 	for _, iface := range vmi.Spec.Domain.Devices.Interfaces {
 		if iface.Model == "" || iface.Model == v1.VirtIO {
 			return true
@@ -106,10 +109,18 @@ func wantVirtioNetDevice(vmi *v1.VirtualMachineInstance) bool {
 	return false
 }
 
-func NeedTunDevice(vmi *v1.VirtualMachineInstance) bool {
-	return (len(vmi.Spec.Domain.Devices.Interfaces) > 0) ||
-		(vmi.Spec.Domain.Devices.AutoattachPodInterface == nil) ||
-		(*vmi.Spec.Domain.Devices.AutoattachPodInterface)
+// NeedTunDevice always holds. Upstream withheld /dev/net/tun from a VMI with no interface
+// and the pod interface autoattach rejected, which is exactly how DVP spells a machine
+// whose networks are not Ready yet and whose interfaces are plugged once they are. The
+// device cannot be added to a running pod, so every VMI claims it upfront.
+func NeedTunDevice(_ *v1.VirtualMachineInstance) bool {
+	return true
+}
+
+// mayBePluggedAnInterface reports whether a VMI can still be plugged an interface while it
+// runs, see NeedTunDevice.
+func mayBePluggedAnInterface(vmi *v1.VirtualMachineInstance) bool {
+	return len(vmi.Spec.Domain.Devices.Interfaces) == 0
 }
 
 func IsAutoAttachVSOCK(vmi *v1.VirtualMachineInstance) bool {

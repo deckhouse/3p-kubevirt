@@ -3405,6 +3405,13 @@ func (c *Controller) addRestartRequiredIfNeeded(lastSeenVMSpec *virtv1.VirtualMa
 		lastSeenVM.Spec.Template.Spec.Networks = currentVM.Spec.Template.Spec.Networks
 	}
 
+	// NOTE: the pod interface autoattach reaches no further than the pod rendering and the
+	// VMI mutator, both of them long done by the time a machine runs, and with the tun and
+	// vhost-net devices claimed for an interfaceless VMI too it no longer even changes the
+	// pod. DVP writes it out for a machine that is not on the pod network, so honouring the
+	// difference would restart every such machine once, on upgrade, for nothing.
+	lastSeenVM.Spec.Template.Spec.Domain.Devices.AutoattachPodInterface = currentVM.Spec.Template.Spec.Domain.Devices.AutoattachPodInterface
+
 	// NOTE: In the new version of KubeVirt, virt-controller sets .Spec.Template.Spec.Domain.Firmware.UUID for all
 	// existing virtual machines, which could previously be absent.
 	// This leads to the need for a restart because the old and new KVVM specs do not match.

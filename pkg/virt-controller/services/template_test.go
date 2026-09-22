@@ -3063,7 +3063,8 @@ var _ = Describe("Template", func() {
 				Expect(caps.Drop).To(ContainElement(k8sv1.Capability("ALL")), "Expected compute container to drop all capabilities")
 			})
 
-			It("Should not require tun device if explicitly rejected", func() {
+			// NOTE: diverges from upstream, see mayBePluggedAnInterface.
+			It("Should still require tun device if the autoattach is rejected and no interface is present", func() {
 				config, kvStore, svc = configFactory(defaultArch)
 				domain := v1.DomainSpec{}
 				autoAttach := false
@@ -3081,8 +3082,9 @@ var _ = Describe("Template", func() {
 				pod, err := svc.RenderLaunchManifest(&vmi)
 				Expect(err).ToNot(HaveOccurred())
 
-				_, ok := pod.Spec.Containers[0].Resources.Limits[TunDevice]
-				Expect(ok).To(BeFalse())
+				tun, ok := pod.Spec.Containers[0].Resources.Limits[TunDevice]
+				Expect(ok).To(BeTrue())
+				Expect(int(tun.Value())).To(Equal(1))
 
 				caps := pod.Spec.Containers[0].SecurityContext.Capabilities
 
