@@ -24,11 +24,19 @@ import v1 "kubevirt.io/api/core/v1"
 // RequiresVirtioNetDevice checks whether a VMI requires the presence of the "virtio" net device.
 // This happens when the VMI wants to use a "virtio" network interface, and software emulation is disallowed.
 func RequiresVirtioNetDevice(vmi *v1.VirtualMachineInstance, allowEmulation bool) bool {
-	return hasVirtioIface(vmi) && !allowEmulation
+	return (mayBePluggedAnInterface(vmi) || hasVirtioIface(vmi)) && !allowEmulation
 }
 
-func RequiresTunDevice(vmi *v1.VirtualMachineInstance) bool {
-	return (len(vmi.Spec.Domain.Devices.Interfaces) > 0) ||
-		(vmi.Spec.Domain.Devices.AutoattachPodInterface == nil) ||
-		(*vmi.Spec.Domain.Devices.AutoattachPodInterface)
+// RequiresTunDevice always holds. Upstream withheld /dev/net/tun from a VMI with no interface
+// and the pod interface autoattach rejected, which is exactly how DVP spells a machine
+// whose networks are not Ready yet and whose interfaces are plugged once they are. The
+// device cannot be added to a running pod, so every VMI claims it upfront.
+func RequiresTunDevice(_ *v1.VirtualMachineInstance) bool {
+	return true
+}
+
+// mayBePluggedAnInterface reports whether a VMI can still be plugged an interface while it
+// runs, see RequiresTunDevice.
+func mayBePluggedAnInterface(vmi *v1.VirtualMachineInstance) bool {
+	return len(vmi.Spec.Domain.Devices.Interfaces) == 0
 }
