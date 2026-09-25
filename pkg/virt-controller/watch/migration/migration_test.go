@@ -2415,7 +2415,11 @@ var _ = Describe("Migration watcher", func() {
 			expectVolumesChangeCondition(vmi.Namespace, vmi.Name, BeNil())
 		})
 
-		It("should request an abort when the migration has already started", func() {
+		// The job stays in flight while virt-handler unwinds the migration, as with a
+		// deleted one: failing it now leaves the target pod behind a final job and makes
+		// the next migration of this VMI wait on a job nobody tracks anymore.
+		It("should request an abort and keep the migration in flight when it has already started", func() {
+			migration.Status.Phase = virtv1.MigrationRunning
 			vmi.Status.MigrationState.StartTimestamp = pointer.P(metav1.Now())
 			cancelVolumeMigration(metav1.NewTime(migration.CreationTimestamp.Add(time.Second)))
 			addAll()
@@ -2427,6 +2431,30 @@ var _ = Describe("Migration watcher", func() {
 				"AbortRequested": BeTrue(),
 				"Failed":         BeFalse(),
 			})))
+			expectVolumesChangeCondition(vmi.Namespace, vmi.Name, BeNil())
+			updatedVMIM, err := virtClientset.KubevirtV1().VirtualMachineInstanceMigrations(migration.Namespace).Get(
+				context.Background(), migration.Name, metav1.GetOptions{})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(updatedVMIM.Status.Phase).To(Equal(virtv1.MigrationRunning))
+			expectMigrationCondition(migration.Namespace, migration.Name, virtv1.VirtualMachineInstanceMigrationAbortRequested)
+		})
+
+		It("should fail the migration once the source reports the abort", func() {
+			migration.Status.Phase = virtv1.MigrationRunning
+			now := metav1.Now()
+			vmi.Status.MigrationState.StartTimestamp = pointer.P(now)
+			vmi.Status.MigrationState.EndTimestamp = pointer.P(now)
+			vmi.Status.MigrationState.AbortRequested = true
+			vmi.Status.MigrationState.AbortStatus = virtv1.MigrationAbortSucceeded
+			vmi.Status.MigrationState.Failed = true
+			vmi.Status.MigrationState.Completed = true
+			addAll()
+
+			sanityExecute()
+
+			testutils.ExpectEvent(recorder, virtcontroller.FailedMigrationReason)
+			expectMigrationFailedState(migration.Namespace, migration.Name)
+			expectMigrationCondition(migration.Namespace, migration.Name, virtv1.VirtualMachineInstanceMigrationFailed)
 		})
 
 		// A marker predating the migration belongs to an earlier volume migration.

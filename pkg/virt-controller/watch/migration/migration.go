@@ -528,17 +528,35 @@ func (c *Controller) updateStatus(migration, migrationCopy *virtv1.VirtualMachin
 
 		setMigrationFailedConditionIfNotExists(migrationCopy, virtv1.VirtualMachineInstanceMigrationFailedReasonVMIIsShutdown, msg)
 	} else if isVolumeMigrationCanceled(migration, vmi) {
-		msg := "Migration failed because the volume migration was canceled."
-		if err := c.stopCanceledVolumeMigration(migration, vmi); err != nil {
+		aborting, err := c.stopCanceledVolumeMigration(migration, vmi)
+		if err != nil {
 			return err
 		}
-		if err := c.interruptMigration(migrationCopy, vmi); err != nil {
-			return err
-		}
-		c.recorder.Eventf(migration, k8sv1.EventTypeWarning, controller.FailedMigrationReason, msg)
-		log.Log.Object(migration).Error(msg)
+		if aborting {
+			// virt-handler is unwinding a migration that already runs. The job stays in
+			// flight until the source reports the outcome, as with a deleted migration:
+			// failing it now leaves the target pod behind a final job and makes the next
+			// migration of this VMI wait on a job nobody tracks anymore.
+			msg := "Migration is being aborted because the volume migration was canceled."
+			c.recorder.Eventf(migration, k8sv1.EventTypeWarning, controller.FailedMigrationReason, msg)
+			log.Log.Object(migration).Warning(msg)
+			if !conditionManager.HasCondition(migration, virtv1.VirtualMachineInstanceMigrationAbortRequested) {
+				migrationCopy.Status.Conditions = append(migrationCopy.Status.Conditions, virtv1.VirtualMachineInstanceMigrationCondition{
+					Type:          virtv1.VirtualMachineInstanceMigrationAbortRequested,
+					Status:        k8sv1.ConditionTrue,
+					LastProbeTime: v1.Now(),
+				})
+			}
+		} else {
+			msg := "Migration failed because the volume migration was canceled."
+			if err := c.interruptMigration(migrationCopy, vmi); err != nil {
+				return err
+			}
+			c.recorder.Eventf(migration, k8sv1.EventTypeWarning, controller.FailedMigrationReason, msg)
+			log.Log.Object(migration).Error(msg)
 
-		setMigrationFailedConditionIfNotExists(migrationCopy, virtv1.VirtualMachineInstanceMigrationFailedReasonVolumeMigrationCanceled, msg)
+			setMigrationFailedConditionIfNotExists(migrationCopy, virtv1.VirtualMachineInstanceMigrationFailedReasonVolumeMigrationCanceled, msg)
+		}
 	} else if migration.DeletionTimestamp != nil && !c.isMigrationHandedOff(migration, vmi) {
 		c.recorder.Eventf(migration, k8sv1.EventTypeWarning, controller.FailedMigrationReason, "Migration failed due to being canceled")
 		if !conditionManager.HasCondition(migration, virtv1.VirtualMachineInstanceMigrationAbortRequested) {
@@ -1143,7 +1161,8 @@ func dropStaleVolumeMigrationCancellation(migration *virtv1.VirtualMachineInstan
 }
 
 // stopCanceledVolumeMigration ends the migration on the VMI side and drops the
-// cancellation marker.
+// cancellation marker. It reports whether the migration had already started, in
+// which case only an abort was requested and virt-handler still has to unwind it.
 //
 // Dropping the marker is what keeps the next, unrelated migration from being
 // rejected by the very same check: the condition is otherwise only removed when a
@@ -1151,7 +1170,7 @@ func dropStaleVolumeMigrationCancellation(migration *virtv1.VirtualMachineInstan
 func (c *Controller) stopCanceledVolumeMigration(
 	migration *virtv1.VirtualMachineInstanceMigration,
 	vmi *virtv1.VirtualMachineInstance,
-) error {
+) (aborting bool, err error) {
 	vmiCopy := vmi.DeepCopy()
 
 	if vmiCopy.Status.MigrationState != nil {
@@ -1169,21 +1188,22 @@ func (c *Controller) stopCanceledVolumeMigration(
 		} else {
 			// Already handed off and running, virt-handler has to unwind it.
 			vmiCopy.Status.MigrationState.AbortRequested = true
+			aborting = true
 		}
 	}
 	controller.NewVirtualMachineInstanceConditionManager().RemoveCondition(vmiCopy, virtv1.VirtualMachineInstanceVolumesChange)
 
 	if equality.Semantic.DeepEqual(vmi.Status, vmiCopy.Status) {
-		return nil
+		return aborting, nil
 	}
 
 	if err := c.patchVMI(vmi, vmiCopy); err != nil {
 		log.Log.Reason(err).Object(vmi).Errorf("Failed to patch VMI status to stop the canceled migration %s/%s.",
 			migration.Namespace, migration.Name)
-		return err
+		return false, err
 	}
 
-	return nil
+	return aborting, nil
 }
 
 func (c *Controller) handlePreHandoffMigrationCancel(migration *virtv1.VirtualMachineInstanceMigration, vmi *virtv1.VirtualMachineInstance, pod *k8sv1.Pod) error {
