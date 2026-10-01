@@ -186,11 +186,11 @@ func generateDeviceRulesForAttachedHotplugDevices(vmi *v1.VirtualMachineInstance
 		return nil, err
 	}
 
-	// resolveRule returns an allow-rule for the device node at relPath (relative to the pod mount root), or nil if
+	// resolveRule returns an allow-rule for the device node at relPath (relative to root), or nil if
 	// the node is not present yet (device not attached) - in that case the corresponding mount/attach flow will add
 	// it later, so there is nothing to seed.
-	resolveRule := func(relPath string) (*devices.Rule, error) {
-		devicePath, err := safepath.JoinNoFollow(mountRoot, relPath)
+	resolveRule := func(root *safepath.Path, relPath string) (*devices.Rule, error) {
+		devicePath, err := safepath.JoinNoFollow(root, relPath)
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
 				return nil, nil
@@ -202,6 +202,12 @@ func generateDeviceRulesForAttachedHotplugDevices(vmi *v1.VirtualMachineInstance
 
 	var rules []*devices.Rule
 
+	// /var/run is a symlink to /run in the upstream virt-launcher image, and safepath does not
+	// follow symlinks. Resolve the hotplug disks directory inside the launcher root, then open
+	// the device nodes in it without following links.
+	var hotplugDisksDir *safepath.Path
+	hotplugDisksDirMissing := false
+
 	// Already attached hotplug block volumes. Filesystem hotplug volumes are files, not device nodes, so they are
 	// skipped (newAllowedDeviceRule would return nil for them anyway).
 	for _, volumeStatus := range vmi.Status.VolumeStatus {
@@ -212,7 +218,20 @@ func generateDeviceRulesForAttachedHotplugDevices(vmi *v1.VirtualMachineInstance
 			!storagetypes.IsPVCBlock(volumeStatus.PersistentVolumeClaimInfo.VolumeMode) {
 			continue
 		}
-		rule, err := resolveRule(filepath.Join("var/run/kubevirt/hotplug-disks", volumeStatus.Name))
+		if hotplugDisksDirMissing {
+			continue
+		}
+		if hotplugDisksDir == nil {
+			hotplugDisksDir, err = mountRoot.AppendAndResolveWithRelativeRoot("var/run/kubevirt/hotplug-disks")
+			if err != nil {
+				if errors.Is(err, os.ErrNotExist) {
+					hotplugDisksDirMissing = true
+					continue
+				}
+				return nil, fmt.Errorf("failed to resolve the hotplug disks directory: %v", err)
+			}
+		}
+		rule, err := resolveRule(hotplugDisksDir, volumeStatus.Name)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create device rule for hotplug volume %s: %v", volumeStatus.Name, err)
 		}
