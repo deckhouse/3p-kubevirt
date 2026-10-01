@@ -57,6 +57,7 @@ go_library(
 go_test(
     name = "go_default_test",
     srcs = [
+        "align_test.go",
         "firmware_test.go",
         "patchreactor_test.go",
         "updatereactor_test.go",
