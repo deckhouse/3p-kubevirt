@@ -249,6 +249,12 @@ func generateDeviceRulesForVMI(vmi *v1.VirtualMachineInstance, mountRoot *safepa
 func generateDeviceRulesForAttachedHotplugDevices(vmi *v1.VirtualMachineInstance, mountRoot *safepath.Path) ([]*devices.Rule, error) {
 	var rules []*devices.Rule
 
+	// /var/run is a symlink to /run in the upstream virt-launcher image, and safepath does not
+	// follow symlinks. Resolve the hotplug disks directory inside the launcher root, then open
+	// the device nodes in it without following links.
+	var hotplugDisksDir *safepath.Path
+	hotplugDisksDirMissing := false
+
 	// Filesystem hotplug volumes are files, not device nodes, so they are skipped.
 	for _, volumeStatus := range vmi.Status.VolumeStatus {
 		if volumeStatus.HotplugVolume == nil {
@@ -258,8 +264,22 @@ func generateDeviceRulesForAttachedHotplugDevices(vmi *v1.VirtualMachineInstance
 			!storagetypes.IsPVCBlock(volumeStatus.PersistentVolumeClaimInfo.VolumeMode) {
 			continue
 		}
+		if hotplugDisksDirMissing {
+			continue
+		}
+		if hotplugDisksDir == nil {
+			var err error
+			hotplugDisksDir, err = mountRoot.AppendAndResolveWithRelativeRoot("var/run/kubevirt/hotplug-disks")
+			if err != nil {
+				if errors.Is(err, os.ErrNotExist) {
+					hotplugDisksDirMissing = true
+					continue
+				}
+				return nil, fmt.Errorf("failed to resolve the hotplug disks directory: %v", err)
+			}
+		}
 		// A missing node means the disk is not attached yet; the mount flow adds it later.
-		rule, err := newAllowedDeviceRule(mountRoot, filepath.Join("var/run/kubevirt/hotplug-disks", volumeStatus.Name), getDeviceRwmPermissions())
+		rule, err := newAllowedDeviceRule(hotplugDisksDir, volumeStatus.Name, getDeviceRwmPermissions())
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
 				continue
