@@ -95,7 +95,7 @@ var _ = Describe("Validating VMIUpdate Admitter", func() {
 			return &admissionv1.AdmissionReview{
 				Request: &admissionv1.AdmissionRequest{
 					UserInfo: authv1.UserInfo{
-						Username: "system:serviceaccount:kubevirt:kubevirt-handler",
+						Username: "system:serviceaccount:kubevirt:" + components.HandlerServiceAccountName,
 						Extra: map[string]authv1.ExtraValue{
 							"authentication.kubernetes.io/node-name": {handlernode},
 						},
@@ -551,7 +551,9 @@ var _ = Describe("Validating VMIUpdate Admitter", func() {
 					res = append(res, v1.Volume{
 						Name: fmt.Sprintf("volume-name-%d", index),
 						VolumeSource: v1.VolumeSource{
-							ContainerDisk: testutils.NewFakeContainerDiskSource(),
+							EmptyDisk: &v1.EmptyDiskSource{
+								Capacity: resource.MustParse("1Gi"),
+							},
 						},
 					})
 				}
@@ -620,6 +622,16 @@ var _ = Describe("Validating VMIUpdate Admitter", func() {
 					},
 				},
 				BootOrder: &bootOrder,
+			})
+		}
+		return res
+	}
+
+	makeDisksNoDevice := func(indexes ...int) []v1.Disk {
+		res := make([]v1.Disk, 0)
+		for _, index := range indexes {
+			res = append(res, v1.Disk{
+				Name: fmt.Sprintf("volume-name-%d", index),
 			})
 		}
 		return res
@@ -845,14 +857,14 @@ var _ = Describe("Validating VMIUpdate Admitter", func() {
 			makeFilesystems(),
 			makeStatus(1, 0),
 			makeExpected("hotplug volume volume-name-1, changed", "")),
-		Entry("Should reject if we add volumes that are not PVC or DV",
+		Entry("Should reject if we add volumes that are not PVC, DV, memory dump or container disk",
 			makeInvalidVolumes(2, 1),
 			makeVolumes(0),
 			makeDisks(0, 1),
 			makeDisks(0),
 			makeFilesystems(),
 			makeStatus(1, 0),
-			makeExpected("volume volume-name-1 is not a PVC or DataVolume", "")),
+			makeExpected("volume volume-name-1 is not a PVC,DataVolume,MemoryDumpVolume or ContainerDisk", "")),
 		Entry("Should accept if we add volumes and disk properly",
 			makeVolumes(0, 1),
 			makeVolumes(0, 1),
@@ -909,14 +921,22 @@ var _ = Describe("Validating VMIUpdate Admitter", func() {
 			makeFilesystems(),
 			makeStatus(1, 0),
 			makeExpected("Hotplug configuration for LUN [volume-name-1] requires bus to be 'scsi'. [invalid] is not permitted.", "")),
-		Entry("Should reject if we add disk with neither Disk nor LUN type",
+		Entry("Should reject if we add disk without a disk device",
+			makeVolumes(0, 1),
+			makeVolumes(0),
+			makeDisksNoDevice(0, 1),
+			makeDisksNoDevice(0),
+			makeFilesystems(),
+			makeStatus(1, 0),
+			makeExpected("Hotplug configuration for [volume-name-1] requires diskDevice of type 'disk' or 'lun' to be used.", "")),
+		Entry("Should accept if we add cd-rom disk with scsi bus",
 			makeVolumes(0, 1),
 			makeVolumes(0),
 			makeCDRomDisks(0, 1),
 			makeCDRomDisks(0),
 			makeFilesystems(),
 			makeStatus(1, 0),
-			makeExpected("Hotplug configuration for [volume-name-1] requires diskDevice of type 'disk' or 'lun' to be used.", "")),
+			nil),
 		Entry("Should allow cd-rom inject",
 			makeVolumes(0, 1),
 			makeVolumes(0),
@@ -925,14 +945,14 @@ var _ = Describe("Validating VMIUpdate Admitter", func() {
 			makeFilesystems(),
 			makeStatus(1, 0),
 			nil),
-		Entry("Should allow cd-rom eject",
+		Entry("Should reject cd-rom eject with featuregate",
 			makeVolumes(0),
 			makeVolumes(0, 1),
 			makeCDRomDisks(0, 1),
 			makeCDRomDisks(0, 1),
 			makeFilesystems(),
 			makeStatus(1, 0),
-			nil,
+			makeExpected("spec.domain.devices.disks[1].Name 'volume-name-1' not found.", "spec.domain.devices.disks[1].name"),
 			featuregate.DeclarativeHotplugVolumesGate),
 		Entry("Should reject cd-rom eject",
 			makeVolumes(0),
