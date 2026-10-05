@@ -90,7 +90,7 @@ var _ = Describe("Validating VMIUpdate Admitter", func() {
 			return &admissionv1.AdmissionReview{
 				Request: &admissionv1.AdmissionRequest{
 					UserInfo: authv1.UserInfo{
-						Username: "system:serviceaccount:kubevirt:kubevirt-handler",
+						Username: "system:serviceaccount:kubevirt:" + components.HandlerServiceAccountName,
 						Extra: map[string]authv1.ExtraValue{
 							"authentication.kubernetes.io/node-name": {handlernode},
 						},

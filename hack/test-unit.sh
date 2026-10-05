@@ -52,8 +52,6 @@ set -o pipefail
 # need to be brought up to date in dedicated follow-ups (each is a fixture or
 # mock that never tracked a fork change, not a product bug):
 #   - virt-handler vm/migration mock tests (unmocked calls)
-#   - validating-webhook admitter tests (cd-rom feature gate, node
-#     restriction, eviction messages)
 #   - client-go/api schema examples still include the removed slirp binding
 ginkgo -succinct -vet=off --keep-going --flake-attempts=2 \
     --output-dir=_out/junit --junit-report=junit.xml \
@@ -61,7 +59,4 @@ ginkgo -succinct -vet=off --keep-going --flake-attempts=2 \
     --skip-file=pkg/virt-handler/vm_test.go \
     --skip-file=pkg/virt-handler/migration-source_test.go \
     --skip-file=pkg/virt-handler/migration-target_test.go \
-    --skip-file=admitters/vmi-create-admitter_test.go \
-    --skip-file=admitters/vmi-update-admitter_test.go \
-    --skip-file=admitters/pod-eviction-admitter_test.go \
     pkg/... cmd/... staging/... 2>"$TEST_STDERR" | tee "$TEST_LOG"

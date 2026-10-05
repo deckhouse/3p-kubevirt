@@ -170,7 +170,7 @@ var _ = Describe("Pod eviction admitter", func() {
 		Entry("When cluster-wide eviction strategy is missing, VMI eviction strategy is LiveMigrate and VMI is migratable",
 			nil,
 			libvmi.WithEvictionStrategy(virtv1.EvictionStrategyLiveMigrate),
-			withLiveMigratableCondition(),
+			withStorageLiveMigratableCondition(),
 		),
 		Entry("When cluster-wide eviction strategy is missing, VMI eviction strategy is LiveMigrateIfPossible and VMI is migratable",
 			nil,
@@ -188,7 +188,7 @@ var _ = Describe("Pod eviction admitter", func() {
 		),
 		Entry("When cluster-wide eviction strategy is LiveMigrate, VMI eviction strategy is missing and VMI is migratable",
 			pointer.P(virtv1.EvictionStrategyLiveMigrate),
-			withLiveMigratableCondition(),
+			withStorageLiveMigratableCondition(),
 		),
 		Entry("When cluster-wide eviction strategy is LiveMigrateIfPossible, VMI eviction strategy is missing and VMI is migratable",
 			pointer.P(virtv1.EvictionStrategyLiveMigrateIfPossible),
@@ -294,12 +294,17 @@ var _ = Describe("Pod eviction admitter", func() {
 		Entry("When cluster-wide eviction strategy is LiveMigrate, VMI eviction strategy is missing and VMI is not migratable",
 			pointer.P(virtv1.EvictionStrategyLiveMigrate),
 		),
+		Entry("When VMI eviction strategy is LiveMigrate and VMI is migratable but storage is not live-migratable",
+			nil,
+			libvmi.WithEvictionStrategy(virtv1.EvictionStrategyLiveMigrate),
+			withLiveMigratableCondition(),
+		),
 	)
 
 	It("should set the eviction source annotation when the eviction is requested by the descheduler", func() {
 		vmiOptions := append(defaultVMIOptions,
 			libvmi.WithAnnotation("", ""),
-			libvmi.WithEvictionStrategy(virtv1.EvictionStrategyLiveMigrate), withLiveMigratableCondition())
+			libvmi.WithEvictionStrategy(virtv1.EvictionStrategyLiveMigrate), withStorageLiveMigratableCondition())
 
 		vmi := libvmi.New(vmiOptions...)
 		virtClient := kubevirtfake.NewSimpleClientset(vmi)
@@ -370,7 +375,7 @@ var _ = Describe("Pod eviction admitter", func() {
 	It("should deny the request when the admitter fails to patch the VMI", func() {
 		vmiOptions := append(defaultVMIOptions,
 			libvmi.WithEvictionStrategy(virtv1.EvictionStrategyLiveMigrate),
-			withLiveMigratableCondition(),
+			withStorageLiveMigratableCondition(),
 		)
 
 		migratableVMI := libvmi.New(vmiOptions...)
@@ -410,7 +415,7 @@ var _ = Describe("Pod eviction admitter", func() {
 	It("should deny the request and not mark the VMI again when the VMI is already marked for evacuation", func() {
 		vmiOptions := append(defaultVMIOptions,
 			libvmi.WithEvictionStrategy(virtv1.EvictionStrategyLiveMigrate),
-			withLiveMigratableCondition(),
+			withStorageLiveMigratableCondition(),
 			withEvacuationNodeName(testNodeName),
 		)
 
@@ -443,7 +448,7 @@ var _ = Describe("Pod eviction admitter", func() {
 	DescribeTable("should deny the request and perform a dryRun patch on the VMI when", func(dryRunOpts *requestOptions) {
 		vmiOptions := append(defaultVMIOptions,
 			libvmi.WithEvictionStrategy(virtv1.EvictionStrategyLiveMigrate),
-			withLiveMigratableCondition(),
+			withStorageLiveMigratableCondition(),
 		)
 
 		migratableVMI := libvmi.New(vmiOptions...)
@@ -483,7 +488,7 @@ var _ = Describe("Pod eviction admitter", func() {
 		It("should deny the request for a hotplug pod of a VMI", func() {
 			vmiOptions := append(defaultVMIOptions,
 				libvmi.WithEvictionStrategy(virtv1.EvictionStrategyLiveMigrate),
-				withLiveMigratableCondition(),
+				withStorageLiveMigratableCondition(),
 			)
 			migratableVMI := libvmi.New(vmiOptions...)
 
@@ -683,6 +688,15 @@ func withLiveMigratableCondition() libvmi.Option {
 	return func(vmi *virtv1.VirtualMachineInstance) {
 		vmi.Status.Conditions = append(vmi.Status.Conditions, virtv1.VirtualMachineInstanceCondition{
 			Type:   virtv1.VirtualMachineInstanceIsMigratable,
+			Status: k8sv1.ConditionTrue,
+		})
+	}
+}
+
+func withStorageLiveMigratableCondition() libvmi.Option {
+	return func(vmi *virtv1.VirtualMachineInstance) {
+		vmi.Status.Conditions = append(vmi.Status.Conditions, virtv1.VirtualMachineInstanceCondition{
+			Type:   virtv1.VirtualMachineInstanceIsStorageLiveMigratable,
 			Status: k8sv1.ConditionTrue,
 		})
 	}
