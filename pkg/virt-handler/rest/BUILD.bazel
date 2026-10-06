@@ -40,6 +40,7 @@ go_test(
     name = "go_default_test",
     srcs = [
         "console_spice_test.go",
+        "console_stream_test.go",
         "console_test.go",
         "rest_suite_test.go",
         "vmstats_test.go",
@@ -60,6 +61,7 @@ go_test(
         "//staging/src/kubevirt.io/client-go/api:go_default_library",
         "//staging/src/kubevirt.io/client-go/testutils:go_default_library",
         "//vendor/github.com/emicklei/go-restful/v3:go_default_library",
+        "//vendor/github.com/gorilla/websocket:go_default_library",
         "//vendor/github.com/onsi/ginkgo/v2:go_default_library",
         "//vendor/github.com/onsi/gomega:go_default_library",
         "//vendor/go.uber.org/mock/gomock:go_default_library",
