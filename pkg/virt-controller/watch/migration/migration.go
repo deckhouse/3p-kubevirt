@@ -138,6 +138,7 @@ type Controller struct {
 	podExpectations                   *controller.UIDTrackingControllerExpectations
 	pvcExpectations                   *controller.UIDTrackingControllerExpectations
 	migrationStartLock                *sync.Mutex
+	pendingPermits                    *pendingPermits
 	clusterConfig                     *virtconfig.ClusterConfig
 	hasSynced                         func() bool
 	virtControllerVMIMWorkQueueTracer *traceUtils.Tracer
@@ -192,6 +193,7 @@ func NewController(templateService templateService,
 		podExpectations:         controller.NewUIDTrackingControllerExpectations(controller.NewControllerExpectations()),
 		pvcExpectations:         controller.NewUIDTrackingControllerExpectations(controller.NewControllerExpectations()),
 		migrationStartLock:      &sync.Mutex{},
+		pendingPermits:          newPendingPermits(),
 		clusterConfig:           clusterConfig,
 		handOffMap:              make(map[string]struct{}),
 		netAnnotationsGenerator: netAnnotationsGenerator,
@@ -891,6 +893,7 @@ func (c *Controller) processMigrationPhase(
 		if vmi.Status.MigrationState.StartTimestamp != nil {
 			migrationCopy.Status.Phase = virtv1.MigrationRunning
 		}
+		c.reconcileActiveLimitCondition(conditionManager, migrationCopy, vmi)
 	case virtv1.MigrationRunning:
 		if migration.IsLocalOrDecentralizedTarget() {
 			_, exists := pod.Annotations[virtv1.MigrationTargetReadyTimestamp]
@@ -1396,6 +1399,11 @@ func (c *Controller) handleTargetPodHandoff(migration *virtv1.VirtualMachineInst
 	vmiCopy.Status.MigrationState.TargetNode = pod.Spec.NodeName
 	vmiCopy.Status.MigrationState.SourceNode = vmi.Status.NodeName
 	vmiCopy.Status.MigrationState.TargetPod = pod.Name
+	// The decision to wait for a permit is taken here once, so a virt-handler never waits for
+	// a permit an older virt-controller does not grant, and a change of the limits does not
+	// strand a migration in flight.
+	vmiCopy.Status.MigrationState.TransferPermitRequired = !migration.IsDecentralized() &&
+		migrationsutil.ActiveMigrationLimitsConfigured(c.clusterConfig.GetMigrationConfiguration())
 
 	// Set target memory overhead from pod annotation
 	if c.clusterConfig.VmiMemoryOverheadReportEnabled() {
@@ -2136,16 +2144,19 @@ func (c *Controller) sync(key string, migration *virtv1.VirtualMachineInstanceMi
 			}
 		}
 
+		// A migration waiting for an active slot has published its ports but cannot have
+		// started, so its target going down fails it as well instead of after the wait.
 		if migration.IsLocalOrDecentralizedTarget() && (!targetPodExists || controller.PodIsDown(pod)) &&
 			vmi.IsMigrationSynchronized(migration) &&
 			vmi.Status.MigrationState.StartTimestamp == nil &&
 			!vmi.Status.MigrationState.Failed &&
 			!vmi.Status.MigrationState.Completed {
 
-			err = c.handleMarkMigrationFailedOnVMI(migration, vmi)
-			if err != nil {
-				return err
-			}
+			return c.handleMarkMigrationFailedOnVMI(migration, vmi)
+		}
+
+		if migration.Status.Phase == virtv1.MigrationTargetReady && migration.IsLocalOrDecentralizedSource() && migration.DeletionTimestamp == nil {
+			return c.handleTransferPermission(key, migration, vmi)
 		}
 		return nil
 	case virtv1.MigrationFailed:
@@ -2204,10 +2215,17 @@ func (c *Controller) addMigration(obj interface{}) {
 
 func (c *Controller) deleteMigration(obj interface{}) {
 	c.enqueueMigration(obj)
+	// A migration removed after it finished, by garbage collection for one, frees no slot.
+	if migration, ok := obj.(*virtv1.VirtualMachineInstanceMigration); ok && !migration.IsFinal() {
+		c.migrationFinished(migration)
+	}
 }
 
-func (c *Controller) updateMigration(_, curr interface{}) {
+func (c *Controller) updateMigration(old, curr interface{}) {
 	c.enqueueMigration(curr)
+	if migration := curr.(*virtv1.VirtualMachineInstanceMigration); !old.(*virtv1.VirtualMachineInstanceMigration).IsFinal() && migration.IsFinal() {
+		c.migrationFinished(migration)
+	}
 }
 
 func (c *Controller) enqueueMigration(obj interface{}) {

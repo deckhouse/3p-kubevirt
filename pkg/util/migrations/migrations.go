@@ -188,3 +188,12 @@ func ToVMIMConfigurationOptions(cfg *v1.MigrationConfiguration) *v1.VMIMConfigur
 	}
 	return opts.DeepCopy()
 }
+
+// ActiveMigrationLimitsConfigured reports whether virt-controller has to permit a migration
+// before its source starts transferring memory.
+func ActiveMigrationLimitsConfigured(cfg *v1.MigrationConfiguration) bool {
+	return cfg != nil && (cfg.ActiveOutboundMigrationsPerNode != nil ||
+		cfg.ActiveInboundMigrationsPerNode != nil ||
+		cfg.ActiveMigrationsPerNode != nil ||
+		cfg.ActiveMigrationsPerCluster != nil)
+}
