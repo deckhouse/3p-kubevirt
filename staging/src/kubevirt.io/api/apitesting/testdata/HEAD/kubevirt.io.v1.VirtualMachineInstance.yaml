@@ -720,6 +720,10 @@ status:
     failed: true
     failureReason: failureReasonValue
     migrationConfiguration:
+      activeInboundMigrationsPerNode: 4294967266
+      activeMigrationsPerCluster: 4294967270
+      activeMigrationsPerNode: 4294967273
+      activeOutboundMigrationsPerNode: 4294967265
       allowAutoConverge: true
       allowPostCopy: true
       allowWorkloadDisruption: true
@@ -784,6 +788,8 @@ status:
       selinuxContext: selinuxContextValue
       syncAddress: syncAddressValue
       virtualMachineInstanceUID: virtualMachineInstanceUIDValue
+    transferPermitRequired: true
+    transferPermitted: true
     transferStatus:
       autoConvergeThrottle: 4294967276
       dataProcessedBytes: 18446744073709551598

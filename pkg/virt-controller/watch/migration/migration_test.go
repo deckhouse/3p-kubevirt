@@ -2741,6 +2741,284 @@ var _ = Describe("Migration watcher", func() {
 		})
 
 	})
+
+	Context("active migration slots", func() {
+		const (
+			nodeA = "node-a"
+			nodeB = "node-b"
+			nodeC = "node-c"
+		)
+
+		// addPreparedMigration adds a migration in the TargetReady phase and its VMI handed off
+		// from sourceNode to targetNode.
+		addPreparedMigration := func(name, sourceNode, targetNode string, permitted bool) (*virtv1.VirtualMachineInstanceMigration, *virtv1.VirtualMachineInstance) {
+			vmi := newVirtualMachine(name+"-vmi", virtv1.Running)
+			vmi.Status.NodeName = sourceNode
+			migration := newMigration(name, vmi.Name, virtv1.MigrationTargetReady)
+			vmi.Status.MigrationState = &virtv1.VirtualMachineInstanceMigrationState{
+				MigrationUID:           migration.UID,
+				SourceNode:             sourceNode,
+				TargetNode:             targetNode,
+				TransferPermitRequired: true,
+				TransferPermitted:      permitted,
+				MigrationConfiguration: &virtv1.MigrationConfiguration{},
+			}
+			addVirtualMachineInstance(vmi)
+			Expect(controller.migrationIndexer.Add(migration)).To(Succeed())
+			return migration, vmi
+		}
+
+		isPermitted := func(vmi *virtv1.VirtualMachineInstance) bool {
+			updated, err := virtClientset.KubevirtV1().VirtualMachineInstances(vmi.Namespace).Get(context.Background(), vmi.Name, metav1.GetOptions{})
+			Expect(err).ToNot(HaveOccurred())
+			return updated.Status.MigrationState.TransferPermitted
+		}
+
+		permit := func(migration *virtv1.VirtualMachineInstanceMigration, vmi *virtv1.VirtualMachineInstance) {
+			key, err := virtcontroller.KeyFunc(migration)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(controller.handleTransferPermission(key, migration, vmi)).To(Succeed())
+		}
+
+		setActiveLimits := func(cfg virtv1.MigrationConfiguration) {
+			setConfig(&virtv1.KubeVirtConfiguration{MigrationConfiguration: &cfg})
+		}
+
+		DescribeTable("requires a permit at the handoff only with an active limit configured",
+			func(cfg *virtv1.MigrationConfiguration, required bool) {
+				if cfg != nil {
+					setActiveLimits(*cfg)
+				}
+				vmi := newVirtualMachine("testvmi", virtv1.Running)
+				addNodeNameToVMI(vmi, nodeA)
+				migration := newMigration("testmigration", vmi.Name, virtv1.MigrationScheduled)
+				addVirtualMachineInstance(vmi)
+				targetPod := newTargetPodForVirtualMachine(vmi, migration, k8sv1.PodRunning)
+				targetPod.Spec.NodeName = nodeB
+
+				Expect(controller.handleTargetPodHandoff(migration, vmi, targetPod)).To(Succeed())
+				testutils.ExpectEvent(recorder, virtcontroller.SuccessfulHandOverPodReason)
+
+				expectVirtualMachineInstanceMigrationState(vmi.Namespace, vmi.Name, PointTo(MatchFields(IgnoreExtras, Fields{
+					"TransferPermitRequired": Equal(required),
+				})))
+			},
+			Entry("without limits", nil, false),
+			Entry("with an active limit", &virtv1.MigrationConfiguration{ActiveOutboundMigrationsPerNode: pointer.P(uint32(1))}, true),
+		)
+
+		It("leaves a migration handed off without a permit requirement alone", func() {
+			setActiveLimits(virtv1.MigrationConfiguration{ActiveOutboundMigrationsPerNode: pointer.P(uint32(1))})
+			migration, vmi := addPreparedMigration("unlimited", nodeA, nodeB, false)
+			vmi.Status.MigrationState.TransferPermitRequired = false
+			Expect(controller.vmiStore.Update(vmi)).To(Succeed())
+
+			permit(migration, vmi)
+
+			Expect(isPermitted(vmi)).To(BeFalse())
+			Expect(controller.pendingPermits.has(migration.UID)).To(BeFalse())
+		})
+
+		It("permits a migration right away once the active limits are removed", func() {
+			addPreparedMigration("busy", nodeA, nodeB, true)
+			migration, vmi := addPreparedMigration("waiting", nodeA, nodeC, false)
+
+			permit(migration, vmi)
+
+			Expect(isPermitted(vmi)).To(BeTrue())
+		})
+
+		DescribeTable("holds a migration that does not fit an active limit",
+			func(cfg virtv1.MigrationConfiguration, busySource, busyTarget, source, target string) {
+				setActiveLimits(cfg)
+				addPreparedMigration("busy", busySource, busyTarget, true)
+				migration, vmi := addPreparedMigration("waiting", source, target, false)
+
+				permit(migration, vmi)
+
+				Expect(isPermitted(vmi)).To(BeFalse())
+			},
+			Entry("outbound slot of the source taken", virtv1.MigrationConfiguration{ActiveOutboundMigrationsPerNode: pointer.P(uint32(1))}, nodeA, nodeB, nodeA, nodeC),
+			Entry("inbound slot of the target taken", virtv1.MigrationConfiguration{ActiveInboundMigrationsPerNode: pointer.P(uint32(1))}, nodeA, nodeB, nodeC, nodeB),
+			Entry("shared budget of the source taken by an incoming migration", virtv1.MigrationConfiguration{ActiveMigrationsPerNode: pointer.P(uint32(1))}, nodeB, nodeA, nodeA, nodeC),
+			Entry("shared budget of the target taken by an outgoing migration", virtv1.MigrationConfiguration{ActiveMigrationsPerNode: pointer.P(uint32(1))}, nodeB, nodeA, nodeC, nodeB),
+			Entry("cluster limit taken", virtv1.MigrationConfiguration{ActiveMigrationsPerCluster: pointer.P(uint32(1))}, nodeA, nodeB, nodeC, nodeA),
+		)
+
+		DescribeTable("permits a migration that fits the active limits",
+			func(cfg virtv1.MigrationConfiguration, busySource, busyTarget, source, target string) {
+				setActiveLimits(cfg)
+				addPreparedMigration("busy", busySource, busyTarget, true)
+				migration, vmi := addPreparedMigration("waiting", source, target, false)
+
+				permit(migration, vmi)
+
+				Expect(isPermitted(vmi)).To(BeTrue())
+			},
+			Entry("another source with the outbound limit", virtv1.MigrationConfiguration{ActiveOutboundMigrationsPerNode: pointer.P(uint32(1))}, nodeA, nodeB, nodeC, nodeB),
+			Entry("another target with the inbound limit", virtv1.MigrationConfiguration{ActiveInboundMigrationsPerNode: pointer.P(uint32(1))}, nodeA, nodeB, nodeA, nodeC),
+			Entry("a node sending and receiving with separate limits", virtv1.MigrationConfiguration{
+				ActiveOutboundMigrationsPerNode: pointer.P(uint32(1)),
+				ActiveInboundMigrationsPerNode:  pointer.P(uint32(1)),
+			}, nodeA, nodeB, nodeB, nodeC),
+			Entry("a shared budget of two", virtv1.MigrationConfiguration{ActiveMigrationsPerNode: pointer.P(uint32(2))}, nodeA, nodeB, nodeB, nodeA),
+		)
+
+		It("does not permit a migration before its migration configuration is filled", func() {
+			migration, vmi := addPreparedMigration("waiting", nodeA, nodeB, false)
+			vmi.Status.MigrationState.MigrationConfiguration = nil
+			Expect(controller.vmiStore.Update(vmi)).To(Succeed())
+
+			permit(migration, vmi)
+
+			Expect(isPermitted(vmi)).To(BeFalse())
+		})
+
+		It("counts a migration that transfers without a permit", func() {
+			setActiveLimits(virtv1.MigrationConfiguration{ActiveOutboundMigrationsPerNode: pointer.P(uint32(1))})
+			_, started := addPreparedMigration("started", nodeA, nodeB, false)
+			started.Status.MigrationState.StartTimestamp = pointer.P(metav1.Now())
+			Expect(controller.vmiStore.Update(started)).To(Succeed())
+			migration, vmi := addPreparedMigration("waiting", nodeA, nodeC, false)
+
+			permit(migration, vmi)
+
+			Expect(isPermitted(vmi)).To(BeFalse())
+		})
+
+		It("fails a migration waiting for a slot once its target pod goes down", func() {
+			setActiveLimits(virtv1.MigrationConfiguration{ActiveOutboundMigrationsPerNode: pointer.P(uint32(1))})
+			vmi := newVirtualMachine("testvmi", virtv1.Running)
+			addNodeNameToVMI(vmi, nodeA)
+			migration := newMigration("testmigration", vmi.Name, virtv1.MigrationTargetReady)
+			vmi.Status.MigrationState = &virtv1.VirtualMachineInstanceMigrationState{
+				MigrationUID:                   migration.UID,
+				SourceNode:                     nodeA,
+				TargetNode:                     nodeB,
+				TargetDirectMigrationNodePorts: map[string]int{"49152": 12132},
+				MigrationConfiguration:         &virtv1.MigrationConfiguration{},
+				TransferPermitRequired:         true,
+			}
+			addMigration(migration)
+			addVirtualMachineInstance(vmi)
+			addPod(newSourcePodForVirtualMachine(vmi))
+			targetPod := newTargetPodForVirtualMachine(vmi, migration, k8sv1.PodFailed)
+			targetPod.Spec.NodeName = nodeB
+			addPod(targetPod)
+
+			sanityExecute()
+
+			expectVirtualMachineInstanceMigrationState(vmi.Namespace, vmi.Name, PointTo(MatchFields(IgnoreExtras, Fields{
+				"Failed":            BeTrue(),
+				"Completed":         BeTrue(),
+				"TransferPermitted": BeFalse(),
+			})))
+			testutils.ExpectEvent(recorder, virtcontroller.FailedMigrationReason)
+			testutils.ExpectEvent(recorder, virtcontroller.FailedMigrationReason)
+		})
+
+		It("wakes the migrations waiting for a slot once a migration finishes", func() {
+			setActiveLimits(virtv1.MigrationConfiguration{ActiveOutboundMigrationsPerNode: pointer.P(uint32(1))})
+			running, _ := addPreparedMigration("running", nodeA, nodeB, true)
+			running.Status.Phase = virtv1.MigrationRunning
+			waiting, _ := addPreparedMigration("waiting", nodeA, nodeC, false)
+			finished := running.DeepCopy()
+			finished.Status.Phase = virtv1.MigrationSucceeded
+
+			controller.updateMigration(running, finished)
+
+			waitingKey, err := virtcontroller.KeyFunc(waiting)
+			Expect(err).ToNot(HaveOccurred())
+			var queued []string
+			for controller.Queue.Len() > 0 {
+				key, _ := controller.Queue.Get()
+				controller.Queue.Done(key)
+				queued = append(queued, key)
+			}
+			Expect(queued).To(ContainElement(waitingKey))
+		})
+
+		It("does not wake a migration that shares no node with the finished one", func() {
+			setActiveLimits(virtv1.MigrationConfiguration{ActiveOutboundMigrationsPerNode: pointer.P(uint32(1))})
+			running, _ := addPreparedMigration("running", nodeA, nodeB, true)
+			running.Status.Phase = virtv1.MigrationRunning
+			addPreparedMigration("unrelated", nodeC, "node-d", false)
+			finished := running.DeepCopy()
+			finished.Status.Phase = virtv1.MigrationSucceeded
+
+			controller.updateMigration(running, finished)
+
+			Expect(controller.Queue.Len()).To(Equal(1), "only the finished migration itself is enqueued")
+		})
+
+		It("does not wake anything when a long finished migration is deleted", func() {
+			setActiveLimits(virtv1.MigrationConfiguration{ActiveOutboundMigrationsPerNode: pointer.P(uint32(1))})
+			finished, _ := addPreparedMigration("finished", nodeA, nodeB, true)
+			finished.Status.Phase = virtv1.MigrationSucceeded
+			addPreparedMigration("waiting", nodeA, nodeC, false)
+
+			controller.deleteMigration(finished)
+
+			Expect(controller.Queue.Len()).To(Equal(1), "only the deleted migration itself is enqueued")
+		})
+
+		It("forgets the permit of a migration once it finishes", func() {
+			migration, vmi := addPreparedMigration("permitted", nodeA, nodeB, false)
+			permit(migration, vmi)
+			Expect(controller.pendingPermits.has(migration.UID)).To(BeTrue())
+			finished := migration.DeepCopy()
+			finished.Status.Phase = virtv1.MigrationFailed
+
+			controller.updateMigration(migration, finished)
+
+			Expect(controller.pendingPermits.has(migration.UID)).To(BeFalse())
+		})
+
+		It("does not report a wait for the migration it has just permitted", func() {
+			setActiveLimits(virtv1.MigrationConfiguration{ActiveOutboundMigrationsPerNode: pointer.P(uint32(1))})
+			migration, vmi := addPreparedMigration("permitted", nodeA, nodeB, false)
+			permit(migration, vmi)
+
+			migrationCopy := migration.DeepCopy()
+			controller.reconcileActiveLimitCondition(virtcontroller.NewVirtualMachineInstanceMigrationConditionManager(), migrationCopy, vmi)
+
+			Expect(migrationCopy.Status.Conditions).To(BeEmpty())
+		})
+
+		It("does not count a finished migration", func() {
+			setActiveLimits(virtv1.MigrationConfiguration{ActiveOutboundMigrationsPerNode: pointer.P(uint32(1))})
+			finished, _ := addPreparedMigration("finished", nodeA, nodeB, true)
+			finished.Status.Phase = virtv1.MigrationSucceeded
+			Expect(controller.migrationIndexer.Update(finished)).To(Succeed())
+			migration, vmi := addPreparedMigration("waiting", nodeA, nodeC, false)
+
+			permit(migration, vmi)
+
+			Expect(isPermitted(vmi)).To(BeTrue())
+		})
+
+		It("counts a permit not yet seen in the informer", func() {
+			setActiveLimits(virtv1.MigrationConfiguration{ActiveOutboundMigrationsPerNode: pointer.P(uint32(1))})
+			first, firstVMI := addPreparedMigration("first", nodeA, nodeB, false)
+			second, secondVMI := addPreparedMigration("second", nodeA, nodeC, false)
+
+			permit(first, firstVMI)
+			permit(second, secondVMI)
+
+			Expect(isPermitted(firstVMI)).To(BeTrue())
+			Expect(isPermitted(secondVMI)).To(BeFalse())
+		})
+
+		It("reports which active limit holds the migration", func() {
+			cfg := virtv1.MigrationConfiguration{ActiveInboundMigrationsPerNode: pointer.P(uint32(1))}
+			load := activeMigrationLoad{outbound: map[string]int{nodeA: 1}, inbound: map[string]int{nodeB: 1}, cluster: 1}
+
+			reason, message := activeLimitReasonAndMessage(&cfg, load, nodeC, nodeB)
+
+			Expect(reason).To(Equal(virtv1.VirtualMachineInstanceMigrationConcurrencyLimitReachedReasonActiveInboundNode))
+			Expect(message).To(ContainSubstring(nodeB))
+		})
+	})
 })
 
 func newPDB(name string, vmi *virtv1.VirtualMachineInstance, pods int32) *policyv1.PodDisruptionBudget {

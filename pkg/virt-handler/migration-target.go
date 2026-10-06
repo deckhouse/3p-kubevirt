@@ -859,15 +859,18 @@ func (c *MigrationTargetController) processVMI(vmi *v1.VirtualMachineInstance) e
 	}
 
 	// Keep the target virt-launcher's domain-wait alive only while this migration
-	// is deliberately held by the external migration-configuration gate: the
-	// inbound migration limiter withholds MigrationState.MigrationConfiguration
-	// until a slot is free, and the source does not start until it is filled.
+	// is deliberately held by the external migration-configuration gate or waits for
+	// virt-controller to permit the transfer under the active migration limits: the
+	// virtualization platform fills MigrationState.MigrationConfiguration and
+	// virt-controller sets TransferPermitted once the migration fits the active
+	// limits; the source does not start before both.
 	// In that window virt-launcher would otherwise panic on its --qemu-timeout.
 	// A quiescent waiting target is not reconciled on its own, so re-enqueue it
 	// on a fixed interval to ping the launcher and reset its deadline repeatedly.
 	// Once the slot is granted (configuration filled) the pings stop and the
 	// standard --qemu-timeout applies unchanged.
-	if vmi.Status.MigrationState != nil && vmi.Status.MigrationState.MigrationConfiguration == nil {
+	if vmi.Status.MigrationState != nil && (vmi.Status.MigrationState.MigrationConfiguration == nil ||
+		(vmi.Status.MigrationState.TransferPermitRequired && !vmi.Status.MigrationState.TransferPermitted)) {
 		_ = client.PingKeepalive()
 		c.queue.AddAfter(controller.VirtualMachineInstanceKey(vmi), domainWaitKeepaliveInterval)
 	}

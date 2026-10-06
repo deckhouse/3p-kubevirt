@@ -151,6 +151,10 @@ spec:
           nodeSelectorKey: nodeSelectorValue
     memBalloonStatsPeriod: 4294967275
     migrations:
+      activeInboundMigrationsPerNode: 4294967266
+      activeMigrationsPerCluster: 4294967270
+      activeMigrationsPerNode: 4294967273
+      activeOutboundMigrationsPerNode: 4294967265
       allowAutoConverge: true
       allowPostCopy: true
       allowWorkloadDisruption: true

@@ -583,6 +583,13 @@ func (c *MigrationSourceController) migrateVMI(vmi *v1.VirtualMachineInstance, d
 		return nil
 	}
 
+	// Under the active migration limits, virt-controller permits the transfer once the
+	// migration fits them; the next VMI update with the permit resumes the reconcile.
+	if vmi.Status.MigrationState.TransferPermitRequired && !vmi.Status.MigrationState.TransferPermitted {
+		log.Log.Object(vmi).V(4).Infof("waiting for virt-controller to permit migration %s to transfer memory", vmi.Status.MigrationState.MigrationUID)
+		return nil
+	}
+
 	err = c.handleSourceMigrationProxy(vmi)
 	if errors.Is(err, errWaitingForTargetPorts) {
 		log.Log.Object(vmi).V(4).Info("waiting for target node to publish migration ports")

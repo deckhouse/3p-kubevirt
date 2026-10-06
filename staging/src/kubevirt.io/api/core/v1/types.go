@@ -943,6 +943,12 @@ const (
 const (
 	VirtualMachineInstanceMigrationConcurrencyLimitReachedReasonCluster      string = "ClusterMigrationLimitReached"
 	VirtualMachineInstanceMigrationConcurrencyLimitReachedReasonOutboundNode string = "OutboundNodeMigrationLimitReached"
+	// The reasons below are set on a migration that has prepared its target and waits for an
+	// active migration slot before it starts transferring memory.
+	VirtualMachineInstanceMigrationConcurrencyLimitReachedReasonActiveOutboundNode string = "ActiveOutboundNodeMigrationLimitReached"
+	VirtualMachineInstanceMigrationConcurrencyLimitReachedReasonActiveInboundNode  string = "ActiveInboundNodeMigrationLimitReached"
+	VirtualMachineInstanceMigrationConcurrencyLimitReachedReasonActiveNode         string = "ActiveNodeMigrationLimitReached"
+	VirtualMachineInstanceMigrationConcurrencyLimitReachedReasonActiveCluster      string = "ActiveClusterMigrationLimitReached"
 )
 
 type VirtualMachineInstanceCondition struct {
@@ -1169,6 +1175,13 @@ type VirtualMachineInstanceMigrationState struct {
 	MigrationPolicyName *string `json:"migrationPolicyName,omitempty"`
 	// Migration configurations to apply
 	MigrationConfiguration *MigrationConfiguration `json:"migrationConfiguration,omitempty"`
+	// TransferPermitRequired is set by virt-controller when it hands the migration off to
+	// the target with an active migration limit configured. The source then does not
+	// start transferring memory before TransferPermitted is set.
+	TransferPermitRequired bool `json:"transferPermitRequired,omitempty"`
+	// TransferPermitted is set by virt-controller once the migration fits the active
+	// migration limits.
+	TransferPermitted bool `json:"transferPermitted,omitempty"`
 	// If the VMI requires dedicated CPUs, this field will
 	// hold the dedicated CPU set on the target node
 	// +listType=atomic
@@ -3333,6 +3346,22 @@ type MigrationConfiguration struct {
 	// ParallelMigrationsPerCluster is the total number of concurrent live migrations
 	// allowed cluster-wide. Defaults to 5
 	ParallelMigrationsPerCluster *uint32 `json:"parallelMigrationsPerCluster,omitempty"`
+	// ActiveOutboundMigrationsPerNode is the maximum number of live migrations that transfer
+	// memory from a node at the same time. A migration that has prepared its target waits
+	// for a free slot before it starts transferring. Not limited when unset.
+	ActiveOutboundMigrationsPerNode *uint32 `json:"activeOutboundMigrationsPerNode,omitempty"`
+	// ActiveInboundMigrationsPerNode is the maximum number of live migrations that transfer
+	// memory to a node at the same time. Not limited when unset.
+	ActiveInboundMigrationsPerNode *uint32 `json:"activeInboundMigrationsPerNode,omitempty"`
+	// ActiveMigrationsPerNode is the maximum number of live migrations that transfer memory
+	// to or from a node at the same time, in any direction. When set, it replaces
+	// ActiveOutboundMigrationsPerNode and ActiveInboundMigrationsPerNode.
+	ActiveMigrationsPerNode *uint32 `json:"activeMigrationsPerNode,omitempty"`
+	// ActiveMigrationsPerCluster is the maximum number of live migrations that transfer
+	// memory in the whole cluster at the same time. Unlike ParallelMigrationsPerCluster, it
+	// does not count migrations that wait for their turn with a prepared target. Not
+	// limited when unset.
+	ActiveMigrationsPerCluster *uint32 `json:"activeMigrationsPerCluster,omitempty"`
 	// AllowAutoConverge allows the platform to compromise performance/availability of VMIs to
 	// guarantee successful VMI live migrations. Defaults to false
 	AllowAutoConverge *bool `json:"allowAutoConverge,omitempty"`

@@ -1192,6 +1192,34 @@ var CRDsValidation map[string]string = map[string]string{
                 Can be overridden for specific groups of VMs though migration policies.
                 Visit https://kubevirt.io/user-guide/operations/migration_policies/ for more information.
               properties:
+                activeInboundMigrationsPerNode:
+                  description: |-
+                    ActiveInboundMigrationsPerNode is the maximum number of live migrations that transfer
+                    memory to a node at the same time. Not limited when unset.
+                  format: int32
+                  type: integer
+                activeMigrationsPerCluster:
+                  description: |-
+                    ActiveMigrationsPerCluster is the maximum number of live migrations that transfer
+                    memory in the whole cluster at the same time. Unlike ParallelMigrationsPerCluster, it
+                    does not count migrations that wait for their turn with a prepared target. Not
+                    limited when unset.
+                  format: int32
+                  type: integer
+                activeMigrationsPerNode:
+                  description: |-
+                    ActiveMigrationsPerNode is the maximum number of live migrations that transfer memory
+                    to or from a node at the same time, in any direction. When set, it replaces
+                    ActiveOutboundMigrationsPerNode and ActiveInboundMigrationsPerNode.
+                  format: int32
+                  type: integer
+                activeOutboundMigrationsPerNode:
+                  description: |-
+                    ActiveOutboundMigrationsPerNode is the maximum number of live migrations that transfer
+                    memory from a node at the same time. A migration that has prepared its target waits
+                    for a free slot before it starts transferring. Not limited when unset.
+                  format: int32
+                  type: integer
                 allowAutoConverge:
                   description: |-
                     AllowAutoConverge allows the platform to compromise performance/availability of VMIs to
@@ -14244,6 +14272,34 @@ var CRDsValidation map[string]string = map[string]string{
             migrationConfiguration:
               description: Migration configurations to apply
               properties:
+                activeInboundMigrationsPerNode:
+                  description: |-
+                    ActiveInboundMigrationsPerNode is the maximum number of live migrations that transfer
+                    memory to a node at the same time. Not limited when unset.
+                  format: int32
+                  type: integer
+                activeMigrationsPerCluster:
+                  description: |-
+                    ActiveMigrationsPerCluster is the maximum number of live migrations that transfer
+                    memory in the whole cluster at the same time. Unlike ParallelMigrationsPerCluster, it
+                    does not count migrations that wait for their turn with a prepared target. Not
+                    limited when unset.
+                  format: int32
+                  type: integer
+                activeMigrationsPerNode:
+                  description: |-
+                    ActiveMigrationsPerNode is the maximum number of live migrations that transfer memory
+                    to or from a node at the same time, in any direction. When set, it replaces
+                    ActiveOutboundMigrationsPerNode and ActiveInboundMigrationsPerNode.
+                  format: int32
+                  type: integer
+                activeOutboundMigrationsPerNode:
+                  description: |-
+                    ActiveOutboundMigrationsPerNode is the maximum number of live migrations that transfer
+                    memory from a node at the same time. A migration that has prepared its target waits
+                    for a free slot before it starts transferring. Not limited when unset.
+                  format: int32
+                  type: integer
                 allowAutoConverge:
                   description: |-
                     AllowAutoConverge allows the platform to compromise performance/availability of VMIs to
@@ -14513,6 +14569,17 @@ var CRDsValidation map[string]string = map[string]string{
                     virtual machine instance
                   type: string
               type: object
+            transferPermitRequired:
+              description: |-
+                TransferPermitRequired is set by virt-controller when it hands the migration off to
+                the target with an active migration limit configured. The source then does not
+                start transferring memory before TransferPermitted is set.
+              type: boolean
+            transferPermitted:
+              description: |-
+                TransferPermitted is set by virt-controller once the migration fits the active
+                migration limits.
+              type: boolean
             transferStatus:
               description: TransferStatus contains migration transfer details reported
                 by the source runtime.
@@ -14873,6 +14940,34 @@ var CRDsValidation map[string]string = map[string]string{
             migrationConfiguration:
               description: Migration configurations to apply
               properties:
+                activeInboundMigrationsPerNode:
+                  description: |-
+                    ActiveInboundMigrationsPerNode is the maximum number of live migrations that transfer
+                    memory to a node at the same time. Not limited when unset.
+                  format: int32
+                  type: integer
+                activeMigrationsPerCluster:
+                  description: |-
+                    ActiveMigrationsPerCluster is the maximum number of live migrations that transfer
+                    memory in the whole cluster at the same time. Unlike ParallelMigrationsPerCluster, it
+                    does not count migrations that wait for their turn with a prepared target. Not
+                    limited when unset.
+                  format: int32
+                  type: integer
+                activeMigrationsPerNode:
+                  description: |-
+                    ActiveMigrationsPerNode is the maximum number of live migrations that transfer memory
+                    to or from a node at the same time, in any direction. When set, it replaces
+                    ActiveOutboundMigrationsPerNode and ActiveInboundMigrationsPerNode.
+                  format: int32
+                  type: integer
+                activeOutboundMigrationsPerNode:
+                  description: |-
+                    ActiveOutboundMigrationsPerNode is the maximum number of live migrations that transfer
+                    memory from a node at the same time. A migration that has prepared its target waits
+                    for a free slot before it starts transferring. Not limited when unset.
+                  format: int32
+                  type: integer
                 allowAutoConverge:
                   description: |-
                     AllowAutoConverge allows the platform to compromise performance/availability of VMIs to
@@ -15142,6 +15237,17 @@ var CRDsValidation map[string]string = map[string]string{
                     virtual machine instance
                   type: string
               type: object
+            transferPermitRequired:
+              description: |-
+                TransferPermitRequired is set by virt-controller when it hands the migration off to
+                the target with an active migration limit configured. The source then does not
+                start transferring memory before TransferPermitted is set.
+              type: boolean
+            transferPermitted:
+              description: |-
+                TransferPermitted is set by virt-controller once the migration fits the active
+                migration limits.
+              type: boolean
             transferStatus:
               description: TransferStatus contains migration transfer details reported
                 by the source runtime.

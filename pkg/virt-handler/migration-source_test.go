@@ -656,6 +656,57 @@ var _ = Describe("VirtualMachineInstance migration target", func() {
 
 		sanityExecute()
 	})
+
+	// The source follows the decision virt-controller took at the handoff, not its own copy
+	// of the limits: an older virt-controller never grants a permit, so a migration it handed
+	// off must not wait for one.
+	DescribeTable("should wait for virt-controller to permit the transfer only when the handoff requires it",
+		func(permitRequired, permitted bool, migrations int) {
+			config, _, _ := testutils.NewFakeClusterConfigUsingKVConfig(&v1.KubeVirtConfiguration{
+				MigrationConfiguration: &v1.MigrationConfiguration{ActiveOutboundMigrationsPerNode: pointer.P(uint32(1))},
+			})
+			controller.clusterConfig = config
+
+			vmi := api2.NewMinimalVMI("testvmi")
+			vmi.UID = vmiTestUUID
+			vmi.ObjectMeta.ResourceVersion = "1"
+			vmi.Status.Phase = v1.Running
+			vmi.Labels = map[string]string{v1.MigrationTargetNodeNameLabel: "othernode"}
+			vmi.Status.NodeName = host
+			vmi.Status.MigrationState = &v1.VirtualMachineInstanceMigrationState{
+				TargetNode:                     "othernode",
+				TargetNodeAddress:              "127.0.0.1:12345",
+				SourceNode:                     host,
+				MigrationUID:                   "123",
+				TargetDirectMigrationNodePorts: map[string]int{"49152": 12132},
+				MigrationConfiguration:         &v1.MigrationConfiguration{},
+				TransferPermitRequired:         permitRequired,
+				TransferPermitted:              permitted,
+			}
+			vmi.Status.Conditions = []v1.VirtualMachineInstanceCondition{
+				{
+					Type:   v1.VirtualMachineInstanceIsMigratable,
+					Status: k8sv1.ConditionTrue,
+				},
+			}
+			vmi = addActivePods(vmi, podTestUUID, host)
+
+			domain := api.NewMinimalDomainWithUUID("testvmi", vmiTestUUID)
+			domain.Status.Status = api.Running
+			addVMI(vmi, domain)
+
+			client.EXPECT().GetDomainStats().Return(nil, false, nil).AnyTimes()
+			client.EXPECT().MigrateVirtualMachine(gomock.Any(), gomock.Any()).Times(migrations)
+
+			sanityExecute()
+			if migrations > 0 {
+				testutils.ExpectEvent(recorder, VMIMigrating)
+			}
+		},
+		Entry("not yet permitted", true, false, 0),
+		Entry("permitted", true, true, 1),
+		Entry("handed off by a virt-controller that requires no permit", false, false, 1),
+	)
 })
 
 type stubSourcePasstRepairHandler struct {

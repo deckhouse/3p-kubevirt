@@ -23338,6 +23338,34 @@ func schema_kubevirtio_api_core_v1_MigrationConfiguration(ref common.ReferenceCa
 							Format:      "int64",
 						},
 					},
+					"activeOutboundMigrationsPerNode": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ActiveOutboundMigrationsPerNode is the maximum number of live migrations that transfer memory from a node at the same time. A migration that has prepared its target waits for a free slot before it starts transferring. Not limited when unset.",
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+					"activeInboundMigrationsPerNode": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ActiveInboundMigrationsPerNode is the maximum number of live migrations that transfer memory to a node at the same time. Not limited when unset.",
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+					"activeMigrationsPerNode": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ActiveMigrationsPerNode is the maximum number of live migrations that transfer memory to or from a node at the same time, in any direction. When set, it replaces ActiveOutboundMigrationsPerNode and ActiveInboundMigrationsPerNode.",
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+					"activeMigrationsPerCluster": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ActiveMigrationsPerCluster is the maximum number of live migrations that transfer memory in the whole cluster at the same time. Unlike ParallelMigrationsPerCluster, it does not count migrations that wait for their turn with a prepared target. Not limited when unset.",
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
 					"allowAutoConverge": {
 						SchemaProps: spec.SchemaProps{
 							Description: "AllowAutoConverge allows the platform to compromise performance/availability of VMIs to guarantee successful VMI live migrations. Defaults to false",
@@ -27259,6 +27287,20 @@ func schema_kubevirtio_api_core_v1_VirtualMachineInstanceMigrationState(ref comm
 						SchemaProps: spec.SchemaProps{
 							Description: "Migration configurations to apply",
 							Ref:         ref("kubevirt.io/api/core/v1.MigrationConfiguration"),
+						},
+					},
+					"transferPermitRequired": {
+						SchemaProps: spec.SchemaProps{
+							Description: "TransferPermitRequired is set by virt-controller when it hands the migration off to the target with an active migration limit configured. The source then does not start transferring memory before TransferPermitted is set.",
+							Type:        []string{"boolean"},
+							Format:      "",
+						},
+					},
+					"transferPermitted": {
+						SchemaProps: spec.SchemaProps{
+							Description: "TransferPermitted is set by virt-controller once the migration fits the active migration limits.",
+							Type:        []string{"boolean"},
+							Format:      "",
 						},
 					},
 					"targetCPUSet": {

@@ -3459,6 +3459,26 @@ func (in *MigrationConfiguration) DeepCopyInto(out *MigrationConfiguration) {
 		*out = new(uint32)
 		**out = **in
 	}
+	if in.ActiveOutboundMigrationsPerNode != nil {
+		in, out := &in.ActiveOutboundMigrationsPerNode, &out.ActiveOutboundMigrationsPerNode
+		*out = new(uint32)
+		**out = **in
+	}
+	if in.ActiveInboundMigrationsPerNode != nil {
+		in, out := &in.ActiveInboundMigrationsPerNode, &out.ActiveInboundMigrationsPerNode
+		*out = new(uint32)
+		**out = **in
+	}
+	if in.ActiveMigrationsPerNode != nil {
+		in, out := &in.ActiveMigrationsPerNode, &out.ActiveMigrationsPerNode
+		*out = new(uint32)
+		**out = **in
+	}
+	if in.ActiveMigrationsPerCluster != nil {
+		in, out := &in.ActiveMigrationsPerCluster, &out.ActiveMigrationsPerCluster
+		*out = new(uint32)
+		**out = **in
+	}
 	if in.AllowAutoConverge != nil {
 		in, out := &in.AllowAutoConverge, &out.AllowAutoConverge
 		*out = new(bool)
