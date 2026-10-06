@@ -31,6 +31,7 @@ import (
 	"path"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/emicklei/go-restful/v3"
 	"github.com/mdlayher/vsock"
@@ -83,6 +84,9 @@ const (
 	spiceLinkHeaderSize   = 16
 	spiceConnectionIDSize = 4
 	spiceLinkPrefixSize   = spiceLinkHeaderSize + spiceConnectionIDSize
+
+	// closeFrameTimeout bounds how long an evicted session waits to tell its client goodbye.
+	closeFrameTimeout = time.Second
 )
 
 func NewConsoleHandler(podIsolationDetector isolation.PodIsolationDetector, vmiStore cache.Store, certManager certificate.Manager) *ConsoleHandler {
@@ -301,7 +305,7 @@ func (t *ConsoleHandler) streamSPICE(vmi *v1.VirtualMachineInstance, request *re
 
 	select {
 	case <-stopCh:
-		clientSocket.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseGoingAway, "close by another connection"))
+		closeByAnotherConnection(vmi, clientSocket)
 	case err := <-errCh:
 		if err != nil && err != io.EOF {
 			log.Log.Object(vmi).Reason(err).Error("Error in proxing websocket and unix socket")
@@ -408,6 +412,17 @@ func (t *ConsoleHandler) VSOCKHandler(request *restful.Request, response *restfu
 	}, make(chan struct{})) // It is legitimate and up to the guest-application to accept multiple connections.
 }
 
+// closeByAnotherConnection tells the client its session was taken over by a newer
+// connection. The proxy goroutine is still pushing frames through the message writer at
+// this point, and gorilla allows exactly one of those at a time; a control frame is the
+// only write it permits alongside, so the close must go out as one or the process panics.
+func closeByAnotherConnection(vmi *v1.VirtualMachineInstance, clientSocket *websocket.Conn) {
+	reason := websocket.FormatCloseMessage(websocket.CloseGoingAway, "close by another connection")
+	if err := clientSocket.WriteControl(websocket.CloseMessage, reason, time.Now().Add(closeFrameTimeout)); err != nil {
+		log.Log.Object(vmi).Reason(err).Warning("Failed to send the close frame to the evicted client")
+	}
+}
+
 func newStopChan(uid types.UID, lock *sync.Mutex, stopChans map[types.UID]chan struct{}) chan struct{} {
 	lock.Lock()
 	defer lock.Unlock()
@@ -492,7 +507,7 @@ func (t *ConsoleHandler) stream(vmi *v1.VirtualMachineInstance, request *restful
 
 	select {
 	case <-stopCh:
-		clientSocket.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseGoingAway, "close by another connection"))
+		closeByAnotherConnection(vmi, clientSocket)
 	case err := <-errCh:
 		if err != nil && err != io.EOF {
 			log.Log.Object(vmi).Reason(err).Error("Error in proxing websocket and unix socket")
