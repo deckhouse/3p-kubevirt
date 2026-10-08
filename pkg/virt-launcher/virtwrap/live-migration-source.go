@@ -92,6 +92,9 @@ type migrationMonitor struct {
 	progressTimeout          int64
 	acceptableCompletionTime int64
 	migrationFailedWithError error
+	// guestSuspended is set once the monitor has paused a running guest to
+	// complete the migration.
+	guestSuspended bool
 }
 
 type inflightMigrationAborted struct {
@@ -622,13 +625,20 @@ func (m *migrationMonitor) processInflightMigration(dom cli.VirDomain, stats *li
 		} else {
 
 			logger.Info("Pausing the guest to allow migration to complete")
+			// A guest paused by the user stays paused whatever the migration outcome.
+			domState, _, err := dom.GetState()
+			if err != nil {
+				logger.Reason(err).Error(failedGetDomainState)
+				return nil
+			}
 			// if a migration has stalled too long, the guest will be paused
 			// to complete the migration when allowPostCopy is disabled
-			err := dom.Suspend()
+			err = dom.Suspend()
 			if err != nil {
 				logger.Reason(err).Error("Signalling suspension failed.")
 				return nil
 			}
+			m.guestSuspended = domState != libvirt.DOMAIN_PAUSED
 			logger.Infof("Signaled pause for %s", m.vmi.GetObjectMeta().GetName())
 
 			// update acceptableCompletionTime to prevent premature migration
@@ -674,6 +684,19 @@ func (m *migrationMonitor) processInflightMigration(dom cli.VirDomain, stats *li
 	return nil
 }
 
+// setMigrationResult reports the migration result. A guest the monitor has
+// paused to complete the migration stays on the source when the migration
+// fails, and nothing else would ever resume it, so it is released first to let
+// the synchronization triggered by the report resume it.
+func (m *migrationMonitor) setMigrationResult(failed bool, reason string, abortStatus v1.MigrationAbortStatus) {
+	if failed && m.guestSuspended {
+		log.Log.Object(m.vmi).Info("Migration failed, releasing the guest paused by the migration monitor")
+		m.l.paused.remove(m.vmi.UID)
+		m.guestSuspended = false
+	}
+	m.l.setMigrationResult(failed, reason, abortStatus)
+}
+
 func (m *migrationMonitor) startMonitor() {
 	var completedJobInfo *libvirt.DomainJobInfo
 	vmi := m.vmi
@@ -690,7 +713,7 @@ func (m *migrationMonitor) startMonitor() {
 	dom, err := m.l.virConn.LookupDomainByName(domName)
 	if err != nil {
 		logger.Reason(err).Error(liveMigrationFailed)
-		m.l.setMigrationResult(true, fmt.Sprintf("%v", err), "")
+		m.setMigrationResult(true, fmt.Sprintf("%v", err), "")
 		return
 	}
 	defer dom.Free()
@@ -717,11 +740,11 @@ func (m *migrationMonitor) startMonitor() {
 			// Improve the error message when the volume migration fails because the destination size is smaller then the source volume
 			if len(vmi.Status.MigratedVolumes) > 0 && strings.Contains(m.migrationFailedWithError.Error(),
 				"has to be smaller or equal to the actual size of the containing file") {
-				m.l.setMigrationResult(true, fmt.Sprintf("Volume migration cannot be performed because the destination volume is smaller then the source volume: %v",
+				m.setMigrationResult(true, fmt.Sprintf("Volume migration cannot be performed because the destination volume is smaller then the source volume: %v",
 					m.migrationFailedWithError), abortStatus)
 				return
 			}
-			m.l.setMigrationResult(true, fmt.Sprintf("Live migration failed %v", m.migrationFailedWithError), abortStatus)
+			m.setMigrationResult(true, fmt.Sprintf("Live migration failed %v", m.migrationFailedWithError), abortStatus)
 			return
 		}
 
@@ -746,7 +769,7 @@ func (m *migrationMonitor) startMonitor() {
 			aborted := m.processInflightMigration(dom, stats)
 			if aborted != nil {
 				logger.Errorf("Live migration abort detected with reason: %s", aborted.message)
-				m.l.setMigrationResult(true, aborted.message, aborted.abortStatus)
+				m.setMigrationResult(true, aborted.message, aborted.abortStatus)
 				return
 			}
 			logInterval++
@@ -757,7 +780,7 @@ func (m *migrationMonitor) startMonitor() {
 			completedJobInfo = m.determineNonRunningMigrationStatus(dom)
 		case libvirt.DOMAIN_JOB_COMPLETED:
 			logger.Info("Migration has been completed")
-			m.l.setMigrationResult(false, "", "")
+			m.setMigrationResult(false, "", "")
 			return
 		case libvirt.DOMAIN_JOB_FAILED:
 			logger.Info("Migration job failed")
@@ -771,11 +794,11 @@ func (m *migrationMonitor) startMonitor() {
 				reason.WriteString(fmt.Sprintf(": %s", stats.ErrorMessage))
 			}
 
-			m.l.setMigrationResult(true, reason.String(), "")
+			m.setMigrationResult(true, reason.String(), "")
 			return
 		case libvirt.DOMAIN_JOB_CANCELLED:
 			logger.Info("Migration was canceled")
-			m.l.setMigrationResult(true, "Live migration aborted ", v1.MigrationAbortSucceeded)
+			m.setMigrationResult(true, "Live migration aborted ", v1.MigrationAbortSucceeded)
 			return
 		}
 	}

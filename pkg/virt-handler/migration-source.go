@@ -761,6 +761,40 @@ func (c *MigrationSourceController) handleMigrationAbort(vmi *v1.VirtualMachineI
 	return nil
 }
 
+// AbortMigrations cancels every in-flight migration this node is the source of.
+// The migration proxy lives in the virt-handler process, so the proxied
+// connections die with it. Cut at the switchover, they leave the source domain
+// paused by libvirt. Aborting ahead of the shutdown lets these migrations fail
+// while the guest still runs; the ones already past the point where libvirt can
+// abort them complete before the proxy goes away.
+func (c *MigrationSourceController) AbortMigrations() {
+	for _, obj := range c.vmiStore.List() {
+		vmi := obj.(*v1.VirtualMachineInstance)
+		if vmi.IsFinal() || vmi.DeletionTimestamp != nil ||
+			isMigrationDone(vmi.Status.MigrationState) || !c.isMigrationSource(vmi) {
+			continue
+		}
+		// A post-copy migration cannot be aborted: the target already runs the guest.
+		if vmi.Status.MigrationState.Mode == v1.MigrationPostCopy {
+			continue
+		}
+
+		client, err := c.launcherClients.GetLauncherClient(vmi)
+		if err != nil {
+			log.Log.Object(vmi).Reason(err).Warning("failed to abort the migration on shutdown")
+			continue
+		}
+		if err := client.CancelVirtualMachineMigration(vmi); err != nil {
+			if err.Error() != migrations.CancelMigrationFailedVmiNotMigratingErr {
+				log.Log.Object(vmi).Reason(err).Warning("failed to abort the migration on shutdown")
+			}
+			continue
+		}
+		log.Log.Object(vmi).Info("aborting the migration, virt-handler is shutting down")
+		c.recorder.Event(vmi, k8sv1.EventTypeNormal, v1.Migrating.String(), VMIAbortingMigration)
+	}
+}
+
 func configureParallelMigrationThreads(options *cmdclient.MigrationOptions, vm *v1.VirtualMachineInstance) {
 	// When the CPU is limited, there's a risk of the migration threads choking the CPU resources on the compute container.
 	// For this reason, we will avoid configuring migration threads in such scenarios.

@@ -312,7 +312,8 @@ func isMigrationInProgress(vmi *v1.VirtualMachineInstance, domain *api.Domain) b
 		if domain.Status.Status == api.Paused &&
 			(domain.Status.Reason == api.ReasonPausedMigration ||
 				domain.Status.Reason == api.ReasonPausedStartingUp ||
-				domain.Status.Reason == api.ReasonPausedPostcopy) {
+				domain.Status.Reason == api.ReasonPausedPostcopy) &&
+			!isDomainPausedByFailedMigration(vmi, domain) {
 			return true
 		}
 	}
@@ -321,6 +322,34 @@ func isMigrationInProgress(vmi *v1.VirtualMachineInstance, domain *api.Domain) b
 		return vmi.IsMigrationTarget() && !vmi.IsMigrationCompleted()
 	}
 	return false
+}
+
+// isDomainPausedByFailedMigration reports a source domain that libvirt left
+// paused after the outgoing migration had failed, e.g. with the migration
+// connection cut at the switchover. The migration is over and the guest has not
+// been reported running on the target, so the domain has to be synchronized,
+// and thus resumed, as any other one.
+func isDomainPausedByFailedMigration(vmi *v1.VirtualMachineInstance, domain *api.Domain) bool {
+	if domain.Status.Status != api.Paused || domain.Status.Reason != api.ReasonPausedMigration {
+		return false
+	}
+
+	domainMigrationMetadata := domain.Spec.Metadata.KubeVirt.Migration
+	if domainMigrationMetadata == nil ||
+		domainMigrationMetadata.EndTimestamp == nil ||
+		!domainMigrationMetadata.Failed {
+		return false
+	}
+
+	if vmi == nil || vmi.Status.MigrationState == nil {
+		return false
+	}
+	migrationState := vmi.Status.MigrationState
+	return migrationState.EndTimestamp != nil &&
+		migrationState.Failed &&
+		!migrationState.Completed &&
+		migrationState.Mode != v1.MigrationPostCopy &&
+		migrationState.TargetNodeDomainReadyTimestamp == nil
 }
 
 func (c *BaseController) hotplugCPU(vmi *v1.VirtualMachineInstance, client cmdclient.LauncherClient, capabilities *libvirtxml.Caps) error {

@@ -232,17 +232,6 @@ func (app *virtHandlerApp) Run() {
 		os.Exit(2)
 	}
 
-	go func() {
-		sigint := make(chan os.Signal, 1)
-
-		signal.Notify(sigint, syscall.SIGTERM)
-
-		<-sigint
-
-		app.markNodeAsUnschedulable(logger)
-		os.Exit(0)
-	}()
-
 	// Create event recorder
 	broadcaster := record.NewBroadcaster()
 	broadcaster.StartRecordingToSink(&k8coresv1.EventSinkImpl{Interface: app.virtCli.CoreV1().Events(k8sv1.NamespaceAll)})
@@ -530,19 +519,30 @@ func (app *virtHandlerApp) Run() {
 	)
 	// start graceful shutdown handler
 	go func() {
-		connectionInterval := 10 * time.Second
+		connectionInterval := 200 * time.Millisecond
 		connectionTimeout := time.Duration(app.gracefulShutdownSeconds) * time.Second
 
 		s := <-c
 		log.Log.Infof("Received signal %s, initiating graceful shutdown", s.String())
 
+		app.markNodeAsUnschedulable(logger)
+
 		// This triggers the migration proxy to no longer accept new connections
 		migrationProxy.InitiateGracefulShutdown()
 
+		// The proxied migration connections die with this process. Abort the
+		// outgoing migrations first, so that none of them is cut at the switchover
+		// and leaves the source domain paused.
+		migrationSourceController.AbortMigrations()
+
+		lastCount := -1
 		err := virtwait.PollImmediately(connectionInterval, connectionTimeout, func(_ context.Context) (done bool, err error) {
 			count := migrationProxy.OpenListenerCount()
 			if count > 0 {
-				log.Log.Infof("waiting for %d migration listeners to terminate", count)
+				if count != lastCount {
+					log.Log.Infof("waiting for %d migration listeners to terminate", count)
+					lastCount = count
+				}
 				return false, nil
 			}
 			return true, nil
