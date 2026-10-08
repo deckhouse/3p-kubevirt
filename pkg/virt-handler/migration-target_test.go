@@ -30,6 +30,8 @@ import (
 	"sync"
 	"time"
 
+	cmdv1 "kubevirt.io/kubevirt/pkg/handler-launcher-com/cmd/v1"
+
 	k8sv1 "k8s.io/api/core/v1"
 
 	"go.uber.org/mock/gomock"
@@ -840,3 +842,35 @@ func (s *stubTargetPasstRepairHandler) HandleMigrationTarget(*v1.VirtualMachineI
 	s.isHandleMigrationTargetCalled = true
 	return nil
 }
+
+var _ = Describe("refreshInterfacesAfterCrossClusterMigration", func() {
+	newVMI := func(syncAddress *string) *v1.VirtualMachineInstance {
+		vmi := api2.NewMinimalVMI("testvmi")
+		vmi.Spec.Domain.Devices.Interfaces = []v1.Interface{{Name: "default"}, {Name: "extra"}}
+		vmi.Status.MigrationState = &v1.VirtualMachineInstanceMigrationState{
+			SourceState: &v1.VirtualMachineInstanceMigrationSourceState{
+				VirtualMachineInstanceCommonMigrationState: v1.VirtualMachineInstanceCommonMigrationState{SyncAddress: syncAddress},
+			},
+		}
+		return vmi
+	}
+
+	It("reconnects every interface of a VM received from another cluster", func() {
+		options := &cmdv1.VirtualMachineOptions{}
+
+		refreshInterfacesAfterCrossClusterMigration(newVMI(pointer.P("10.0.0.1:9185")), options)
+
+		Expect(options.InterfaceMigration).To(HaveLen(2))
+		for _, name := range []string{"default", "extra"} {
+			Expect(options.InterfaceMigration[name].Method).To(Equal(string(v1.LinkRefresh)))
+		}
+	})
+
+	It("leaves a migration within the cluster to the binding", func() {
+		options := &cmdv1.VirtualMachineOptions{InterfaceMigration: map[string]*cmdv1.InterfaceBindingMigration{}}
+
+		refreshInterfacesAfterCrossClusterMigration(newVMI(nil), options)
+
+		Expect(options.InterfaceMigration).To(BeEmpty())
+	})
+})

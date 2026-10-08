@@ -35,8 +35,25 @@ import (
 	"kubevirt.io/kubevirt/pkg/controller"
 )
 
+// isMigrationStateOver reports a migration state the given migration must not inherit: a completed one,
+// or a failed one of another migration. An aborted migration fails without completing, and a migration
+// that took over its state would start out failed, with the end time and target of the old one.
+func isMigrationStateOver(vmi *v1.VirtualMachineInstance, migrationUID types.UID) bool {
+	state := vmi.Status.MigrationState
+	if state == nil || state.Completed {
+		return true
+	}
+	if !state.Failed {
+		return false
+	}
+	ownedBy := state.MigrationUID == migrationUID ||
+		(state.SourceState != nil && state.SourceState.MigrationUID == migrationUID) ||
+		(state.TargetState != nil && state.TargetState.MigrationUID == migrationUID)
+	return !ownedBy
+}
+
 func (c *Controller) initializeMigrateSourceState(migration *v1.VirtualMachineInstanceMigration, vmi *v1.VirtualMachineInstance) {
-	if vmi.Status.MigrationState == nil || vmi.IsMigrationCompleted() {
+	if isMigrationStateOver(vmi, migration.UID) {
 		vmi.Status.MigrationState = &v1.VirtualMachineInstanceMigrationState{}
 	}
 	if vmi.Status.MigrationState.SourceState == nil {
@@ -52,7 +69,7 @@ func (c *Controller) initializeMigrateSourceState(migration *v1.VirtualMachineIn
 }
 
 func (c *Controller) initializeMigrateTargetState(migration *v1.VirtualMachineInstanceMigration, vmi *v1.VirtualMachineInstance) {
-	if vmi.Status.MigrationState == nil || vmi.IsMigrationCompleted() {
+	if isMigrationStateOver(vmi, migration.UID) {
 		vmi.Status.MigrationState = &v1.VirtualMachineInstanceMigrationState{}
 	}
 	if vmi.Status.MigrationState.TargetState == nil {

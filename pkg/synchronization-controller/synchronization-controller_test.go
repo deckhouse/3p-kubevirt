@@ -1136,3 +1136,37 @@ func createLegacyMigration() *virtv1.VirtualMachineInstanceMigration {
 		},
 	}
 }
+
+var _ = Describe("copyLegacySourceFields", func() {
+	newSourceState := func(failed bool) *virtv1.VirtualMachineInstanceMigrationState {
+		now := metav1.Now()
+		return &virtv1.VirtualMachineInstanceMigrationState{
+			SourceState:    &virtv1.VirtualMachineInstanceMigrationSourceState{},
+			StartTimestamp: &now,
+			EndTimestamp:   &now,
+			Failed:         failed,
+			FailureReason:  "Domain job failed",
+		}
+	}
+
+	It("ends the migration on the target when the source failed", func() {
+		vmi := &virtv1.VirtualMachineInstance{}
+		vmi.Status.MigrationState = &virtv1.VirtualMachineInstanceMigrationState{}
+
+		copyLegacySourceFields(vmi, newSourceState(true))
+
+		Expect(vmi.Status.MigrationState.EndTimestamp).ToNot(BeNil())
+		Expect(vmi.Status.MigrationState.Failed).To(BeTrue())
+		Expect(vmi.Status.MigrationState.FailureReason).To(Equal("Domain job failed"))
+	})
+
+	It("leaves the outcome to the target when the source has not failed", func() {
+		vmi := &virtv1.VirtualMachineInstance{}
+		vmi.Status.MigrationState = &virtv1.VirtualMachineInstanceMigrationState{}
+
+		copyLegacySourceFields(vmi, newSourceState(false))
+
+		Expect(vmi.Status.MigrationState.Failed).To(BeFalse())
+		Expect(vmi.Status.MigrationState.Completed).To(BeFalse())
+	})
+})

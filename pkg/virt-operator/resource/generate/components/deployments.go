@@ -795,7 +795,16 @@ func NewSynchronizationControllerDeployment(
 	pod := &deployment.Spec.Template.Spec
 	pod.ServiceAccountName = SynchronizationControllerServiceAccountName
 	pod.SecurityContext = &corev1.PodSecurityContext{
-		RunAsNonRoot: pointer.P(true),
+		RunAsNonRoot:   pointer.P(true),
+		SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
+	}
+	pod.Containers[0].SecurityContext = &corev1.SecurityContext{
+		AllowPrivilegeEscalation: pointer.P(false),
+		ReadOnlyRootFilesystem:   pointer.P(true),
+		Capabilities: &corev1.Capabilities{
+			Drop: []corev1.Capability{"ALL"},
+		},
+		SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
 	}
 
 	const shortName = "sync"

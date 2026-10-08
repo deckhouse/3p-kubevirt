@@ -338,6 +338,45 @@ var _ = Describe("VirtualMachineInstance migration target", func() {
 		})
 	})
 
+	Context("updateStatus of a migration to another cluster", func() {
+		newCrossClusterSource := func() *v1.VirtualMachineInstance {
+			return libvmi.New(libvmistatus.WithStatus(libvmistatus.New(
+				libvmistatus.WithPhase(v1.Running),
+				libvmistatus.WithNodeName(host),
+				libvmistatus.WithMigrationState(v1.VirtualMachineInstanceMigrationState{
+					MigrationUID:      "1234",
+					SourceNode:        host,
+					TargetNodeAddress: "10.0.0.2",
+					SourceState:       &v1.VirtualMachineInstanceMigrationSourceState{VirtualMachineInstanceCommonMigrationState: v1.VirtualMachineInstanceCommonMigrationState{SyncAddress: pointer.P("10.0.0.1:9185")}},
+					TargetState:       &v1.VirtualMachineInstanceMigrationTargetState{VirtualMachineInstanceCommonMigrationState: v1.VirtualMachineInstanceCommonMigrationState{SyncAddress: pointer.P("10.0.0.2:9185")}},
+				}),
+			)))
+		}
+		BeforeEach(func() {
+			client.EXPECT().GetDomainStats().Return(nil, false, nil).AnyTimes()
+		})
+		newDomain := func(end *metav1.Time) *api.Domain {
+			d := api.NewMinimalDomainWithUUID("test", "1234")
+			d.Spec.Metadata.KubeVirt.Migration = &api.MigrationMetadata{UID: "1234", EndTimestamp: end}
+			return d
+		}
+
+		It("does not fail the VMI while the target node is unknown and libvirt has not finished", func() {
+			vmi := newCrossClusterSource()
+			Expect(controller.updateStatus(vmi, newDomain(nil))).To(Succeed())
+			Expect(vmi.Status.Phase).To(Equal(v1.Running))
+			Expect(vmi.Status.MigrationState.Completed).To(BeFalse())
+		})
+
+		It("still fails the VMI that migrated to an unknown host", func() {
+			vmi := newCrossClusterSource()
+			Expect(controller.updateStatus(vmi, newDomain(pointer.P(metav1.Now())))).To(Succeed())
+			Expect(vmi.Status.Phase).To(Equal(v1.Failed))
+			Expect(vmi.Status.MigrationState.Completed).To(BeTrue())
+			testutils.ExpectEvent(recorder, v1.Migrated.String())
+		})
+	})
+
 	Context("setMigrationTransferStatus", func() {
 		It("should map transfer counters from domain job stats", func() {
 			vmi := libvmi.New(libvmistatus.WithStatus(libvmistatus.New(

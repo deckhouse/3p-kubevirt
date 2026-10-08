@@ -1100,6 +1100,7 @@ func (c *MigrationTargetController) finalizeMigration(vmi *v1.VirtualMachineInst
 
 	options := &cmdv1.VirtualMachineOptions{}
 	options.InterfaceMigration = domainspec.BindingMigrationByInterfaceName(vmi.Spec.Domain.Devices.Interfaces, c.clusterConfig.GetNetworkBindings())
+	refreshInterfacesAfterCrossClusterMigration(vmi, options)
 	if err := client.FinalizeVirtualMachineMigration(vmi, options); err != nil {
 		log.Log.Object(vmi).Reason(err).Error(errorMessage)
 		return fmt.Errorf("%s: %v", errorMessage, err)
@@ -1107,6 +1108,22 @@ func (c *MigrationTargetController) finalizeMigration(vmi *v1.VirtualMachineInst
 
 	vmi.Status.MigrationState.Completed = true
 	return nil
+}
+
+// refreshInterfacesAfterCrossClusterMigration reconnects every interface of a VM received from another
+// cluster. The guest keeps the address, DNS server and MTU it got by DHCP in the source cluster, and they
+// may differ here; reconnecting makes it ask DHCP again. Within a cluster the binding decides, as before.
+func refreshInterfacesAfterCrossClusterMigration(vmi *v1.VirtualMachineInstance, options *cmdv1.VirtualMachineOptions) {
+	state := vmi.Status.MigrationState
+	if state == nil || state.SourceState == nil || state.SourceState.SyncAddress == nil {
+		return
+	}
+	if options.InterfaceMigration == nil {
+		options.InterfaceMigration = map[string]*cmdv1.InterfaceBindingMigration{}
+	}
+	for _, iface := range vmi.Spec.Domain.Devices.Interfaces {
+		options.InterfaceMigration[iface.Name] = &cmdv1.InterfaceBindingMigration{Method: string(v1.LinkRefresh)}
+	}
 }
 
 func finalizeNodePlacement(vmi *v1.VirtualMachineInstance) {

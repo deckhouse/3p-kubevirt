@@ -1080,6 +1080,14 @@ func copyLegacySourceFields(vmi *virtv1.VirtualMachineInstance, migrationState *
 	}
 	vmi.Status.MigrationState.SourcePod = migrationState.SourceState.Pod
 	copyCommonLegacyFields(vmi.Status.MigrationState, migrationState)
+	// A failure the source reports ends the migration on the target too. Without it the target sees the
+	// end timestamp the source sets on the failure, takes the migration for finished and completes it.
+	if migrationState.Failed {
+		vmi.Status.MigrationState.Failed = true
+		if vmi.Status.MigrationState.FailureReason == "" {
+			vmi.Status.MigrationState.FailureReason = migrationState.FailureReason
+		}
+	}
 }
 
 func copyCommonLegacyFields(targetMigrationState, sourceMigrationState *virtv1.VirtualMachineInstanceMigrationState) {

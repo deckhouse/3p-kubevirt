@@ -43,6 +43,9 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/record"
 
+	"github.com/deckhouse/kube-api-rewriter/pkg/proxy"
+	kubevirtrules "github.com/deckhouse/virtualization/src/kubevirt-rules"
+
 	"kubevirt.io/kubevirt/pkg/healthz"
 	"kubevirt.io/kubevirt/pkg/service"
 	kvtls "kubevirt.io/kubevirt/pkg/util/tls"
@@ -148,7 +151,7 @@ func (app *synchronizationControllerApp) setupTLS(factory controller.KubeInforme
 	kubevirtCAConfigInformer := factory.KubeVirtCAConfigMap()
 	if err := kubevirtCAConfigInformer.SetWatchErrorHandler(func(r *cache.Reflector, err error) {
 		apiHealthVersion.Clear()
-		cache.DefaultWatchErrorHandler(r, err)
+		cache.DefaultWatchErrorHandler(context.TODO(), r, err)
 	}); err != nil {
 		return err
 	}
@@ -192,6 +195,10 @@ func (app *synchronizationControllerApp) Run() {
 	if retryCount >= maxRetryCount {
 		panic(fmt.Errorf("unable to get kubevirt client config after %d retries %v", maxRetryCount, err))
 	}
+
+	rewriteRules := kubevirtrules.KubevirtRewriteRules
+	rewriteRules.Init()
+	proxy.WrapRESTConfig(clientConfig, proxy.NewProxyRoundTripper("virt-synchronization-controller", proxy.ToRenamed, rewriteRules))
 
 	clientConfig.RateLimiter = app.reloadableRateLimiter
 	for retryCount = 0; retryCount < maxRetryCount; retryCount++ {
@@ -361,8 +368,13 @@ func (app *synchronizationControllerApp) runWithLeaderElection(synchronizationCo
 					wg.Done()
 				},
 				OnStoppedLeading: func() {
-					log.Log.Error("leaderelection lost, shutting down controller")
+					// Stopping the controller is not enough: the goroutine waiting for a signal keeps
+					// the process alive and healthz keeps answering, so the pod would stay up with no
+					// leader election and no listener. Exit and let the kubelet restart it, as
+					// virt-controller does.
+					log.Log.Error("leaderelection lost, exiting")
 					controllerCancel()
+					os.Exit(1)
 				},
 			},
 		})

@@ -298,6 +298,14 @@ func (c *MigrationSourceController) updateStatus(vmi *v1.VirtualMachineInstance,
 	//
 	// After a migration, the VMI's phase is no longer owned by this node. Only the
 	// MigrationState status field is eligible to be mutated.
+	// The source of a migration between clusters learns the target node over the synchronization
+	// channel, and the node can come later than the address: an empty TargetNode does not mean the
+	// domain went to an unknown host, it may not have left yet. Failing the VMI here shuts down a
+	// running guest, so ownership is transferred only once libvirt reports the migration over.
+	if isCrossClusterSource(vmi) && !domainMigrationEnded(vmi, domain) {
+		return nil
+	}
+
 	migrationHost := ""
 	if vmi.Status.MigrationState != nil {
 		migrationHost = vmi.Status.MigrationState.TargetNode
@@ -340,6 +348,21 @@ func (c *MigrationSourceController) updateStatus(vmi *v1.VirtualMachineInstance,
 	}
 
 	return nil
+}
+
+// isCrossClusterSource reports a source of a migration to another cluster. IsDecentralizedMigration
+// is not used: it is false once both sides have published their synchronization addresses.
+func isCrossClusterSource(vmi *v1.VirtualMachineInstance) bool {
+	state := vmi.Status.MigrationState
+	return state != nil && state.TargetState != nil && state.TargetState.SyncAddress != nil
+}
+
+func domainMigrationEnded(vmi *v1.VirtualMachineInstance, domain *api.Domain) bool {
+	if domain == nil || domain.Spec.Metadata.KubeVirt.Migration == nil {
+		return false
+	}
+	migration := domain.Spec.Metadata.KubeVirt.Migration
+	return migration.UID == vmi.Status.MigrationState.MigrationUID && migration.EndTimestamp != nil
 }
 
 func (c *MigrationSourceController) Run(threadiness int, stopCh chan struct{}) {
