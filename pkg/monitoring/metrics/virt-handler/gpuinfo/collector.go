@@ -107,7 +107,7 @@ func (c *gpuInfoCache) fetchGPUAllocations() ([]GPUAllocation, error) {
 
 	var allocations []GPUAllocation
 	for _, pod := range resp.PodResources {
-		if !strings.HasPrefix(pod.Name, "virt-launcher-") {
+		if !strings.HasPrefix(pod.Name, "d8v-vm-") && !strings.HasPrefix(pod.Name, "virt-launcher-") {
 			continue
 		}
 

@@ -40,13 +40,13 @@ var _ = Describe("GPU Info Collector", func() {
 				allocations: []GPUAllocation{
 					{
 						Namespace: "test-ns",
-						PodName:   "virt-launcher-test-vmi-abc123",
+						PodName:   "d8v-vm-test-vmi-abc123",
 						Resource:  "nvidia.com/NVIDIA_A2-2Q",
 						UUID:      "gpu-uuid-123",
 					},
 					{
 						Namespace: "test-ns",
-						PodName:   "virt-launcher-test-vmi-abc123",
+						PodName:   "d8v-vm-test-vmi-abc123",
 						Resource:  "nvidia.com/NVIDIA_A2-2Q",
 						UUID:      "gpu-uuid-456",
 					},
@@ -59,7 +59,7 @@ var _ = Describe("GPU Info Collector", func() {
 			Expect(results[0].Value).To(Equal(float64(1)))
 			Expect(results[0].ConstLabels["node"]).To(Equal("worker-1"))
 			Expect(results[0].ConstLabels["namespace"]).To(Equal("test-ns"))
-			Expect(results[0].ConstLabels["pod"]).To(Equal("virt-launcher-test-vmi-abc123"))
+			Expect(results[0].ConstLabels["pod"]).To(Equal("d8v-vm-test-vmi-abc123"))
 			Expect(results[0].ConstLabels["resource"]).To(Equal("nvidia.com/NVIDIA_A2-2Q"))
 			Expect(results[0].ConstLabels["uuid"]).To(Equal("gpu-uuid-123"))
 
