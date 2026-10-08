@@ -82,7 +82,7 @@ var _ = Describe("Sidecar ValidatingAdmissionPolicies", func() {
 
 		It("should allow compute container without subPath", func() {
 			pod := launcherPod(corev1.Container{
-				Name:         "compute",
+				Name:         "d8v-compute",
 				VolumeMounts: []corev1.VolumeMount{pluginVolumeMount("")},
 			})
 			Expect(admitSidecarSubPath(pod)).To(Succeed())
@@ -90,7 +90,7 @@ var _ = Describe("Sidecar ValidatingAdmissionPolicies", func() {
 
 		It("should allow sidecar container with subPath", func() {
 			pod := launcherPod(
-				corev1.Container{Name: "compute"},
+				corev1.Container{Name: "d8v-compute"},
 				corev1.Container{
 					Name:         "plugin-sidecar-test",
 					VolumeMounts: []corev1.VolumeMount{pluginVolumeMount("test")},
@@ -101,7 +101,7 @@ var _ = Describe("Sidecar ValidatingAdmissionPolicies", func() {
 
 		It("should reject sidecar container without subPath", func() {
 			pod := launcherPod(
-				corev1.Container{Name: "compute"},
+				corev1.Container{Name: "d8v-compute"},
 				corev1.Container{
 					Name:         "plugin-sidecar-test",
 					VolumeMounts: []corev1.VolumeMount{pluginVolumeMount("")},
@@ -112,7 +112,7 @@ var _ = Describe("Sidecar ValidatingAdmissionPolicies", func() {
 
 		It("should allow container not mounting plugin volume", func() {
 			pod := launcherPod(
-				corev1.Container{Name: "compute"},
+				corev1.Container{Name: "d8v-compute"},
 				corev1.Container{
 					Name:         "unrelated-sidecar",
 					VolumeMounts: []corev1.VolumeMount{{Name: "other-volume", MountPath: "/mnt"}},
@@ -122,7 +122,7 @@ var _ = Describe("Sidecar ValidatingAdmissionPolicies", func() {
 		})
 
 		It("should reject initContainer without subPath", func() {
-			pod := launcherPod(corev1.Container{Name: "compute"})
+			pod := launcherPod(corev1.Container{Name: "d8v-compute"})
 			pod.Spec.InitContainers = []corev1.Container{{
 				Name:         "init-sidecar",
 				VolumeMounts: []corev1.VolumeMount{pluginVolumeMount("")},
@@ -131,7 +131,7 @@ var _ = Describe("Sidecar ValidatingAdmissionPolicies", func() {
 		})
 
 		It("should allow initContainer with subPath", func() {
-			pod := launcherPod(corev1.Container{Name: "compute"})
+			pod := launcherPod(corev1.Container{Name: "d8v-compute"})
 			pod.Spec.InitContainers = []corev1.Container{{
 				Name:         "init-sidecar",
 				VolumeMounts: []corev1.VolumeMount{pluginVolumeMount("my-plugin")},

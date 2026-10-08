@@ -40,7 +40,7 @@ import (
 )
 
 const (
-	computeContainerName = "compute"
+	computeContainerName = "d8v-compute"
 )
 
 // VirtLauncherPodMutator mutates virt-launcher pods to inject virtiofs containers

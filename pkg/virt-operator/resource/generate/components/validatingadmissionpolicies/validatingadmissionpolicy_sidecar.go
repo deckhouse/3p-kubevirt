@@ -75,7 +75,7 @@ func NewSidecarSubPathValidatingAdmissionPolicy() *admissionregistrationv1.Valid
 				{
 					Name: "containersHaveSubPath",
 					Expression: `object.spec.containers.all(c,
-    c.name == "compute" ||
+    c.name == "d8v-compute" ||
     !c.volumeMounts.exists(vm, vm.name == "kubevirt-plugin-sockets") ||
     c.volumeMounts.filter(vm, vm.name == "kubevirt-plugin-sockets")
         .all(vm, has(vm.subPath) && vm.subPath != ""))`,

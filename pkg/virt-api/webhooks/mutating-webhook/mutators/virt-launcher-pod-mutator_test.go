@@ -287,7 +287,7 @@ func newVirtLauncherPod(vmi *v1.VirtualMachineInstance) *k8sv1.Pod {
 		Spec: k8sv1.PodSpec{
 			Containers: []k8sv1.Container{
 				{
-					Name:  "compute",
+					Name:  "d8v-compute",
 					Image: "virt-launcher:latest",
 				},
 			},
