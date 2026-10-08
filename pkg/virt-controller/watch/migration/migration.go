@@ -1814,6 +1814,7 @@ func (c *Controller) sync(key string, migration *virtv1.VirtualMachineInstanceMi
 		// words, canceling would require the migration to run first.
 		if migration.DeletionTimestamp != nil && !migration.IsFinal() &&
 			vmi.Status.MigrationState != nil &&
+			vmi.Status.MigrationState.MigrationUID == migration.UID &&
 			!vmi.Status.MigrationState.Failed &&
 			!vmi.Status.MigrationState.Completed {
 			if vmi.Status.MigrationState.StartTimestamp == nil {
@@ -1829,6 +1830,9 @@ func (c *Controller) sync(key string, migration *virtv1.VirtualMachineInstanceMi
 		// started, so its target going down fails it as well instead of after the wait.
 		if migration.IsLocalOrDecentralizedTarget() && (!targetPodExists || controller.PodIsDown(pod)) &&
 			vmi.IsMigrationSynchronized(migration) &&
+			// A failed migration stays in this phase for good. Without the UID check it takes the
+			// migration state of the next migration of the VMI for its own and fails it before it starts.
+			vmi.Status.MigrationState.MigrationUID == migration.UID &&
 			(len(vmi.Status.MigrationState.TargetDirectMigrationNodePorts) == 0 || waitsForTransferPermission(vmi)) &&
 			vmi.Status.MigrationState.StartTimestamp == nil &&
 			!vmi.Status.MigrationState.Failed &&
