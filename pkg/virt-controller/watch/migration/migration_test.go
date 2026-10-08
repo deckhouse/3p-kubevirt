@@ -2893,6 +2893,59 @@ var _ = Describe("Migration watcher", func() {
 		})
 	})
 
+	Context("Migration from another cluster whose target VMI shut down", func() {
+		It("should report the failure in the migration state for the source cluster", func() {
+			vmi := newVirtualMachine("testvmi", v1.Failed)
+			migration := newMigration("testmigration", vmi.Name, v1.MigrationPending)
+			migration.Spec.Receive = &v1.VirtualMachineInstanceMigrationTarget{MigrationID: "some-id"}
+			vmi.Status.MigrationState = &v1.VirtualMachineInstanceMigrationState{
+				SourceState: &v1.VirtualMachineInstanceMigrationSourceState{VirtualMachineInstanceCommonMigrationState: v1.VirtualMachineInstanceCommonMigrationState{MigrationUID: "source-uid"}},
+				TargetState: &v1.VirtualMachineInstanceMigrationTargetState{VirtualMachineInstanceCommonMigrationState: v1.VirtualMachineInstanceCommonMigrationState{MigrationUID: migration.UID}},
+			}
+
+			addMigration(migration)
+			addVirtualMachineInstance(vmi)
+
+			sanityExecute()
+
+			testutils.ExpectEvent(recorder, virtcontroller.FailedMigrationReason)
+			testutils.ExpectEvent(recorder, virtcontroller.FailedMigrationReason)
+			expectMigrationFailedState(migration.Namespace, migration.Name)
+			expectVirtualMachineInstanceMigrationState(vmi.Namespace, vmi.Name, PointTo(MatchFields(IgnoreExtras, Fields{
+				"Failed":    BeTrue(),
+				"Completed": BeTrue(),
+			})))
+		})
+	})
+
+	Context("Migration to another cluster canceled before it starts", func() {
+		DescribeTable("should fail the migration instead of waiting for an abort", func(phase v1.VirtualMachineInstanceMigrationPhase) {
+			vmi := newVirtualMachine("testvmi", v1.Running)
+			migration := newMigration("testmigration", vmi.Name, phase)
+			migration.Spec.SendTo = &v1.VirtualMachineInstanceMigrationSource{MigrationID: "some-id", ConnectURL: "10.0.0.1:9185"}
+			migration.DeletionTimestamp = pointer.P(metav1.Now())
+			vmi.Status.MigrationState = &v1.VirtualMachineInstanceMigrationState{
+				MigrationUID:             migration.UID,
+				VMIMConfigurationOptions: &v1.VMIMConfigurationOptions{},
+				SourceState:              &v1.VirtualMachineInstanceMigrationSourceState{VirtualMachineInstanceCommonMigrationState: v1.VirtualMachineInstanceCommonMigrationState{MigrationUID: migration.UID}},
+				TargetState:              &v1.VirtualMachineInstanceMigrationTargetState{VirtualMachineInstanceCommonMigrationState: v1.VirtualMachineInstanceCommonMigrationState{MigrationUID: "target-uid"}},
+			}
+			Expect(controller.isMigrationHandedOff(migration, vmi)).To(BeTrue(), "the synchronization makes the migration look handed off")
+
+			addMigration(migration)
+			addVirtualMachineInstance(vmi)
+			addPod(newSourcePodForVirtualMachine(vmi))
+
+			sanityExecute()
+
+			testutils.ExpectEvent(recorder, virtcontroller.FailedMigrationReason)
+			expectMigrationFailedState(migration.Namespace, migration.Name)
+		},
+			Entry("while pending", v1.MigrationPending),
+			Entry("while waiting for the target", v1.MigrationScheduling),
+		)
+	})
+
 	Context("Migration deleted after the hand-off to virt-handler", func() {
 		var vmi *v1.VirtualMachineInstance
 		var migration *v1.VirtualMachineInstanceMigration
@@ -4289,3 +4342,46 @@ type stubNetworkAnnotationsGenerator struct {
 func (s stubNetworkAnnotationsGenerator) GenerateFromActivePod(_ *v1.VirtualMachineInstance, _ *k8sv1.Pod) map[string]string {
 	return s.annotations
 }
+
+var _ = Describe("initializeMigrateSourceState", func() {
+	controller := &Controller{}
+	newMigrationTo := func(uid types.UID) *v1.VirtualMachineInstanceMigration {
+		return &v1.VirtualMachineInstanceMigration{
+			ObjectMeta: metav1.ObjectMeta{UID: uid},
+			Spec: v1.VirtualMachineInstanceMigrationSpec{
+				SendTo: &v1.VirtualMachineInstanceMigrationSource{MigrationID: string(uid), ConnectURL: "10.0.0.2:9185"},
+			},
+		}
+	}
+	failedState := func(uid types.UID) *v1.VirtualMachineInstanceMigrationState {
+		return &v1.VirtualMachineInstanceMigrationState{
+			MigrationUID: uid,
+			Failed:       true,
+			EndTimestamp: pointer.P(metav1.Now()),
+			SourceState:  &v1.VirtualMachineInstanceMigrationSourceState{VirtualMachineInstanceCommonMigrationState: v1.VirtualMachineInstanceCommonMigrationState{MigrationUID: uid}},
+			TargetState:  &v1.VirtualMachineInstanceMigrationTargetState{VirtualMachineInstanceCommonMigrationState: v1.VirtualMachineInstanceCommonMigrationState{MigrationUID: "old-target"}},
+		}
+	}
+
+	It("starts a migration afresh after an aborted one", func() {
+		vmi := &v1.VirtualMachineInstance{}
+		vmi.Status.MigrationState = failedState("aborted")
+
+		controller.initializeMigrateSourceState(newMigrationTo("next"), vmi)
+
+		Expect(vmi.Status.MigrationState.Failed).To(BeFalse())
+		Expect(vmi.Status.MigrationState.EndTimestamp).To(BeNil())
+		Expect(vmi.Status.MigrationState.SourceState.MigrationUID).To(Equal(types.UID("next")))
+		Expect(vmi.Status.MigrationState.TargetState.MigrationUID).To(BeEmpty())
+		Expect(*vmi.Status.MigrationState.TargetState.SyncAddress).To(Equal("10.0.0.2:9185"))
+	})
+
+	It("keeps the failure of the migration itself", func() {
+		vmi := &v1.VirtualMachineInstance{}
+		vmi.Status.MigrationState = failedState("same")
+
+		controller.initializeMigrateSourceState(newMigrationTo("same"), vmi)
+
+		Expect(vmi.Status.MigrationState.Failed).To(BeTrue())
+	})
+})

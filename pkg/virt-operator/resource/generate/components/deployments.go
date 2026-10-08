@@ -848,6 +848,7 @@ func NewSynchronizationControllerDeployment(config *operatorutil.KubeVirtDeploym
 
 	container.SecurityContext = &corev1.SecurityContext{
 		AllowPrivilegeEscalation: pointer.P(false),
+		ReadOnlyRootFilesystem:   pointer.P(true),
 		Capabilities: &corev1.Capabilities{
 			Drop: []corev1.Capability{"ALL"},
 		},

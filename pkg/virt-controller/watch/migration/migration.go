@@ -546,6 +546,47 @@ func (c *Controller) interruptMigration(migration *virtv1.VirtualMachineInstance
 	return backendstorage.RecoverFromBrokenMigration(c.clientset, migration, c.pvcStore, vmi, c.templateService.GetLauncherImage())
 }
 
+// reportDecentralizedTargetFailure marks the migration failed in the migration state of the target VMI
+// of a migration from another cluster. The source learns the outcome only from that state, which the
+// synchronization passes over; a failed target migration alone left the source waiting for good.
+func (c *Controller) reportDecentralizedTargetFailure(migration *virtv1.VirtualMachineInstanceMigration, vmi *virtv1.VirtualMachineInstance) error {
+	state := vmi.Status.MigrationState
+	if !migration.IsDecentralizedTarget() || state == nil || state.TargetState == nil ||
+		state.TargetState.MigrationUID != migration.UID || state.Failed || state.Completed {
+		return nil
+	}
+
+	// handleMarkMigrationFailedOnVMI guards its patch with migrationState.migrationUid, which the target
+	// of a migration from another cluster has not got before the handoff; guard with the target state.
+	const failureReason = "Target VMI is shut down"
+	now := v1.Now()
+	patchSet := patch.New(
+		patch.WithTest("/status/migrationState/targetState/migrationUID", string(migration.UID)),
+		patch.WithAdd("/status/migrationState/failed", true),
+		patch.WithAdd("/status/migrationState/completed", true),
+	)
+	if state.EndTimestamp == nil {
+		patchSet.AddOption(patch.WithAdd("/status/migrationState/endTimestamp", now))
+	}
+	if state.StartTimestamp == nil {
+		patchSet.AddOption(patch.WithAdd("/status/migrationState/startTimestamp", now))
+	}
+	if state.FailureReason == "" {
+		patchSet.AddOption(patch.WithAdd("/status/migrationState/failureReason", failureReason))
+	}
+	patchBytes, err := patchSet.GeneratePayload()
+	if err != nil {
+		return err
+	}
+	if _, err = c.clientset.VirtualMachineInstance(vmi.Namespace).Patch(context.Background(), vmi.Name, types.JSONPatchType, patchBytes, v1.PatchOptions{}); err != nil {
+		log.Log.Reason(err).Object(vmi).Errorf("Failed to patch VMI status to indicate migration %s/%s failed.", migration.Namespace, migration.Name)
+		return err
+	}
+	c.recorder.Event(vmi, k8sv1.EventTypeWarning, controller.FailedMigrationReason,
+		fmt.Sprintf("VirtualMachineInstance migration uid %s failed. reason: %s", string(migration.UID), failureReason))
+	return nil
+}
+
 func (c *Controller) updateStatus(migration, migrationCopy *virtv1.VirtualMachineInstanceMigration, vmi *virtv1.VirtualMachineInstance, pods []*k8sv1.Pod, syncError error) error {
 	var pod *k8sv1.Pod = nil
 	var attachmentPod *k8sv1.Pod = nil
@@ -596,6 +637,9 @@ func (c *Controller) updateStatus(migration, migrationCopy *virtv1.VirtualMachin
 		log.Log.Object(migration).Error("Unable to migrate vmi because vmi is shutdown.")
 
 		setMigrationFailedConditionIfNotExists(migrationCopy, virtv1.VirtualMachineInstanceMigrationFailedReasonVMIIsShutdown, msg)
+		if err := c.reportDecentralizedTargetFailure(migration, vmi); err != nil {
+			return err
+		}
 	} else if isVolumeMigrationCanceled(migration, vmi) {
 		aborting, err := c.stopCanceledVolumeMigration(migration, vmi)
 		if err != nil {
@@ -626,7 +670,7 @@ func (c *Controller) updateStatus(migration, migrationCopy *virtv1.VirtualMachin
 
 			setMigrationFailedConditionIfNotExists(migrationCopy, virtv1.VirtualMachineInstanceMigrationFailedReasonVolumeMigrationCanceled, msg)
 		}
-	} else if migration.DeletionTimestamp != nil && !c.isMigrationHandedOff(migration, vmi) {
+	} else if migration.DeletionTimestamp != nil && (!c.isMigrationHandedOff(migration, vmi) || decentralizedSourceNotStarted(migration, vmi)) {
 		c.recorder.Eventf(migration, k8sv1.EventTypeWarning, controller.FailedMigrationReason, "Migration failed due to being canceled")
 		if !conditionManager.HasCondition(migration, virtv1.VirtualMachineInstanceMigrationAbortRequested) {
 			condition := virtv1.VirtualMachineInstanceMigrationCondition{
@@ -2930,6 +2974,21 @@ func (c *Controller) matchMigrationPolicy(vmi *virtv1.VirtualMachineInstance) er
 	vmi.Status.MigrationState.VMIMConfigurationOptions = resolvedConfig
 
 	return nil
+}
+
+// decentralizedSourceNotStarted reports a migration to another cluster that has synchronized with its
+// target but not started: the synchronization alone makes it look handed off, yet virt-handler has nothing
+// to abort before the target node is known. A canceled migration in this state is failed here, or it
+// waits for an abort that never comes and keeps its finalizers for good.
+func decentralizedSourceNotStarted(migration *virtv1.VirtualMachineInstanceMigration, vmi *virtv1.VirtualMachineInstance) bool {
+	if !migration.IsDecentralizedSource() {
+		return false
+	}
+	switch migration.Status.Phase {
+	case virtv1.MigrationSynchronizing, virtv1.MigrationPending, virtv1.MigrationScheduling:
+		return vmi.Status.MigrationState == nil || vmi.Status.MigrationState.StartTimestamp == nil
+	}
+	return false
 }
 
 func (c *Controller) isMigrationHandedOff(migration *virtv1.VirtualMachineInstanceMigration, vmi *virtv1.VirtualMachineInstance) bool {
