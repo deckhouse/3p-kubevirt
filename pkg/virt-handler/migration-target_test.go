@@ -344,7 +344,7 @@ var _ = Describe("VirtualMachineInstance migration target", func() {
 
 		// since a random port is generated, we have to create the proxy
 		// here in order to know what port will be in the update.
-		err = controller.handleTargetMigrationProxy(vmi)
+		err = controller.handleTargetMigrationProxy(vmi, client)
 		Expect(err).NotTo(HaveOccurred())
 
 		destSrcPorts := controller.migrationProxy.GetTargetListenerPorts(string(vmi.UID))
@@ -939,7 +939,7 @@ var _ = Describe("VirtualMachineInstance migration target", func() {
 			Expect(err).NotTo(HaveOccurred())
 			GinkgoT().Cleanup(func() { socket.Close() })
 
-			Expect(controller.handleTargetMigrationProxy(vmi)).To(Succeed())
+			Expect(controller.handleTargetMigrationProxy(vmi, client)).To(Succeed())
 			proxyKey := string(decentralizedSourceVMIUID)
 			Expect(controller.migrationProxy.GetTargetListenerPorts(proxyKey)).NotTo(BeEmpty())
 
@@ -1005,7 +1005,7 @@ var _ = Describe("VirtualMachineInstance migration target", func() {
 			Expect(err).NotTo(HaveOccurred())
 			GinkgoT().Cleanup(func() { socket.Close() })
 
-			Expect(controller.handleTargetMigrationProxy(vmi)).To(Succeed())
+			Expect(controller.handleTargetMigrationProxy(vmi, client)).To(Succeed())
 			proxyKey := migrationProxyKey(vmi)
 			Expect(controller.migrationProxy.GetTargetListenerPorts(proxyKey)).NotTo(BeEmpty())
 			return proxyKey

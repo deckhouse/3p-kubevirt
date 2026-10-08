@@ -202,14 +202,6 @@ var _ = Describe("Migration watcher", func() {
 		Expect(updatedVMI.Labels).To(SatisfyAll(matchers...))
 	}
 
-	expectVirtualMachineInstanceMigrationConfiguration := func(namespace, name string, expectedConfiguration *v1.VMIMConfigurationOptions) {
-		updatedVMI, err := virtClientset.KubevirtV1().VirtualMachineInstances(namespace).Get(context.Background(), name, metav1.GetOptions{})
-		Expect(err).ToNot(HaveOccurred())
-		Expect(updatedVMI.Status.MigrationState).ToNot(BeNil())
-		Expect(updatedVMI.Status.MigrationState.VMIMConfigurationOptions).ToNot(BeNil())
-		Expect(*updatedVMI.Status.MigrationState.VMIMConfigurationOptions).To(BeComparableTo(*expectedConfiguration))
-	}
-
 	expectVirtualMachineInstanceMigrationConfigurationIsEmpty := func(namespace, name string) {
 		updatedVMI, err := virtClientset.KubevirtV1().VirtualMachineInstances(namespace).Get(context.Background(), name, metav1.GetOptions{})
 		Expect(err).ToNot(HaveOccurred())
@@ -1881,7 +1873,7 @@ var _ = Describe("Migration watcher", func() {
 				SourceNode:   "node02",
 				TargetPod:    targetPod.Name,
 				// Emulate external migration configuration.
-				MigrationConfiguration: getMigrationConfig(),
+				VMIMConfigurationOptions: getMigrationConfig(),
 			}
 			vmi.Labels[v1.MigrationTargetNodeNameLabel] = "node01"
 			addMigration(migration)
@@ -2376,7 +2368,7 @@ var _ = Describe("Migration watcher", func() {
 			})
 		})
 
-		DescribeTable("should override cluster-wide migration configurations when", func(defineMigrationPolicy func(*migrationsv1.MigrationPolicySpec), testMigrationConfigs func(configuration *v1.MigrationConfiguration), expectConfigUpdate bool) {
+		DescribeTable("should override cluster-wide migration configurations when", func(defineMigrationPolicy func(*migrationsv1.MigrationPolicySpec), testResolvedConfig func(*v1.VMIMConfigurationOptions)) {
 			Skip("MigrationPolicy overrides of the cluster-wide migration configuration is disabled in favor of external migration configuration")
 			By("Initialize VMI and migration")
 			vmi = newVirtualMachine("testvmi", v1.Running)

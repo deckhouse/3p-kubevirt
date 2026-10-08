@@ -16,7 +16,6 @@ import (
 	gomock "go.uber.org/mock/gomock"
 	v1alpha1 "kubevirt.io/api/backup/v1alpha1"
 	v1 "kubevirt.io/api/core/v1"
-
 	v10 "kubevirt.io/kubevirt/pkg/handler-launcher-com/cmd/v1"
 	cmdclient "kubevirt.io/kubevirt/pkg/virt-handler/cmd-client"
 	api "kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/api"
@@ -145,6 +144,20 @@ func (m *MockDomainManager) GetAgentData(dataKey string) (string, error) {
 func (mr *MockDomainManagerMockRecorder) GetAgentData(dataKey any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetAgentData", reflect.TypeOf((*MockDomainManager)(nil).GetAgentData), dataKey)
+}
+
+// GetAppliedVMIChecksum mocks base method.
+func (m *MockDomainManager) GetAppliedVMIChecksum() string {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetAppliedVMIChecksum")
+	ret0, _ := ret[0].(string)
+	return ret0
+}
+
+// GetAppliedVMIChecksum indicates an expected call of GetAppliedVMIChecksum.
+func (mr *MockDomainManagerMockRecorder) GetAppliedVMIChecksum() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetAppliedVMIChecksum", reflect.TypeOf((*MockDomainManager)(nil).GetAppliedVMIChecksum))
 }
 
 // GetDomainDirtyRateStats mocks base method.
@@ -430,6 +443,20 @@ func (m *MockDomainManager) MigrateVMI(arg0 *v1.VirtualMachineInstance, arg1 *cm
 func (mr *MockDomainManagerMockRecorder) MigrateVMI(arg0, arg1 any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "MigrateVMI", reflect.TypeOf((*MockDomainManager)(nil).MigrateVMI), arg0, arg1)
+}
+
+// MigrationProxy mocks base method.
+func (m *MockDomainManager) MigrationProxy(action v10.MigrationProxyAction) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "MigrationProxy", action)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// MigrationProxy indicates an expected call of MigrationProxy.
+func (mr *MockDomainManagerMockRecorder) MigrationProxy(action any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "MigrationProxy", reflect.TypeOf((*MockDomainManager)(nil).MigrationProxy), action)
 }
 
 // PauseVMI mocks base method.
