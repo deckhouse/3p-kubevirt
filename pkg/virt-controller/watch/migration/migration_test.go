@@ -2955,6 +2955,47 @@ var _ = Describe("Migration watcher", func() {
 		)
 	})
 
+	Context("Failed migration whose target pod is gone", func() {
+		var vmi *v1.VirtualMachineInstance
+		var migration *v1.VirtualMachineInstanceMigration
+
+		BeforeEach(func() {
+			vmi = newVirtualMachine("testvmi", v1.Running)
+			addNodeNameToVMI(vmi, "node02")
+			migration = newMigration("testmigration", vmi.Name, v1.MigrationFailed)
+		})
+
+		It("should fail the migration state it owns", func() {
+			vmi.Status.MigrationState = &v1.VirtualMachineInstanceMigrationState{MigrationUID: migration.UID, SourceNode: "node02"}
+			addMigration(migration)
+			addVirtualMachineInstance(vmi)
+
+			sanityExecute()
+
+			testutils.ExpectEvent(recorder, virtcontroller.FailedMigrationReason)
+			expectVirtualMachineInstanceMigrationState(vmi.Namespace, vmi.Name, PointTo(MatchFields(IgnoreExtras, Fields{
+				"MigrationUID": Equal(migration.UID),
+				"Failed":       BeTrue(),
+				"Completed":    BeTrue(),
+			})))
+		})
+
+		It("should leave the migration state of the next migration alone", func() {
+			vmi.Status.MigrationState = &v1.VirtualMachineInstanceMigrationState{MigrationUID: "next-migration", SourceNode: "node02"}
+			addMigration(migration)
+			addVirtualMachineInstance(vmi)
+
+			sanityExecute()
+
+			expectVirtualMachineInstanceMigrationState(vmi.Namespace, vmi.Name, PointTo(MatchFields(IgnoreExtras, Fields{
+				"MigrationUID":   Equal(types.UID("next-migration")),
+				"Failed":         BeFalse(),
+				"Completed":      BeFalse(),
+				"StartTimestamp": BeNil(),
+			})))
+		})
+	})
+
 	Context("Migration with a canceled volume migration", func() {
 		var vmi *v1.VirtualMachineInstance
 		var migration *v1.VirtualMachineInstanceMigration
