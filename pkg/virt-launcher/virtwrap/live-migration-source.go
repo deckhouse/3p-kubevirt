@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"libvirt.org/go/libvirt"
@@ -100,6 +101,9 @@ type migrationMonitor struct {
 	progressWatermark  uint64
 	remainingData      uint64
 	progressTimeout    int64
+	// guestSuspended is set once the monitor has paused a running guest to
+	// complete the migration. migrate() reads it from its own goroutine.
+	guestSuspended atomic.Bool
 }
 
 var libvirtCompressionMethods = map[v1.MigrationCompression]string{
@@ -804,13 +808,20 @@ func (m *migrationMonitor) handleLegacyConvergence(dom cli.VirDomain, elapsedNs 
 			m.l.updateVMIMigrationMode(v1.MigrationPaused)
 		} else {
 			logger.Info("Pausing the guest to allow migration to complete")
+			// A guest paused by the user stays paused whatever the migration outcome.
+			domState, _, err := dom.GetState()
+			if err != nil {
+				logger.Reason(err).Error(failedGetDomainState)
+				return
+			}
 			// if a migration has stalled too long, the guest will be paused
 			// to complete the migration when allowPostCopy is disabled
-			err := dom.Suspend()
+			err = dom.Suspend()
 			if err != nil {
 				logger.Reason(err).Error("Signalling suspension failed.")
 				return
 			}
+			m.guestSuspended.Store(domState != libvirt.DOMAIN_PAUSED)
 			logger.Infof("Signaled pause for %s", m.vmi.GetObjectMeta().GetName())
 
 			// update acceptableCompletionTime to prevent premature migration
@@ -1525,6 +1536,18 @@ func shouldImmediatelyFailMigration(vmi *v1.VirtualMachineInstance) bool {
 	return shouldFail
 }
 
+// releaseSuspendedGuest forgets the pause the monitor has put on a running guest
+// to complete the migration. When the migration fails the guest stays on the
+// source and nothing else would ever resume it, so it is released before the
+// result is reported, and the synchronization the report triggers resumes it.
+// A guest the user paused before the migration is not released.
+func (m *migrationMonitor) releaseSuspendedGuest() {
+	if m.guestSuspended.CompareAndSwap(true, false) {
+		log.Log.Object(m.vmi).Info("Migration failed, releasing the guest paused by the migration monitor")
+		m.l.paused.remove(m.vmi.UID)
+	}
+}
+
 func (l *LibvirtDomainManager) migrate(vmi *v1.VirtualMachineInstance, options *cmdclient.MigrationOptions) {
 	if shouldImmediatelyFailMigration(vmi) {
 		log.Log.Object(vmi).Error("Live migration failed. Failure is forced by functional tests suite.")
@@ -1553,6 +1576,7 @@ func (l *LibvirtDomainManager) migrate(vmi *v1.VirtualMachineInstance, options *
 	err := l.migrateHelper(vmi, options)
 	if err != nil {
 		log.Log.Object(vmi).Reason(err).Error(liveMigrationFailed)
+		monitor.releaseSuspendedGuest()
 		l.setMigrationResult(true, err.Error())
 		return
 	}

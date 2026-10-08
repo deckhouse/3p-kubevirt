@@ -583,6 +583,56 @@ var _ = Describe("VirtualMachineInstance migration target", func() {
 		})
 	})
 
+	Context("AbortMigrations", func() {
+		newSourceVMI := func(state v1.VirtualMachineInstanceMigrationState) *v1.VirtualMachineInstance {
+			vmi := api2.NewMinimalVMI("testvmi")
+			vmi.UID = vmiTestUUID
+			vmi.Status.Phase = v1.Running
+			vmi.Status.NodeName = host
+			state.SourceNode = host
+			state.TargetNode = "othernode"
+			state.TargetNodeAddress = "127.0.0.1:12345"
+			state.MigrationUID = "123"
+			vmi.Status.MigrationState = &state
+			return vmi
+		}
+
+		It("should abort an in-flight migration", func() {
+			vmi := newSourceVMI(v1.VirtualMachineInstanceMigrationState{StartTimestamp: pointer.P(metav1.Now())})
+			Expect(controller.vmiStore.Add(vmi)).To(Succeed())
+
+			client.EXPECT().CancelVirtualMachineMigration(vmi)
+			controller.AbortMigrations()
+			testutils.ExpectEvent(recorder, VMIAbortingMigration)
+		})
+
+		It("should not abort a migration the launcher has not started yet", func() {
+			vmi := newSourceVMI(v1.VirtualMachineInstanceMigrationState{})
+			Expect(controller.vmiStore.Add(vmi)).To(Succeed())
+
+			controller.AbortMigrations()
+		})
+
+		DescribeTable("should leave the migration alone", func(state v1.VirtualMachineInstanceMigrationState, sourceNode string) {
+			vmi := newSourceVMI(state)
+			vmi.Status.MigrationState.SourceNode = sourceNode
+			Expect(controller.vmiStore.Add(vmi)).To(Succeed())
+
+			controller.AbortMigrations()
+		},
+			Entry("when it is in post-copy", v1.VirtualMachineInstanceMigrationState{Mode: v1.MigrationPostCopy}, host),
+			Entry("when it has completed", v1.VirtualMachineInstanceMigrationState{
+				EndTimestamp: pointer.P(metav1.Now()),
+				Completed:    true,
+			}, host),
+			Entry("when it has failed", v1.VirtualMachineInstanceMigrationState{
+				EndTimestamp: pointer.P(metav1.Now()),
+				Failed:       true,
+			}, host),
+			Entry("when this node is not the source", v1.VirtualMachineInstanceMigrationState{}, "othernode"),
+		)
+	})
+
 	Context("Migration options", func() {
 		Context("multi-threaded qemu migrations", func() {
 

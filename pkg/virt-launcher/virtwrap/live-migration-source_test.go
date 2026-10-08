@@ -2014,3 +2014,27 @@ var _ = Describe("migratableDomXML", func() {
 		Expect(newXML).To(Equal(expectedXML))
 	})
 })
+
+var _ = Describe("releaseSuspendedGuest", func() {
+	newMonitor := func(guestSuspended bool) (*migrationMonitor, *LibvirtDomainManager) {
+		vmi := libvmi.New(libvmi.WithName("testvmi"))
+		vmi.UID = "uid-1"
+		manager := &LibvirtDomainManager{paused: pausedVMIs{paused: map[types.UID]bool{vmi.UID: true}}}
+		monitor := &migrationMonitor{l: manager, vmi: vmi}
+		monitor.guestSuspended.Store(guestSuspended)
+		return monitor, manager
+	}
+
+	It("should release the guest the monitor paused to complete the migration", func() {
+		monitor, manager := newMonitor(true)
+		monitor.releaseSuspendedGuest()
+		Expect(manager.paused.contains(monitor.vmi.UID)).To(BeFalse())
+		Expect(monitor.guestSuspended.Load()).To(BeFalse())
+	})
+
+	It("should keep a guest the user paused before the migration", func() {
+		monitor, manager := newMonitor(false)
+		monitor.releaseSuspendedGuest()
+		Expect(manager.paused.contains(monitor.vmi.UID)).To(BeTrue())
+	})
+})
