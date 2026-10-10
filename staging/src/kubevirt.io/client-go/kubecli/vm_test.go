@@ -252,7 +252,7 @@ var _ = Describe("Kubevirt VirtualMachine Client", func() {
 		Expect(err).ToNot(HaveOccurred())
 
 		server.AppendHandlers(ghttp.CombineHandlers(
-			ghttp.VerifyRequest("PUT", path.Join(proxyPath, subVMPath, "evacuate", "cancel")),
+			ghttp.VerifyRequest("PUT", path.Join(proxyPath, subVMPath, "evacuatecancel")),
 			ghttp.RespondWithJSONEncoded(http.StatusOK, nil),
 		))
 		err = client.VirtualMachine(k8sv1.NamespaceDefault).EvacuateCancel(context.Background(), "testvm", &virtv1.EvacuateCancelOptions{})

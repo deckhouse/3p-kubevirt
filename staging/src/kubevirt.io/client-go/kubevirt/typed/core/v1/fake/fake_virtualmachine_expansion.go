@@ -114,7 +114,7 @@ func (c *fakeVirtualMachines) ObjectGraph(ctx context.Context, name string, obje
 
 func (c *fakeVirtualMachines) EvacuateCancel(ctx context.Context, name string, evacuateCancelOptions *v1.EvacuateCancelOptions) error {
 	_, err := c.Fake.
-		Invokes(fake2.NewPutSubresourceAction(c.Resource(), c.Namespace(), "evacuate/cancel", name, evacuateCancelOptions), nil)
+		Invokes(fake2.NewPutSubresourceAction(c.Resource(), c.Namespace(), "evacuatecancel", name, evacuateCancelOptions), nil)
 
 	return err
 }

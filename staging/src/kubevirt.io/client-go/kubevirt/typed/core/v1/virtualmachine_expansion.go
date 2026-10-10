@@ -235,7 +235,7 @@ func (c *virtualMachines) EvacuateCancel(ctx context.Context, name string, evacu
 		Namespace(c.GetNamespace()).
 		Resource("virtualmachines").
 		Name(name).
-		SubResource("evacuate", "cancel").
+		SubResource("evacuatecancel").
 		Body(body).
 		Do(ctx).
 		Error()

@@ -77,7 +77,7 @@ const (
 	apiVMMigrate             = "virtualmachines/migrate"
 	apiVMMemoryDump          = "virtualmachines/memorydump"
 	apiVMObjectGraph         = "virtualmachines/objectgraph"
-	apiVMEvacuateCancel      = "virtualmachines/evacuate/cancel"
+	apiVMEvacuateCancel      = "virtualmachines/evacuatecancel"
 	apiVMAddResourceClaim    = "virtualmachines/addresourceclaim"
 	apiVMRemoveResourceClaim = "virtualmachines/removeresourceclaim"
 
@@ -104,7 +104,7 @@ const (
 	apiVMInstancesSEVInjectLaunchSecret     = "virtualmachineinstances/sev/injectlaunchsecret"
 	apiVMInstancesUSBRedir                  = "virtualmachineinstances/usbredir"
 	apiVMInstancesObjectGraph               = "virtualmachineinstances/objectgraph"
-	apiVMInstancesEvacuateCancel            = "virtualmachineinstances/evacuate/cancel"
+	apiVMInstancesEvacuateCancel            = "virtualmachineinstances/evacuatecancel"
 )
 
 func GetAllCluster() []runtime.Object {
