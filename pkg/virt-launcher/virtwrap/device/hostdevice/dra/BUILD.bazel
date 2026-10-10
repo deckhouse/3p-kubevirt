@@ -3,6 +3,7 @@ load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
 go_library(
     name = "go_default_library",
     srcs = [
+        "device_status.go",
         "generic_hostdev.go",
         "gpu_hostdev.go",
     ],
@@ -21,6 +22,7 @@ go_test(
     name = "go_default_test",
     srcs = [
         "dra_suite_test.go",
+        "device_status_test.go",
         "generic_hostdev_test.go",
         "gpu_hostdev_test.go",
     ],

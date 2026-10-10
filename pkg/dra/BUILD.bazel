@@ -4,6 +4,7 @@ go_library(
     name = "go_default_library",
     srcs = [
         "resource_claims.go",
+        "status.go",
         "utils.go",
     ],
     importpath = "kubevirt.io/kubevirt/pkg/dra",
