@@ -353,14 +353,20 @@ func (t *TemplateService) RenderMigrationManifest(vmi *v1.VirtualMachineInstance
 		}
 		backendStoragePVCName = backendStoragePVC.Name
 	}
-	memoryOverhead := CalculateMemoryOverhead(t.clusterConfig, t.netMemoryCalculator, vmi, t.launcherHypervisorResources)
-	targetPod, err := t.renderLaunchManifest(vmi, reproducibleImageIDs, backendStoragePVCName, false, memoryOverhead)
+
+	vmiCopy := vmi.DeepCopy()
+	if sourceLauncherRunAsUser(sourcePod) == util.RootUser {
+		vmiCopy.Status.RuntimeUser = util.RootUser
+	}
+
+	memoryOverhead := CalculateMemoryOverhead(t.clusterConfig, t.netMemoryCalculator, vmiCopy, t.launcherHypervisorResources)
+	targetPod, err := t.renderLaunchManifest(vmiCopy, reproducibleImageIDs, backendStoragePVCName, false, memoryOverhead)
 	if err != nil {
 		return nil, err
 	}
 
 	if t.netTargetAnnotationsGenerator != nil {
-		netAnnotations, err := t.netTargetAnnotationsGenerator.GenerateFromSource(vmi, sourcePod)
+		netAnnotations, err := t.netTargetAnnotationsGenerator.GenerateFromSource(vmiCopy, sourcePod)
 		if err != nil {
 			return nil, err
 		}
@@ -369,6 +375,13 @@ func (t *TemplateService) RenderMigrationManifest(vmi *v1.VirtualMachineInstance
 	}
 
 	return targetPod, err
+}
+
+func sourceLauncherRunAsUser(sourcePod *k8sv1.Pod) int64 {
+	if sourcePod != nil && sourcePod.Spec.SecurityContext != nil && sourcePod.Spec.SecurityContext.RunAsUser != nil {
+		return *sourcePod.Spec.SecurityContext.RunAsUser
+	}
+	return util.RootUser
 }
 
 func (t *TemplateService) RenderLaunchManifest(vmi *v1.VirtualMachineInstance) (*k8sv1.Pod, error) {
