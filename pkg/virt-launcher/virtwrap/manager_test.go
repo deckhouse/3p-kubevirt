@@ -470,10 +470,6 @@ var _ = Describe("Manager", func() {
 			Expect(err).ToNot(HaveOccurred())
 			if extraControllers > 0 {
 				appendPCIeRootPortControllers(domainSpec, extraControllers)
-				// The xmlns:qemu attribute is lost during the XML marshal/unmarshal
-				// round-trip in SetDomainSpecStrWithHooks, so clear it to match
-				// the production code behavior for subsequent defines.
-				domainSpec.XmlNS = ""
 				domainXMLWithExtra, err := xml.MarshalIndent(domainSpec, "", "\t")
 				Expect(err).ToNot(HaveOccurred())
 				mockLibvirt.ConnectionEXPECT().DomainDefineXML(string(domainXMLWithExtra)).DoAndReturn(mockDomainWithFreeExpectation)
@@ -502,10 +498,6 @@ var _ = Describe("Manager", func() {
 				// Extra controllers are added after WithNetworkIfacesResources,
 				// requiring a third DomainDefineXML call.
 				appendPCIeRootPortControllers(domainSpec, extraControllers)
-				// The xmlns:qemu attribute is lost during the XML marshal/unmarshal
-				// round-trip in SetDomainSpecStrWithHooks, so clear it to match
-				// the production code behavior for subsequent defines.
-				domainSpec.XmlNS = ""
 				domainXMLWithExtra, err := xml.MarshalIndent(domainSpec, "", "\t")
 				Expect(err).ToNot(HaveOccurred())
 				mockLibvirt.ConnectionEXPECT().DomainDefineXML(string(domainXMLWithExtra)).DoAndReturn(mockDomainWithFreeExpectation)

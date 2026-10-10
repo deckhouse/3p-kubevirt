@@ -151,6 +151,16 @@ func ApplySidecarHooks(vmi *v1.VirtualMachineInstance, wantedSpec *api.DomainSpe
 	if err = xml.Unmarshal([]byte(domainSpec), domainSpecObj); err != nil {
 		return "", err
 	}
+	// encoding/xml cannot read the prefixed qemu:commandline element and the
+	// xmlns:qemu attribute back, so the round-trip would drop them from
+	// wantedSpec and every later define (e.g. the extra pcie-root-port pass)
+	// would lose the QEMU command line. Keep what the caller asked for.
+	if domainSpecObj.QEMUCmd == nil {
+		domainSpecObj.QEMUCmd = wantedSpec.QEMUCmd.DeepCopy()
+	}
+	if domainSpecObj.XmlNS == "" {
+		domainSpecObj.XmlNS = wantedSpec.XmlNS
+	}
 	domainSpecObj.DeepCopyInto(wantedSpec)
 
 	return domainSpec, nil
