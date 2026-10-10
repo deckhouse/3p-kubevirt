@@ -21,6 +21,7 @@ package cache
 
 import (
 	"path/filepath"
+	"strings"
 
 	v1 "kubevirt.io/api/core/v1"
 
@@ -70,6 +71,23 @@ func DeletePodInterfaceCache(c cacheCreator, uid, ifaceName string) error {
 		return err
 	}
 	return podCache.Remove()
+}
+
+// ListPodInterfaceCache returns the interface names that have cache entries
+// for the given VMI. Dot-prefixed entries are internal files sharing the same
+// directory (e.g. the launcher-pid cache), not interfaces, and are skipped.
+func ListPodInterfaceCache(c cacheCreator, uid string) ([]string, error) {
+	entries, err := NewPodInterfaceCache(c, uid).cache.Entries()
+	if err != nil {
+		return nil, err
+	}
+	var ifaceNames []string
+	for _, entry := range entries {
+		if !strings.HasPrefix(entry, ".") {
+			ifaceNames = append(ifaceNames, entry)
+		}
+	}
+	return ifaceNames, nil
 }
 
 func NewPodInterfaceCache(creator cacheCreator, uid string) PodInterfaceCache {

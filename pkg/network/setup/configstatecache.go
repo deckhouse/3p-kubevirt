@@ -83,6 +83,39 @@ func (c *ConfigStateCache) Write(key string, state cache.PodIfaceState) error {
 	return nil
 }
 
+func (c *ConfigStateCache) Exists(key string) (bool, error) {
+	if _, exists := c.volatilePodIfaceState[key]; exists {
+		return true, nil
+	}
+	_, err := cache.ReadPodInterfaceCache(c.cacheCreator, c.vmiUID, key)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		}
+		return false, fmt.Errorf("failed to read pod interface network state from cache: %v", err)
+	}
+	return true, nil
+}
+
+// Keys returns every network name known to the cache: both entries persisted
+// on disk and volatile ones seen during this process lifetime.
+func (c *ConfigStateCache) Keys() ([]string, error) {
+	names, err := cache.ListPodInterfaceCache(c.cacheCreator, c.vmiUID)
+	if err != nil {
+		return nil, err
+	}
+	seen := map[string]struct{}{}
+	for _, name := range names {
+		seen[name] = struct{}{}
+	}
+	for name := range c.volatilePodIfaceState {
+		if _, exists := seen[name]; !exists {
+			names = append(names, name)
+		}
+	}
+	return names, nil
+}
+
 func (c *ConfigStateCache) Delete(key string) error {
 	delete(c.volatilePodIfaceState, key)
 	podIfaceCacheData, err := cache.ReadPodInterfaceCache(c.cacheCreator, c.vmiUID, key)
