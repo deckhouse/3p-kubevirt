@@ -33,6 +33,7 @@ import (
 
 	v1 "kubevirt.io/api/core/v1"
 
+	dutils "kubevirt.io/kubevirt/pkg/ephemeral-disk-utils"
 	"kubevirt.io/kubevirt/pkg/network/cache"
 	netsetup "kubevirt.io/kubevirt/pkg/network/setup"
 	"kubevirt.io/kubevirt/pkg/network/setup/netpod"
@@ -54,6 +55,7 @@ var _ = Describe("netconf", func() {
 	const launcherPid = 0
 
 	BeforeEach(func() {
+		dutils.MockDefaultOwnershipManager()
 		stateCache = newConfigStateCacheStub()
 		ns = nsExecutorStub{}
 		stateMap = map[string]*netpod.State{}

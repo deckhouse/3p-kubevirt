@@ -37,6 +37,7 @@ import (
 	"kubevirt.io/kubevirt/pkg/safepath"
 	"kubevirt.io/kubevirt/pkg/unsafepath"
 	virtcache "kubevirt.io/kubevirt/pkg/virt-handler/cache"
+	cmdclient "kubevirt.io/kubevirt/pkg/virt-handler/cmd-client"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -63,7 +64,9 @@ import (
 func findmntByVolume(volume string) []*mount.Info {
 	return []*mount.Info{
 		{
-			Mountpoint: path.Join("/", volume),
+			// LookupFindmntInfoByVolume matches mountpoints under the /path
+			// prefix used by the isolation detector.
+			Mountpoint: path.Join("/path", volume),
 			Source:     "/dev/testvolume",
 			FSType:     "xfs",
 			Options:    "rw,relatime,seclabel,attr2,inode64,logbufs=8,logbsize=32k,noquota",
@@ -98,6 +101,16 @@ var (
 	orgFindMntByOne        = findMntByOne
 	orgNodeIsolationResult = nodeIsolationResult
 )
+
+// preparePodSocket creates the launcher command socket findVirtlauncherUID
+// checks to consider a pod alive.
+func preparePodSocket(tempDir, uid string) {
+	socketDir := filepath.Join(tempDir, uid, "volumes/kubernetes.io~empty-dir/sockets")
+	ExpectWithOffset(1, os.MkdirAll(socketDir, 0755)).To(Succeed())
+	f, err := os.Create(filepath.Join(socketDir, cmdclient.StandardLauncherSocketFileName))
+	ExpectWithOffset(1, err).NotTo(HaveOccurred())
+	ExpectWithOffset(1, f.Close()).To(Succeed())
+}
 
 var _ = Describe("HotplugVolume", func() {
 	var (
@@ -306,6 +319,9 @@ var _ = Describe("HotplugVolume", func() {
 			err = os.MkdirAll(targetPodPath, 0755)
 			Expect(err).ToNot(HaveOccurred())
 
+			cmdclient.SetPodsBaseDir(tempDir)
+			preparePodSocket(tempDir, "abcd")
+
 			record = &vmiMountTargetRecord{}
 
 			m = &volumeMounter{
@@ -409,6 +425,8 @@ var _ = Describe("HotplugVolume", func() {
 			Expect(res).To(BeEquivalentTo("abcd"))
 			vmi.Status.ActivePods["abcdef"] = "host"
 			err = os.MkdirAll(filepath.Join(tempDir, "abcdef/volumes/kubernetes.io~empty-dir/hotplug-disks"), 0755)
+			Expect(err).ToNot(HaveOccurred())
+			preparePodSocket(tempDir, "abcdef")
 			res = m.findVirtlauncherUID(vmi)
 			Expect(res).To(BeEquivalentTo(""))
 		})
@@ -486,6 +504,11 @@ var _ = Describe("HotplugVolume", func() {
 				},
 			}
 
+			// mountFromPod only mounts volumes still present in the spec
+			for _, vs := range vmi.Status.VolumeStatus {
+				vmi.Spec.Volumes = append(vmi.Spec.Volumes, v1.Volume{Name: vs.Name})
+			}
+
 			for _, volume := range []struct {
 				sourceUID types.UID
 				name      string
@@ -510,8 +533,14 @@ var _ = Describe("HotplugVolume", func() {
 			isBlockDevice = func(fileName *safepath.Path) (bool, error) {
 				return true, nil
 			}
+			prevStatDevice := statDevice
+			DeferCleanup(func() { statDevice = prevStatDevice })
+			statDevice = func(fileName *safepath.Path) (os.FileInfo, error) {
+				return fakeStat(true, 0666, 123456), nil
+			}
 
-			setExpectedCgroupRuns(2)
+			// the fork applies the device rules of all volumes from one mount pass at once
+			setExpectedCgroupRuns(1)
 			expectCgroupRule(devices.BlockDevice, 482, 64, true)
 			ownershipManager.EXPECT().SetFileOwnership(gomock.Any()).Times(2)
 
@@ -679,6 +708,9 @@ var _ = Describe("HotplugVolume", func() {
 
 			targetPodPath, err = newDir(tempDir, "abcd/volumes/kubernetes.io~empty-dir/hotplug-disks")
 			Expect(err).ToNot(HaveOccurred())
+
+			cmdclient.SetPodsBaseDir(tempDir)
+			preparePodSocket(tempDir, "abcd")
 
 			record = &vmiMountTargetRecord{}
 
@@ -947,6 +979,9 @@ var _ = Describe("HotplugVolume", func() {
 			targetPodPath = filepath.Join(tempDir, "abcd/volumes/kubernetes.io~empty-dir/hotplug-disks")
 			err = os.MkdirAll(targetPodPath, 0755)
 			Expect(err).ToNot(HaveOccurred())
+
+			cmdclient.SetPodsBaseDir(tempDir)
+			preparePodSocket(tempDir, "abcd")
 
 			m = &volumeMounter{
 				mountRecords:       make(map[types.UID]*vmiMountTargetRecord),
@@ -1272,6 +1307,10 @@ var _ = Describe("HotplugVolume", func() {
 				},
 			})
 			vmi.Status.VolumeStatus = volumeStatuses
+			// mountFromPod only mounts volumes still present in the spec
+			for _, vs := range volumeStatuses {
+				vmi.Spec.Volumes = append(vmi.Spec.Volumes, v1.Volume{Name: vs.Name})
+			}
 			deviceBasePath = func(podUID types.UID, kubeletPodDir string) (*safepath.Path, error) {
 				return newDir(tempDir, string(podUID), "volumeDevices")
 			}

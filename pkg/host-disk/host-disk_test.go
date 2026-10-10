@@ -20,9 +20,11 @@
 package hostdisk
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
 	"strings"
@@ -42,6 +44,19 @@ import (
 	"kubevirt.io/kubevirt/pkg/safepath"
 	"kubevirt.io/kubevirt/pkg/testutils"
 )
+
+// virtualSize returns the qcow2 virtual size of a disk image: the fork
+// creates host disks as qcow2, so the file size on disk exceeds the
+// requested capacity by the qcow2 metadata overhead.
+func virtualSize(imgPath string) int64 {
+	out, err := exec.Command("qemu-img", "info", "--output=json", imgPath).Output()
+	ExpectWithOffset(1, err).NotTo(HaveOccurred())
+	var info struct {
+		VirtualSize int64 `json:"virtual-size"`
+	}
+	ExpectWithOffset(1, json.Unmarshal(out, &info)).To(Succeed())
+	return info.VirtualSize
+}
 
 var _ = Describe("HostDisk", func() {
 	var (
@@ -148,17 +163,9 @@ var _ = Describe("HostDisk", func() {
 					Expect(err).NotTo(HaveOccurred())
 
 					// Check if images exist and the size is adequate to requirements
-					img1, err := os.Stat(vmi.Spec.Volumes[0].HostDisk.Path)
-					Expect(err).NotTo(HaveOccurred())
-					Expect(img1.Size()).To(Equal(int64(67108864))) // 64Mi
-
-					img2, err := os.Stat(vmi.Spec.Volumes[1].HostDisk.Path)
-					Expect(err).NotTo(HaveOccurred())
-					Expect(img2.Size()).To(Equal(int64(134217728))) // 128Mi
-
-					img3, err := os.Stat(vmi.Spec.Volumes[2].HostDisk.Path)
-					Expect(err).NotTo(HaveOccurred())
-					Expect(img3.Size()).To(Equal(int64(83886080))) // 80Mi
+					Expect(virtualSize(vmi.Spec.Volumes[0].HostDisk.Path)).To(Equal(int64(67108864)))  // 64Mi
+					Expect(virtualSize(vmi.Spec.Volumes[1].HostDisk.Path)).To(Equal(int64(134217728))) // 128Mi
+					Expect(virtualSize(vmi.Spec.Volumes[2].HostDisk.Path)).To(Equal(int64(83886080)))  // 80Mi
 				})
 				It("Should stop creating disk images if there is not enough space and should return err", func() {
 					By("Creating a new VMI with HostDisk volumes")
@@ -175,9 +182,7 @@ var _ = Describe("HostDisk", func() {
 					// only first disk.img should be created
 					// when there is not enough space anymore
 					// function should return err and stop creating images
-					img1, err := os.Stat(vmi.Spec.Volumes[0].HostDisk.Path)
-					Expect(err).NotTo(HaveOccurred())
-					Expect(img1.Size()).To(Equal(int64(67108864))) // 64Mi
+					Expect(virtualSize(vmi.Spec.Volumes[0].HostDisk.Path)).To(Equal(int64(67108864))) // 64Mi
 
 					_, err = os.Stat(vmi.Spec.Volumes[1].HostDisk.Path)
 					Expect(true).To(Equal(errors.Is(err, os.ErrNotExist)))
@@ -195,9 +200,7 @@ var _ = Describe("HostDisk", func() {
 					err := hostDiskCreatorWithReserve.Create(vmi)
 					Expect(err).NotTo(HaveOccurred())
 
-					img1, err := os.Stat(vmi.Spec.Volumes[0].HostDisk.Path)
-					Expect(err).NotTo(HaveOccurred())
-					Expect(img1.Size()).To(Equal(int64(67108864))) // 64Mi
+					Expect(virtualSize(vmi.Spec.Volumes[0].HostDisk.Path)).To(Equal(int64(67108864))) // 64Mi
 				})
 				It("Should subtract reserve if there is NOT enough space on storage for requested size", func() {
 					By("Creating a new VMI with a HostDisk volume")
@@ -215,9 +218,7 @@ var _ = Describe("HostDisk", func() {
 					err := hostDiskCreatorWithReserve.Create(vmi)
 					Expect(err).NotTo(HaveOccurred())
 
-					img1, err := os.Stat(vmi.Spec.Volumes[0].HostDisk.Path)
-					Expect(err).NotTo(HaveOccurred())
-					Expect(img1.Size()).To(BeNumerically("==", dirAvailable-hostDiskCreatorWithReserve.diskImgCreator.minimumPVCReserveBytes)) // 64Mi minus reserve
+					Expect(virtualSize(vmi.Spec.Volumes[0].HostDisk.Path)).To(BeNumerically("==", dirAvailable-hostDiskCreatorWithReserve.diskImgCreator.minimumPVCReserveBytes)) // 64Mi minus reserve
 				})
 				It("Should refuse to create disk image if reserve causes image to exceed lessPVCSpaceToleration", func() {
 					By("Creating a new VMI with a HostDisk volume")
@@ -255,6 +256,10 @@ var _ = Describe("HostDisk", func() {
 					calcToleratedSize := func(origSize uint64, diff int) uint64 {
 						return origSize * (100 - uint64(toleration) + uint64(diff)) / 100
 					}
+					// created images are aligned down to 1MiB
+					alignedDown := func(size uint64) uint64 {
+						return size / 1048576 * 1048576
+					}
 
 					fakeDirBytesAvailable := func(path string, reserve uint64) (uint64, error) {
 						if strings.Contains(path, "volume1") {
@@ -280,13 +285,9 @@ var _ = Describe("HostDisk", func() {
 
 					// only first and second disk.img should be created, with the exact available size
 					// third disk is beyond toleration, function should return err and stop creating images
-					img1, err := os.Stat(vmi.Spec.Volumes[0].HostDisk.Path)
-					Expect(err).NotTo(HaveOccurred())
-					Expect(uint64(img1.Size())).To(Equal(calcToleratedSize(size64Mi, 1))) // 64Mi - (toleration + 1%)
+					Expect(uint64(virtualSize(vmi.Spec.Volumes[0].HostDisk.Path))).To(Equal(alignedDown(calcToleratedSize(size64Mi, 1)))) // 64Mi - (toleration + 1%)
 
-					img2, err := os.Stat(vmi.Spec.Volumes[1].HostDisk.Path)
-					Expect(err).NotTo(HaveOccurred())
-					Expect(uint64(img2.Size())).To(Equal(calcToleratedSize(size64Mi, 0))) // 64Mi
+					Expect(uint64(virtualSize(vmi.Spec.Volumes[1].HostDisk.Path))).To(Equal(alignedDown(calcToleratedSize(size64Mi, 0)))) // 64Mi
 
 					_, err = os.Stat(vmi.Spec.Volumes[2].HostDisk.Path)
 					Expect(true).To(Equal(errors.Is(err, os.ErrNotExist)))

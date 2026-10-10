@@ -3,7 +3,6 @@ cmd/sidecars/network-passt-binding
 cmd/sidecars/network-slirp-binding/callback
 cmd/virt-api
 cmd/virt-controller
-cmd/virtctl
 cmd/virt-exportserver
 cmd/virt-operator
 pkg/controller/testing
@@ -44,15 +43,10 @@ pkg/tpm
 pkg/util/ratelimiter
 pkg/virt-controller/leaderelectionconfig
 pkg/virt-controller/watch/common
-pkg/virtctl/adm
-pkg/virtctl/clientconfig
 pkg/virtctl/configuration
 pkg/virtctl/console
 pkg/virtctl/create/clone
-pkg/virtctl/create/params
 pkg/virtctl/create/preference
-pkg/virtctl/create/vm
-pkg/virtctl/credentials
 pkg/virtctl/scp
 pkg/virtctl/ssh
 pkg/virtctl/template
@@ -102,4 +96,3 @@ tests/monitoring
 tests/network
 tests/numa
 tests/usb
-tests/virtctl

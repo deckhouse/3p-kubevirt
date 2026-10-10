@@ -222,7 +222,7 @@ var _ = Describe("Cluster role and cluster role bindings", func() {
 		Context("migrate cluster role", func() {
 
 			DescribeTable("should contain rule to", func(apiGroup, resource string, verbs ...string) {
-				clusterRole := getObject(clusterObjects, reflect.TypeOf(&rbacv1.ClusterRole{}), "kubevirt.io:migrate").(*rbacv1.ClusterRole)
+				clusterRole := getObject(clusterObjects, reflect.TypeOf(&rbacv1.ClusterRole{}), "kubevirt.internal.virtualization.deckhouse.io:migrate").(*rbacv1.ClusterRole)
 				Expect(clusterRole).ToNot(BeNil())
 				expectExactRuleExists(clusterRole.Rules, apiGroup, resource, verbs...)
 			},

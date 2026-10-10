@@ -61,6 +61,7 @@ import (
 	"kubevirt.io/kubevirt/pkg/testutils"
 	"kubevirt.io/kubevirt/pkg/virt-config/featuregate"
 	virtcache "kubevirt.io/kubevirt/pkg/virt-handler/cache"
+	checksum_controller "kubevirt.io/kubevirt/pkg/virt-handler/checksum-controller"
 	cmdclient "kubevirt.io/kubevirt/pkg/virt-handler/cmd-client"
 	hotplugvolume "kubevirt.io/kubevirt/pkg/virt-handler/hotplug-disk"
 	"kubevirt.io/kubevirt/pkg/virt-handler/isolation"
@@ -243,7 +244,7 @@ var _ = Describe("VirtualMachineInstance migration target", func() {
 			nil,
 			nil,
 			nil, // conntrack sync
-			nil,
+			checksum_controller.NewController(vmiInformer, virtClient),
 		)
 
 		controller.hotplugVolumeMounter = mockHotplugVolumeMounter

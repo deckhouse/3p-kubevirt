@@ -59,6 +59,7 @@ import (
 	"kubevirt.io/kubevirt/pkg/testutils"
 	"kubevirt.io/kubevirt/pkg/util"
 	"kubevirt.io/kubevirt/pkg/util/net/ip"
+	"kubevirt.io/kubevirt/pkg/util/syncobject"
 	virtconfig "kubevirt.io/kubevirt/pkg/virt-config"
 	cmdclient "kubevirt.io/kubevirt/pkg/virt-handler/cmd-client"
 	"kubevirt.io/kubevirt/pkg/virt-launcher/metadata"
@@ -118,12 +119,17 @@ var _ = Describe("Manager", func() {
 	}
 
 	BeforeEach(func() {
-		testVirtShareDir = fmt.Sprintf("fake-virt-share-%d", GinkgoRandomSeed())
-		testEphemeralDiskDir = fmt.Sprintf("fake-ephemeral-disk-%d", GinkgoRandomSeed())
+		// Unix sockets are created under the share dir, so it must live on a
+		// real filesystem (not a bind-mounted checkout).
+		testVirtShareDir = filepath.Join(GinkgoT().TempDir(), "virt-share")
+		testEphemeralDiskDir = filepath.Join(GinkgoT().TempDir(), "ephemeral-disk")
 		ctrl = gomock.NewController(GinkgoT())
 		mockLibvirt = testing.NewLibvirt(ctrl)
 		metadataCache = metadata.NewCache()
 		mockLibvirt.DomainEXPECT().GetBlockInfo(gomock.Any(), gomock.Any()).AnyTimes().Return(&libvirt.DomainBlockInfo{Capacity: 0}, nil)
+		// setRebootShutdownPolicy runs on every sync
+		mockLibvirt.DomainEXPECT().GetName().AnyTimes().Return(testDomainName, nil)
+		mockLibvirt.ConnectionEXPECT().QemuMonitorCommand(gomock.Any(), gomock.Any()).AnyTimes().Return("", nil)
 		mockDirectIOChecker = converter.NewMockDirectIOChecker(ctrl)
 		mockDirectIOChecker.EXPECT().CheckBlockDevice(gomock.Any()).AnyTimes().Return(true, nil)
 		mockDirectIOChecker.EXPECT().CheckFile(gomock.Any()).AnyTimes().Return(true, nil)
@@ -885,7 +891,7 @@ var _ = Describe("Manager", func() {
 				Driver: &api.DiskDriver{
 					Cache:       "none",
 					Name:        "qemu",
-					Type:        "raw",
+					Type:        "qcow2",
 					ErrorPolicy: "stop",
 					Discard:     "unmap",
 				},
@@ -989,7 +995,7 @@ var _ = Describe("Manager", func() {
 				Driver: &api.DiskDriver{
 					Cache:       "none",
 					Name:        "qemu",
-					Type:        "raw",
+					Type:        "qcow2",
 					ErrorPolicy: "stop",
 					Discard:     "unmap",
 				},
@@ -1595,6 +1601,7 @@ var _ = Describe("Manager", func() {
 					virtShareDir:  testVirtShareDir,
 					metadataCache: metadataCache,
 					cpuSetGetter:  fakeCpuSetGetter,
+					checksum:      syncobject.NewSyncObject[string](),
 				}
 			})
 
@@ -1741,6 +1748,7 @@ var _ = Describe("Manager", func() {
 					domainInfoStats:              &stats.DomainJobInfo{},
 					hypervisorName:               v1.KvmHypervisorName,
 					iommuFD:                      int(iommuFDFile.Fd()),
+					checksum:                     syncobject.NewSyncObject[string](),
 					efiEnvironment:               efi.DetectEFIEnvironment(runtime.GOARCH, virtconfig.DefaultARCHOVMFPath),
 					directIOChecker:              mockDirectIOChecker,
 					ephemeralDiskCreator:         ephemeralDiskCreatorMock,
@@ -1852,6 +1860,9 @@ var _ = Describe("Manager", func() {
 				Capacity: 10 * 1024 * 1024 * 1024,
 				Physical: 20 * 1024 * 1024 * 1024,
 			}, nil)
+			// setRebootShutdownPolicy runs on every sync
+			localMockLibvirt.DomainEXPECT().GetName().AnyTimes().Return(testDomainName, nil)
+			localMockLibvirt.ConnectionEXPECT().QemuMonitorCommand(gomock.Any(), gomock.Any()).AnyTimes().Return("", nil)
 
 			manager, err := NewLibvirtDomainManager(localMockLibvirt.VirtConnection, testVirtShareDir, testEphemeralDiskDir, nil, virtconfig.DefaultARCHOVMFPath, ephemeralDiskCreatorMock, metadataCache, nil, virtconfig.DefaultDiskVerificationMemoryLimitBytes, fakeCpuSetGetter, false, false, nil, v1.KvmHypervisorName, nil, "", false, false, false)
 			Expect(err).ToNot(HaveOccurred())
@@ -2836,10 +2847,10 @@ var _ = Describe("Manager", func() {
 	DescribeTable("on successful list all domains",
 		func(state libvirt.DomainState, kubevirtState api.LifeCycle, libvirtReason int, kubevirtReason api.StateChangeReason) {
 
-			// Make sure that we always free the domain after use
+			// Make sure that we always free the domain after use.
+			// GetName is satisfied by the suite-wide expectation.
 			mockLibvirt.DomainEXPECT().Free()
 			mockLibvirt.DomainEXPECT().GetState().Return(state, libvirtReason, nil).AnyTimes()
-			mockLibvirt.DomainEXPECT().GetName().Return("test", nil)
 			x, err := xml.MarshalIndent(api.NewMinimalDomainSpec("test"), "", "\t")
 			Expect(err).ToNot(HaveOccurred())
 
@@ -3567,6 +3578,12 @@ var _ = Describe("Manager", func() {
 
 		BeforeEach(func() {
 			vmi = newVMI(testNamespace, testVmName)
+			// The fork forces the SEV firmware combination for non-Windows guests;
+			// mark the guest as Windows to exercise the upstream selection logic.
+			if vmi.Annotations == nil {
+				vmi.Annotations = map[string]string{}
+			}
+			vmi.Annotations["virtualization.deckhouse.io/os-type"] = "Windows"
 			vmi.Spec.Domain.Firmware = &v1.Firmware{
 				Bootloader: &v1.Bootloader{
 					EFI: &v1.EFI{

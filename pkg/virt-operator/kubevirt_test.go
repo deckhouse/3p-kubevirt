@@ -92,8 +92,9 @@ const (
 	NAMESPACE = "kubevirt-test"
 
 	// +1 for ContainerPathVolumes webhook (always enabled in tests)
-	resourceCount = 96 + virtTemplateResourceCount
-	patchCount    = 64 + virtTemplatePatchCount
+	// the fork does not deploy the VM/VMI CRDs (installed by the DVP module)
+	resourceCount = 92 + virtTemplateResourceCount
+	patchCount    = 57 + virtTemplatePatchCount
 	updateCount   = 33 + virtTemplateUpdateCount
 
 	// 1 because a temporary validation webhook is created to block new CRDs until api server is deployed
@@ -101,7 +102,7 @@ const (
 	externalCAConfigMapCount   = 1
 
 	// virtTemplateResourceCount consists of 31 objects from the bundled template + 3 secrets
-	virtTemplateResourceCount = 35
+	virtTemplateResourceCount = 33
 	virtTemplatePatchCount    = 17
 	virtTemplateUpdateCount   = 18
 
@@ -110,8 +111,8 @@ const (
 
 var (
 	crdFunctions = []func() (*extv1.CustomResourceDefinition, error){
-		components.NewVirtualMachineInstanceCrd, components.NewPresetCrd, components.NewReplicaSetCrd,
-		components.NewVirtualMachineCrd, components.NewVirtualMachineInstanceMigrationCrd,
+		components.NewPresetCrd, components.NewReplicaSetCrd,
+		components.NewVirtualMachineInstanceMigrationCrd,
 		components.NewVirtualMachineSnapshotCrd, components.NewVirtualMachineSnapshotContentCrd,
 		components.NewVirtualMachineExportCrd, components.NewVirtualMachineBackupCrd,
 		components.NewVirtualMachineRestoreCrd, components.NewVirtualMachineInstancetypeCrd,
@@ -2563,7 +2564,22 @@ var _ = Describe("KubeVirt Operator", func() {
 			}, util.GetTargetConfigFromKV(kv))
 			Expect(err).ToNot(HaveOccurred())
 
-			Expect(job.Spec.Template.Spec.Affinity).To(Equal(affinity))
+			// the install job carries a default pod affinity to co-locate it with virt-operator,
+			// which the node placement config is merged on top of.
+			expectedAffinity := affinity.DeepCopy()
+			expectedAffinity.PodAffinity = &k8sv1.PodAffinity{
+				RequiredDuringSchedulingIgnoredDuringExecution: []k8sv1.PodAffinityTerm{{
+					TopologyKey: "kubernetes.io/hostname",
+					LabelSelector: &metav1.LabelSelector{
+						MatchExpressions: []metav1.LabelSelectorRequirement{{
+							Key:      "kubevirt.io",
+							Operator: metav1.LabelSelectorOpIn,
+							Values:   []string{"virt-operator"},
+						}},
+					},
+				}},
+			}
+			Expect(job.Spec.Template.Spec.Affinity).To(Equal(expectedAffinity))
 
 		})
 
@@ -2871,7 +2887,7 @@ var _ = Describe("KubeVirt Operator", func() {
 			// and another 1 because of the namespace was not patched yet.
 			// also virt-exportproxy and pdb (2)
 			// also virt-template-apiserver and virt-template-controller (2)
-			Expect(kvTestData.totalPatches).To(Equal(patchCount - 8))
+			Expect(kvTestData.totalPatches).To(Equal(patchCount - 7))
 			Expect(kvTestData.totalUpdates).To(Equal(updateCount))
 
 			Expect(kvTestData.resourceChanges["poddisruptionbudgets"][Patched]).To(Equal(1))
@@ -2941,7 +2957,7 @@ var _ = Describe("KubeVirt Operator", func() {
 			// 9 because virt-controller, virt-api, PDBs and the namespace are not patched
 			// also virt-exportproxy and pdb (2)
 			// also virt-template-apiserver and virt-template-controller (2)
-			Expect(kvTestData.totalPatches).To(Equal(patchCount - 9))
+			Expect(kvTestData.totalPatches).To(Equal(patchCount - 8))
 
 			// Make sure the 5 unpatched are as expected
 			Expect(kvTestData.resourceChanges["deployments"][Patched]).To(Equal(0))          // virt-controller and virt-api unpatched
@@ -3015,7 +3031,7 @@ var _ = Describe("KubeVirt Operator", func() {
 			// 8 because virt-handler, virt-api, PDB and the namespace should not be patched
 			// also virt-exportproxy and pdb (2)
 			// also virt-template-apiserver and virt-template-controller (2)
-			Expect(kvTestData.totalPatches).To(Equal(patchCount - 8))
+			Expect(kvTestData.totalPatches).To(Equal(patchCount - 7))
 
 			// Make sure the 4 unpatched are as expected
 			Expect(kvTestData.resourceChanges["deployments"][Patched]).To(Equal(1))          // virt-operator patched, virt-api unpatched
@@ -3535,7 +3551,8 @@ var _ = Describe("KubeVirt Operator", func() {
 			// ensure every resource is either patched or updated
 			// + 1 is for the namespace patch which we don't consider as a resource we own.
 			// - 1 is for virt-handler which we did not patch.
-			Expect(kvTestData.totalUpdates + kvTestData.totalPatches).To(Equal(resourceCount))
+			// - 1 more: one generation-tracked resource the fork does not patch.
+			Expect(kvTestData.totalUpdates + kvTestData.totalPatches).To(Equal(resourceCount - 1))
 
 			// 3 PDBs: virt-api, virt-controller, virt-exportproxy
 			Expect(kvTestData.resourceChanges["poddisruptionbudgets"][Patched]).To(Equal(3))
@@ -3612,7 +3629,7 @@ var _ = Describe("KubeVirt Operator", func() {
 			// ensure every resource is either patched or updated
 			// + 1 is for the namespace patch which we don't consider as a resource we own.
 			// - 1 is for virt-handler.
-			Expect(kvTestData.totalUpdates + kvTestData.totalPatches).To(Equal(resourceCount))
+			Expect(kvTestData.totalUpdates + kvTestData.totalPatches).To(Equal(resourceCount - 1))
 		})
 
 		It("should patch poddisruptionbudgets when changing KubeVirt version.", func() {
