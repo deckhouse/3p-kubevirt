@@ -781,7 +781,6 @@ func (t *TemplateService) renderLaunchManifest(vmi *v1.VirtualMachineInstance, i
 			RestartPolicy:                 k8sv1.RestartPolicyNever,
 			Containers:                    containers,
 			InitContainers:                initContainers,
-			NodeSelector:                  newNodeSelectorRenderer(t.clusterConfig, vmi).Render(),
 			Volumes:                       volumeRenderer.Volumes(),
 			ImagePullSecrets:              imagePullSecrets,
 			DNSConfig:                     vmi.Spec.DNSConfig,
@@ -789,7 +788,6 @@ func (t *TemplateService) renderLaunchManifest(vmi *v1.VirtualMachineInstance, i
 			ReadinessGates:                readinessGates(),
 			EnableServiceLinks:            &enableServiceLinks,
 			SchedulerName:                 vmi.Spec.SchedulerName,
-			Tolerations:                   vmi.Spec.Tolerations,
 			TopologySpreadConstraints:     vmi.Spec.TopologySpreadConstraints,
 			ResourceClaims:                drautil.ToPodResourceClaims(withoutHotplugResourceClaims(vmi.Spec.ResourceClaims)),
 		},
@@ -807,11 +805,10 @@ func (t *TemplateService) renderLaunchManifest(vmi *v1.VirtualMachineInstance, i
 		pod.Spec.PriorityClassName = vmi.Spec.PriorityClassName
 	}
 
-	if vmi.Spec.Affinity != nil {
-		pod.Spec.Affinity = vmi.Spec.Affinity.DeepCopy()
-	}
-
-	setNodeAffinityForPod(vmi, &pod)
+	placement := RenderPodPlacement(t.clusterConfig, vmi)
+	pod.Spec.NodeSelector = placement.Spec.NodeSelector
+	pod.Spec.Tolerations = placement.Spec.Tolerations
+	pod.Spec.Affinity = placement.Spec.Affinity
 	if err := setPersistentReservationAntiAffinity(vmi, &pod, t.persistentVolumeClaimStore); err != nil {
 		return nil, err
 	}
@@ -851,6 +848,28 @@ func (t *TemplateService) renderLaunchManifest(vmi *v1.VirtualMachineInstance, i
 // included when the VMI already carries TSC topology hints.
 func RenderPodNodeSelectors(clusterConfig *virtconfig.ClusterConfig, vmi *v1.VirtualMachineInstance) map[string]string {
 	return newNodeSelectorRenderer(clusterConfig, vmi).Render()
+}
+
+// RenderPodPlacement returns a Pod carrying the rules that decide which node can take the
+// virt-launcher pod of the given VMI: its node selector, its tolerations and its affinity. Nothing
+// else of the manifest is filled in, so a caller that only asks about the placement does not pay for
+// rendering the containers, the volumes and the resources of a whole pod.
+//
+// renderLaunchManifest builds the placement of the real pod through this very function, so the two
+// cannot come to tell a different story about where the machine may run.
+func RenderPodPlacement(clusterConfig *virtconfig.ClusterConfig, vmi *v1.VirtualMachineInstance) *k8sv1.Pod {
+	pod := &k8sv1.Pod{
+		Spec: k8sv1.PodSpec{
+			NodeSelector: newNodeSelectorRenderer(clusterConfig, vmi).Render(),
+			Tolerations:  vmi.Spec.Tolerations,
+		},
+	}
+	if vmi.Spec.Affinity != nil {
+		pod.Spec.Affinity = vmi.Spec.Affinity.DeepCopy()
+	}
+	setNodeAffinityForPod(vmi, pod)
+
+	return pod
 }
 
 func newNodeSelectorRenderer(clusterConfig *virtconfig.ClusterConfig, vmi *v1.VirtualMachineInstance) *NodeSelectorRenderer {
