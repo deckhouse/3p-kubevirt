@@ -1345,6 +1345,8 @@ func getPrefixFromBus(bus v1.DiskBus) string {
 		return "vd"
 	case v1.DiskBusSATA, v1.DiskBusSCSI, v1.DiskBusUSB:
 		return "sd"
+	case v1.DiskBusIDE:
+		return "hd"
 	default:
 		log.Log.Errorf("Unrecognized bus '%s'", bus)
 		return ""

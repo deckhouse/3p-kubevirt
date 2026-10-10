@@ -57,7 +57,7 @@ func NewControllersDomainConfigurator(options ...controllersOption) ControllersD
 }
 
 func (c ControllersDomainConfigurator) Configure(vmi *v1.VirtualMachineInstance, domain *api.Domain) error {
-	domain.Spec.Devices.Controllers = append(domain.Spec.Devices.Controllers, newUSBController(c.isUSBNeeded))
+	domain.Spec.Devices.Controllers = append(domain.Spec.Devices.Controllers, newUSBController(c.isUSBNeeded, vmi))
 
 	if requiresSCSIController(vmi) {
 		scsiControllerDriver := assignSCSIControllerIOThread(vmi, uint(c.autoThreads), c.controllerDriver.DeepCopy())
@@ -111,7 +111,7 @@ func ControllersWithVirtioSerialModel(model string) controllersOption {
 	}
 }
 
-func newUSBController(usbNeeded bool) api.Controller {
+func newUSBController(usbNeeded bool, vmi *v1.VirtualMachineInstance) api.Controller {
 	controller := api.Controller{
 		Type:  "usb",
 		Index: "0",
@@ -119,12 +119,35 @@ func newUSBController(usbNeeded bool) api.Controller {
 	}
 
 	if usbNeeded {
-		controller.Model = "qemu-xhci"
-		// Reserve ports for USB host devices hotplugged through DRA.
-		controller.Ports = pointer.P(uint(15))
+		controller.Model = usbControllerModel(vmi)
+		// UHCI provides two ports and rejects a port count; xHCI takes 15,
+		// reserving ports for USB host devices hotplugged through DRA.
+		if controller.Model != usbControllerUHCI {
+			controller.Ports = pointer.P(uint(15))
+		}
 	}
 
 	return controller
+}
+
+const (
+	usbControllerXHCI = "qemu-xhci"
+	usbControllerUHCI = "piix3-uhci"
+)
+
+// usbControllerModel picks a USB controller the guest can actually drive. xHCI has
+// no in-box driver in guests older than Windows 8, while the i440fx machine carries
+// the PIIX3 UHCI controller, which Windows NT 5.x and contemporary Linux support.
+// Other machines keep xHCI: q35 has no PIIX3, and arm64 "virt" has no UHCI at all.
+func usbControllerModel(vmi *v1.VirtualMachineInstance) string {
+	machine := vmi.Spec.Domain.Machine
+	if machine == nil {
+		return usbControllerXHCI
+	}
+	if machine.Type == "pc" || strings.HasPrefix(machine.Type, "pc-i440fx") {
+		return usbControllerUHCI
+	}
+	return usbControllerXHCI
 }
 
 func newSCSIController(controllerModel string, controllerDriver *api.ControllerDriver) api.Controller {

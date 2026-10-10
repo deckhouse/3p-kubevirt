@@ -241,7 +241,7 @@ var _ = Describe("Disk Validation", func() {
 				Name: "testdisk1",
 				DiskDevice: v1.DiskDevice{
 					Disk: &v1.DiskTarget{
-						Bus: "ide",
+						Bus: "floppy",
 					},
 				},
 			})
