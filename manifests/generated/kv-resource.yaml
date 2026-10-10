@@ -829,7 +829,7 @@ spec:
                         description: |-
                           CompletionTimeoutPerGiB is the maximum number of seconds per GiB a migration is allowed to take.
                           If the timeout is reached, the migration will be either paused, switched
-                          to post-copy or cancelled depending on other settings. Defaults to 150
+                          to post-copy or canceled depending on other settings. Defaults to 150
                         format: int64
                         type: integer
                       disableTLS:
@@ -878,7 +878,7 @@ spec:
                         description: |-
                           ProgressTimeout is the maximum number of seconds a live migration is allowed to make no progress.
                           Hitting this timeout means a migration transferred 0 data for that many seconds. The migration is
-                          then considered stuck and therefore cancelled. Defaults to 150
+                          then considered stuck and therefore canceled. Defaults to 150
                         format: int64
                         type: integer
                       unsafeMigrationOverride:
@@ -4354,7 +4354,7 @@ spec:
                         description: |-
                           CompletionTimeoutPerGiB is the maximum number of seconds per GiB a migration is allowed to take.
                           If the timeout is reached, the migration will be either paused, switched
-                          to post-copy or cancelled depending on other settings. Defaults to 150
+                          to post-copy or canceled depending on other settings. Defaults to 150
                         format: int64
                         type: integer
                       disableTLS:
@@ -4403,7 +4403,7 @@ spec:
                         description: |-
                           ProgressTimeout is the maximum number of seconds a live migration is allowed to make no progress.
                           Hitting this timeout means a migration transferred 0 data for that many seconds. The migration is
-                          then considered stuck and therefore cancelled. Defaults to 150
+                          then considered stuck and therefore canceled. Defaults to 150
                         format: int64
                         type: integer
                       unsafeMigrationOverride:

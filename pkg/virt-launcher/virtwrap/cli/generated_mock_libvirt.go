@@ -15,9 +15,10 @@ import (
 	time "time"
 
 	gomock "go.uber.org/mock/gomock"
+	libvirt "libvirt.org/go/libvirt"
+
 	api "kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/api"
 	stats "kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/stats"
-	libvirt "libvirt.org/go/libvirt"
 )
 
 // MockConnection is a mock of Connection interface.

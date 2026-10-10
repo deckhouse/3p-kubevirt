@@ -64,6 +64,7 @@ import (
 
 	"github.com/deckhouse/kube-api-rewriter/pkg/proxy"
 	kubevirtrules "github.com/deckhouse/virtualization/src/kubevirt-rules"
+
 	virtwait "kubevirt.io/kubevirt/pkg/apimachinery/wait"
 
 	"kubevirt.io/kubevirt/pkg/certificates/bootstrap"

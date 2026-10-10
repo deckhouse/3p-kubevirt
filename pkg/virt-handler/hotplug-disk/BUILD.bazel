@@ -11,6 +11,7 @@ go_library(
     visibility = ["//visibility:public"],
     deps = [
         "//pkg/ephemeral-disk-utils:go_default_library",
+        "//pkg/host-disk:go_default_library",
         "//pkg/hotplug-disk:go_default_library",
         "//pkg/safepath:go_default_library",
         "//pkg/storage/types:go_default_library",
@@ -22,6 +23,7 @@ go_library(
         "//pkg/virt-handler/virt-chroot:go_default_library",
         "//staging/src/kubevirt.io/api/core/v1:go_default_library",
         "//staging/src/kubevirt.io/client-go/log:go_default_library",
+        "//vendor/github.com/moby/sys/mountinfo:go_default_library",
         "//vendor/github.com/opencontainers/cgroups:go_default_library",
         "//vendor/github.com/opencontainers/cgroups/devices/config:go_default_library",
         "//vendor/go.uber.org/mock/gomock:go_default_library",
@@ -33,7 +35,6 @@ go_library(
 go_test(
     name = "go_default_test",
     srcs = [
-        "findmnt_test.go",
         "hotplug-disk_suite_test.go",
         "mount_test.go",
     ],
@@ -51,6 +52,7 @@ go_test(
         "//staging/src/kubevirt.io/api/core/v1:go_default_library",
         "//staging/src/kubevirt.io/client-go/api:go_default_library",
         "//staging/src/kubevirt.io/client-go/testutils:go_default_library",
+        "//vendor/github.com/moby/sys/mountinfo:go_default_library",
         "//vendor/github.com/onsi/ginkgo/v2:go_default_library",
         "//vendor/github.com/onsi/gomega:go_default_library",
         "//vendor/github.com/opencontainers/cgroups:go_default_library",

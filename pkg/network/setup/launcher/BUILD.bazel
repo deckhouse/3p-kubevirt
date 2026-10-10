@@ -26,9 +26,9 @@ go_test(
         "export_test.go",
         "launcher_suite_test.go",
     ],
+    embed = [":go_default_library"],
     race = "on",
     deps = [
-        ":go_default_library",
         "//pkg/libvmi:go_default_library",
         "//pkg/network/cache:go_default_library",
         "//pkg/network/dhcp:go_default_library",

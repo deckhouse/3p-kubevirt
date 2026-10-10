@@ -764,6 +764,8 @@ rules:
   resources:
   - virtualmachines/addvolume
   - virtualmachines/removevolume
+  - virtualmachines/addresourceclaim
+  - virtualmachines/removeresourceclaim
   verbs:
   - update
 - apiGroups:
@@ -774,6 +776,8 @@ rules:
   - virtualmachineinstances/removevolume
   - virtualmachineinstances/backup
   - virtualmachineinstances/redefine-checkpoint
+  - virtualmachineinstances/addresourceclaim
+  - virtualmachineinstances/removeresourceclaim
   - virtualmachineinstances/freeze
   - virtualmachineinstances/unfreeze
   - virtualmachineinstances/reset
@@ -899,6 +903,7 @@ rules:
   - update
   - list
   - watch
+  - patch
 - apiGroups:
   - ""
   resources:
@@ -964,6 +969,14 @@ rules:
   - get
   - list
   - watch
+- apiGroups:
+  - ""
+  resources:
+  - pods
+  verbs:
+  - get
+  - list
+  - patch
 - apiGroups:
   - export.kubevirt.io
   resources:
@@ -1062,13 +1075,15 @@ rules:
   - virtualmachineinstances/unpause
   - virtualmachineinstances/addvolume
   - virtualmachineinstances/removevolume
+  - virtualmachineinstances/addresourceclaim
+  - virtualmachineinstances/removeresourceclaim
   - virtualmachineinstances/freeze
   - virtualmachineinstances/unfreeze
   - virtualmachineinstances/softreboot
   - virtualmachineinstances/reset
   - virtualmachineinstances/sev/setupsession
   - virtualmachineinstances/sev/injectlaunchsecret
-  - virtualmachineinstances/evacuate/cancel
+  - virtualmachineinstances/evacuatecancel
   verbs:
   - update
 - apiGroups:
@@ -1086,8 +1101,10 @@ rules:
   - virtualmachines/restart
   - virtualmachines/addvolume
   - virtualmachines/removevolume
+  - virtualmachines/addresourceclaim
+  - virtualmachines/removeresourceclaim
   - virtualmachines/memorydump
-  - virtualmachines/evacuate/cancel
+  - virtualmachines/evacuatecancel
   verbs:
   - update
 - apiGroups:
@@ -1248,13 +1265,15 @@ rules:
   - virtualmachineinstances/unpause
   - virtualmachineinstances/addvolume
   - virtualmachineinstances/removevolume
+  - virtualmachineinstances/addresourceclaim
+  - virtualmachineinstances/removeresourceclaim
   - virtualmachineinstances/freeze
   - virtualmachineinstances/unfreeze
   - virtualmachineinstances/softreboot
   - virtualmachineinstances/reset
   - virtualmachineinstances/sev/setupsession
   - virtualmachineinstances/sev/injectlaunchsecret
-  - virtualmachineinstances/evacuate/cancel
+  - virtualmachineinstances/evacuatecancel
   verbs:
   - update
 - apiGroups:
@@ -1272,8 +1291,10 @@ rules:
   - virtualmachines/restart
   - virtualmachines/addvolume
   - virtualmachines/removevolume
+  - virtualmachines/addresourceclaim
+  - virtualmachines/removeresourceclaim
   - virtualmachines/memorydump
-  - virtualmachines/evacuate/cancel
+  - virtualmachines/evacuatecancel
   verbs:
   - update
 - apiGroups:

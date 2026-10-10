@@ -40,9 +40,10 @@ import (
 	hotplug_hostdevice "kubevirt.io/kubevirt/pkg/virt-handler/hotplug-hostdevice"
 	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/converter"
 
+	"libvirt.org/go/libvirtxml"
+
 	cmdv1 "kubevirt.io/kubevirt/pkg/handler-launcher-com/cmd/v1"
 	checksum_controller "kubevirt.io/kubevirt/pkg/virt-handler/checksum-controller"
-	"libvirt.org/go/libvirtxml"
 
 	k8sv1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"

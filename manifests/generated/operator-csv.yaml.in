@@ -731,6 +731,8 @@ spec:
           resources:
           - virtualmachines/addvolume
           - virtualmachines/removevolume
+          - virtualmachines/addresourceclaim
+          - virtualmachines/removeresourceclaim
           verbs:
           - update
         - apiGroups:
@@ -741,6 +743,8 @@ spec:
           - virtualmachineinstances/removevolume
           - virtualmachineinstances/backup
           - virtualmachineinstances/redefine-checkpoint
+          - virtualmachineinstances/addresourceclaim
+          - virtualmachineinstances/removeresourceclaim
           - virtualmachineinstances/freeze
           - virtualmachineinstances/unfreeze
           - virtualmachineinstances/reset
@@ -866,6 +870,7 @@ spec:
           - update
           - list
           - watch
+          - patch
         - apiGroups:
           - ""
           resources:
@@ -931,6 +936,14 @@ spec:
           - get
           - list
           - watch
+        - apiGroups:
+          - ""
+          resources:
+          - pods
+          verbs:
+          - get
+          - list
+          - patch
         - apiGroups:
           - export.kubevirt.io
           resources:
@@ -1029,13 +1042,15 @@ spec:
           - virtualmachineinstances/unpause
           - virtualmachineinstances/addvolume
           - virtualmachineinstances/removevolume
+          - virtualmachineinstances/addresourceclaim
+          - virtualmachineinstances/removeresourceclaim
           - virtualmachineinstances/freeze
           - virtualmachineinstances/unfreeze
           - virtualmachineinstances/softreboot
           - virtualmachineinstances/reset
           - virtualmachineinstances/sev/setupsession
           - virtualmachineinstances/sev/injectlaunchsecret
-          - virtualmachineinstances/evacuate/cancel
+          - virtualmachineinstances/evacuatecancel
           verbs:
           - update
         - apiGroups:
@@ -1053,8 +1068,10 @@ spec:
           - virtualmachines/restart
           - virtualmachines/addvolume
           - virtualmachines/removevolume
+          - virtualmachines/addresourceclaim
+          - virtualmachines/removeresourceclaim
           - virtualmachines/memorydump
-          - virtualmachines/evacuate/cancel
+          - virtualmachines/evacuatecancel
           verbs:
           - update
         - apiGroups:
@@ -1215,13 +1232,15 @@ spec:
           - virtualmachineinstances/unpause
           - virtualmachineinstances/addvolume
           - virtualmachineinstances/removevolume
+          - virtualmachineinstances/addresourceclaim
+          - virtualmachineinstances/removeresourceclaim
           - virtualmachineinstances/freeze
           - virtualmachineinstances/unfreeze
           - virtualmachineinstances/softreboot
           - virtualmachineinstances/reset
           - virtualmachineinstances/sev/setupsession
           - virtualmachineinstances/sev/injectlaunchsecret
-          - virtualmachineinstances/evacuate/cancel
+          - virtualmachineinstances/evacuatecancel
           verbs:
           - update
         - apiGroups:
@@ -1239,8 +1258,10 @@ spec:
           - virtualmachines/restart
           - virtualmachines/addvolume
           - virtualmachines/removevolume
+          - virtualmachines/addresourceclaim
+          - virtualmachines/removeresourceclaim
           - virtualmachines/memorydump
-          - virtualmachines/evacuate/cancel
+          - virtualmachines/evacuatecancel
           verbs:
           - update
         - apiGroups:
@@ -1611,6 +1632,7 @@ spec:
                   capabilities:
                     drop:
                     - ALL
+                  readOnlyRootFilesystem: true
                   seccompProfile:
                     type: RuntimeDefault
                 terminationMessagePolicy: FallbackToLogsOnError

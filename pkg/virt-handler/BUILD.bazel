@@ -125,6 +125,7 @@ go_test(
         "//pkg/virt-config/featuregate:go_default_library",
         "//pkg/virt-handler/cache:go_default_library",
         "//pkg/virt-handler/cgroup:go_default_library",
+        "//pkg/virt-handler/checksum-controller:go_default_library",
         "//pkg/virt-handler/cmd-client:go_default_library",
         "//pkg/virt-handler/container-disk:go_default_library",
         "//pkg/virt-handler/hotplug-disk:go_default_library",

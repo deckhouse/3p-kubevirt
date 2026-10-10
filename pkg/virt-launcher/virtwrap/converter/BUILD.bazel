@@ -3,6 +3,8 @@ load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
 go_library(
     name = "go_default_library",
     srcs = [
+        "block_io.go",
+        "block_io_linux.go",
         "converter.go",
         "generated_mock_converter.go",
         "grace.go",
