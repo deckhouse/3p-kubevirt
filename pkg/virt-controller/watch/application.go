@@ -22,6 +22,7 @@ package watch
 import (
 	"context"
 	"crypto/tls"
+	"fmt"
 	golog "log"
 	"net/http"
 	"os"
@@ -50,9 +51,11 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	flag "github.com/spf13/pflag"
 	k8sv1 "k8s.io/api/core/v1"
+	resourcev1 "k8s.io/api/resource/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	k8sfield "k8s.io/apimachinery/pkg/util/validation/field"
+	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/kubernetes/scheme"
 	k8coresv1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	clientrest "k8s.io/client-go/rest"
@@ -380,7 +383,10 @@ func Execute() {
 
 	app.reInitChan = make(chan string, 10)
 	app.hasCDI = app.clusterConfig.HasDataVolumeAPI()
-	app.isDRAEnabled = app.clusterConfig.AnyDeviceDRAGateEnabled()
+	app.isDRAEnabled, err = app.draIntegrationEnabled()
+	if err != nil {
+		golog.Fatal(fmt.Errorf("failed to check if %s is available: %v", resourcev1.SchemeGroupVersion, err))
+	}
 	app.isVirtTemplateDeploymentEnabled = app.clusterConfig.VirtTemplateDeploymentEnabled()
 	app.isOCIExportEnabled = app.clusterConfig.OCIExportEnabled()
 	app.clusterConfig.SetConfigModifiedCallback(app.configModificationCallback)
@@ -408,7 +414,7 @@ func Execute() {
 	} else {
 		app.resourceClaimInformer = app.informerFactory.DummyResourceClaim()
 		app.resourceSliceInformer = app.informerFactory.DummyResourceSlice()
-		log.Log.Infof("No DRA FG detected, DRA integration disabled")
+		log.Log.Infof("No DRA FG detected or %s is not served, DRA integration disabled", resourcev1.SchemeGroupVersion)
 	}
 	app.nodeInformer = app.informerFactory.KubeVirtNode()
 	app.namespaceStore = app.informerFactory.Namespace().GetStore()
@@ -549,7 +555,11 @@ func (vca *VirtControllerApp) configModificationCallback() {
 		vca.reInitChan <- "reinit"
 		return
 	}
-	newIsDRAEnabled := vca.clusterConfig.AnyDeviceDRAGateEnabled()
+	newIsDRAEnabled, err := vca.draIntegrationEnabled()
+	if err != nil {
+		log.Log.Reason(err).Errorf("Failed to check if %s is available, keeping DRA integration as is", resourcev1.SchemeGroupVersion)
+		newIsDRAEnabled = vca.isDRAEnabled
+	}
 	if newIsDRAEnabled != vca.isDRAEnabled {
 		if newIsDRAEnabled {
 			log.Log.Infof("Reinitialize virt-controller, DRA integration has been introduced")
@@ -1278,4 +1288,28 @@ func (vca *VirtControllerApp) setupLeaderElector() (err error) {
 		})
 
 	return
+}
+
+// draIntegrationEnabled reports whether the DRA integration can run: a DRA feature gate is
+// enabled and the cluster serves resource.k8s.io/v1, which Kubernetes before 1.34 does not.
+// Without the API the ResourceClaim and ResourceSlice informers would never sync and block
+// every controller, so the integration stays off there.
+func (vca *VirtControllerApp) draIntegrationEnabled() (bool, error) {
+	if !vca.clusterConfig.AnyDeviceDRAGateEnabled() {
+		return false, nil
+	}
+	return isResourceV1Served(vca.clientSet)
+}
+
+func isResourceV1Served(clientset kubecli.KubevirtClient) (bool, error) {
+	_, apis, err := clientset.DiscoveryClient().ServerGroupsAndResources()
+	if err != nil && !discovery.IsGroupDiscoveryFailedError(err) {
+		return false, err
+	}
+	for _, api := range apis {
+		if api.GroupVersion == resourcev1.SchemeGroupVersion.String() {
+			return true, nil
+		}
+	}
+	return false, nil
 }

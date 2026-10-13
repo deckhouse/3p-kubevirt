@@ -39,6 +39,8 @@ import (
 	extv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8sfield "k8s.io/apimachinery/pkg/util/validation/field"
+	fakediscovery "k8s.io/client-go/discovery/fake"
+	k8stesting "k8s.io/client-go/testing"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
 	backupv1 "kubevirt.io/api/backup/v1alpha1"
@@ -323,6 +325,12 @@ var _ = Describe("Application", func() {
 			var reInitTriggered bool
 
 			app := VirtControllerApp{}
+
+			virtClient := kubecli.NewMockKubevirtClient(gomock.NewController(GinkgoT()))
+			virtClient.EXPECT().DiscoveryClient().Return(&fakediscovery.FakeDiscovery{Fake: &k8stesting.Fake{
+				Resources: []*metav1.APIResourceList{{GroupVersion: "resource.k8s.io/v1"}},
+			}}).AnyTimes()
+			app.clientSet = virtClient
 
 			clusterConfig, crdInformer, _ := testutils.NewFakeClusterConfigUsingKVConfig(&v1.KubeVirtConfiguration{})
 			app.clusterConfig = clusterConfig
