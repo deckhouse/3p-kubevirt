@@ -59,14 +59,14 @@ replace github.com/deckhouse/kube-api-rewriter => github.com/deckhouse/kube-api-
 replace github.com/deckhouse/virtualization/src/kubevirt-rules => github.com/deckhouse/virtualization/src/kubevirt-rules v1.7.0
 
 // CVE Replaces
-replace golang.org/x/crypto => golang.org/x/crypto v0.53.0
+replace golang.org/x/crypto => golang.org/x/crypto v0.57.0
 
-replace golang.org/x/net => golang.org/x/net v0.56.0
+replace golang.org/x/net => golang.org/x/net v0.60.0
 
 replace golang.org/x/oauth2 => golang.org/x/oauth2 v0.34.0
 
-replace golang.org/x/sys => golang.org/x/sys v0.46.0
+replace golang.org/x/sys => golang.org/x/sys v0.48.0
 
-replace golang.org/x/text => golang.org/x/text v0.39.0
+replace golang.org/x/text => golang.org/x/text v0.42.0
 
 replace google.golang.org/grpc => google.golang.org/grpc v1.83.2

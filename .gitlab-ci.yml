@@ -26,7 +26,7 @@ default:
     - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
 
 variables:
-  GO_VERSION: "1.26.4"
+  GO_VERSION: "1.26.9"
   KUBEVIRT_VERSION: "1.9.0"
   # The runner uses a shell executor, so the host Go may be older than the
   # version go.work requires. Let the go command download the matching
