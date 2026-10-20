@@ -123,9 +123,9 @@ var _ = Describe("Container spec renderer", func() {
 					WithCapabilities(nonRootVMI(nonRootUser)))
 			})
 
-			It("must request the NET_BIND_SERVICE capability", func() {
+			It("must request the NET_BIND_SERVICE and NET_ADMIN capabilities", func() {
 				Expect(specRenderer.Render(exampleCommand).SecurityContext.Capabilities.Add).Should(
-					ConsistOf(k8sv1.Capability(CAP_NET_BIND_SERVICE)))
+					ConsistOf(k8sv1.Capability(CAP_NET_BIND_SERVICE), k8sv1.Capability(CAP_NET_ADMIN)))
 			})
 		})
 	})
