@@ -334,19 +334,11 @@ func (vr *VolumeRenderer) handleSysprep(volume v1.Volume) error {
 	return nil
 }
 
-func hotplugVolumes(vmiVolumeStatus []v1.VolumeStatus, vmiSpecVolumes []v1.Volume) map[string]struct{} {
+func hotplugVolumes(vmiVolumeStatus []v1.VolumeStatus, _ []v1.Volume) map[string]struct{} {
 	hotplugVolumeSet := map[string]struct{}{}
 	for _, volumeStatus := range vmiVolumeStatus {
 		if volumeStatus.HotplugVolume != nil {
 			hotplugVolumeSet[volumeStatus.Name] = struct{}{}
-		}
-	}
-	// This detects hotplug volumes for a started but not ready VMI
-	for _, volume := range vmiSpecVolumes {
-		if (volume.DataVolume != nil && volume.DataVolume.Hotpluggable) ||
-			(volume.PersistentVolumeClaim != nil && volume.PersistentVolumeClaim.Hotpluggable) ||
-			(volume.ContainerDisk != nil && volume.ContainerDisk.Hotpluggable) {
-			hotplugVolumeSet[volume.Name] = struct{}{}
 		}
 	}
 	return hotplugVolumeSet
