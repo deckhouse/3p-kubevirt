@@ -1182,6 +1182,63 @@ var _ = Describe("Manager", func() {
 			Expect(newspec).ToNot(BeNil())
 		})
 
+		It("should apply the VMI and return a disk expansion error when a disk cannot be grown", func() {
+			vmi := newVMI(testNamespace, testVmName)
+			vmi.Spec.Domain.Devices.Disks = []v1.Disk{
+				{
+					Name: "permvolume1",
+					DiskDevice: v1.DiskDevice{
+						Disk: &v1.DiskTarget{
+							Bus: v1.DiskBusVirtio,
+						},
+					},
+				},
+			}
+			vmi.Spec.Volumes = []v1.Volume{
+				{
+					Name: "permvolume1",
+					VolumeSource: v1.VolumeSource{
+						DataVolume: &v1.DataVolumeSource{
+							Name: "dv1",
+						},
+					},
+				},
+			}
+			overhead := v1.Percent("0")
+			vmi.Status.VolumeStatus = []v1.VolumeStatus{
+				{
+					Name:  "permvolume1",
+					Phase: v1.VolumeReady,
+					PersistentVolumeClaimInfo: &v1.PersistentVolumeClaimInfo{
+						Capacity:           k8sv1.ResourceList{k8sv1.ResourceStorage: resource.MustParse("1Gi")},
+						Requests:           k8sv1.ResourceList{k8sv1.ResourceStorage: resource.MustParse("1Gi")},
+						FilesystemOverhead: &overhead,
+					},
+				},
+			}
+			domainSpec := expectedDomainFor(vmi)
+			for i := range domainSpec.Devices.Disks {
+				domainSpec.Devices.Disks[i].ExpandDisksEnabled = true
+			}
+			domainXML, err := xml.MarshalIndent(domainSpec, "", "\t")
+			Expect(err).ToNot(HaveOccurred())
+			mockLibvirt.ConnectionEXPECT().LookupDomainByName(testDomainName).Return(nil, libvirt.Error{Code: libvirt.ERR_NO_DOMAIN})
+			mockLibvirt.ConnectionEXPECT().DomainDefineXML(gomock.Any()).DoAndReturn(mockDomainWithFreeExpectation).Times(2)
+			mockLibvirt.DomainEXPECT().GetXMLDesc(gomock.Any()).AnyTimes().Return(string(domainXML), nil)
+			mockLibvirt.DomainEXPECT().GetState().Return(libvirt.DOMAIN_SHUTDOWN, 1, nil)
+			mockLibvirt.DomainEXPECT().CreateWithFlags(libvirt.DOMAIN_NONE).Return(nil)
+			mockLibvirt.DomainEXPECT().BlockResize(gomock.Any(), gomock.Any(), gomock.Any()).Return(fmt.Errorf("Cannot grow device files"))
+			manager, _ := newLibvirtDomainManager(mockLibvirt.VirtConnection, testVirtShareDir, testEphemeralDiskDir, nil, "/usr/share/OVMF", ephemeralDiskCreatorMock, mockDirectIOChecker, metadataCache, nil, virtconfig.DefaultDiskVerificationMemoryLimitBytes, fakeCpuSetGetter, false)
+
+			_, err = manager.SyncVMI(vmi, true, &cmdv1.VirtualMachineOptions{
+				VirtualMachineSMBios: &cmdv1.SMBios{},
+				ClusterConfig:        &cmdv1.ClusterConfig{ExpandDisksEnabled: true},
+			})
+
+			Expect(err).To(MatchError(ContainSubstring(api.DiskExpansionFailed)))
+			Expect(manager.GetAppliedVMIChecksum()).ToNot(BeEmpty())
+		})
+
 		It("should not hotplug a disk if a volume was hotplugged, but the disk is not ready yet", func() {
 			vmi := newVMI(testNamespace, testVmName)
 			vmi.Spec.Domain.Devices.Disks = []v1.Disk{
