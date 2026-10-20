@@ -42,6 +42,10 @@ const (
 	DomainVersion = "v1"
 )
 
+// DiskExpansionFailed prefixes a SyncVMI error caused only by a failed disk
+// expansion of the running VM; everything else in the sync was applied.
+const DiskExpansionFailed = "failed to expand disks of the running VM"
+
 type LifeCycle string
 type StateChangeReason string
 

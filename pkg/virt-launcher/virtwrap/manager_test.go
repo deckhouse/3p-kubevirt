@@ -1092,6 +1092,56 @@ var _ = Describe("Manager", func() {
 			Expect(newspec).ToNot(BeNil())
 		})
 
+		It("should apply the VMI and return a disk expansion error when a disk cannot be grown", func() {
+			localCtrl := gomock.NewController(GinkgoT())
+			localMockLibvirt := testing.NewLibvirt(localCtrl)
+
+			vmi := newVMI(testNamespace, testVmName)
+			vmi.Spec.Domain.Devices.Disks = []v1.Disk{{
+				Name:       "permvolume1",
+				DiskDevice: v1.DiskDevice{Disk: &v1.DiskTarget{Bus: v1.DiskBusVirtio}},
+			}}
+			vmi.Spec.Volumes = []v1.Volume{{
+				Name:         "permvolume1",
+				VolumeSource: v1.VolumeSource{DataVolume: &v1.DataVolumeSource{Name: "dv1"}},
+			}}
+			overhead := v1.Percent("0")
+			vmi.Status.VolumeStatus = []v1.VolumeStatus{{
+				Name:  "permvolume1",
+				Phase: v1.VolumeReady,
+				PersistentVolumeClaimInfo: &v1.PersistentVolumeClaimInfo{
+					Capacity:           k8sv1.ResourceList{k8sv1.ResourceStorage: resource.MustParse("1Gi")},
+					Requests:           k8sv1.ResourceList{k8sv1.ResourceStorage: resource.MustParse("1Gi")},
+					FilesystemOverhead: &overhead,
+				},
+			}}
+			domainSpec := expectedDomainFor(vmi)
+			domainXML, err := xml.MarshalIndent(domainSpec, "", "\t")
+			Expect(err).NotTo(HaveOccurred())
+
+			localMockLibvirt.ConnectionEXPECT().LookupDomainByName(testDomainName).DoAndReturn(func(_ string) (cli.VirDomain, error) {
+				localMockLibvirt.DomainEXPECT().Free()
+				return localMockLibvirt.VirtDomain, nil
+			})
+			localMockLibvirt.DomainEXPECT().GetState().Return(libvirt.DOMAIN_RUNNING, 1, nil)
+			localMockLibvirt.DomainEXPECT().GetXMLDesc(libvirt.DomainXMLFlags(0)).Times(2).Return(string(domainXML), nil)
+			localMockLibvirt.DomainEXPECT().GetBlockInfo(gomock.Any(), gomock.Any()).AnyTimes().Return(&libvirt.DomainBlockInfo{
+				Capacity: 100 * 1024 * 1024,
+				Physical: 100 * 1024 * 1024,
+			}, nil)
+			localMockLibvirt.DomainEXPECT().BlockResize(gomock.Any(), gomock.Any(), gomock.Any()).Return(fmt.Errorf("Cannot grow device files"))
+			localMockLibvirt.DomainEXPECT().GetName().AnyTimes().Return(testDomainName, nil)
+			localMockLibvirt.ConnectionEXPECT().QemuMonitorCommand(gomock.Any(), gomock.Any()).AnyTimes().Return("", nil)
+
+			manager, err := NewLibvirtDomainManager(localMockLibvirt.VirtConnection, testVirtShareDir, testEphemeralDiskDir, nil, virtconfig.DefaultARCHOVMFPath, ephemeralDiskCreatorMock, metadataCache, nil, virtconfig.DefaultDiskVerificationMemoryLimitBytes, fakeCpuSetGetter, false, false, nil, v1.KvmHypervisorName, nil, "", false, false, false)
+			Expect(err).ToNot(HaveOccurred())
+
+			_, err = manager.SyncVMI(vmi, true, &cmdv1.VirtualMachineOptions{VirtualMachineSMBios: &cmdv1.SMBios{}})
+
+			Expect(err).To(MatchError(ContainSubstring(api.DiskExpansionFailed)))
+			Expect(manager.GetAppliedVMIChecksum()).ToNot(BeEmpty())
+		})
+
 		It("should not hotplug a disk if a volume was hotplugged, but the disk is not ready yet", func() {
 			vmi := newVMI(testNamespace, testVmName)
 			vmi.Spec.Domain.Devices.Disks = []v1.Disk{

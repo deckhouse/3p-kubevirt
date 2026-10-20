@@ -1546,6 +1546,12 @@ type virtLauncherCriticalSecurebootError struct {
 
 func (e *virtLauncherCriticalSecurebootError) Error() string { return e.msg }
 
+type diskExpansionError struct {
+	msg string
+}
+
+func (e *diskExpansionError) Error() string { return e.msg }
+
 func (c *VirtualMachineController) handleSyncError(vmi *v1.VirtualMachineInstance, condManager *controller.VirtualMachineInstanceConditionManager, syncError error) {
 	var criticalNetErr *neterrors.CriticalNetworkError
 	if goerror.As(syncError, &criticalNetErr) {
@@ -2448,7 +2454,11 @@ func (c *VirtualMachineController) vmUpdateHelperDefault(vmi *v1.VirtualMachineI
 
 	// Synchronize the VirtualMachineInstance state
 	err = c.syncVirtualMachine(client, vmi, preallocatedVolumes)
-	if err != nil {
+	var expansionErr *diskExpansionError
+	if goerror.As(err, &expansionErr) {
+		// The expansion is retried on requeue; it must not block hotplug mounts and unmounts.
+		errorTolerantFeaturesError = append(errorTolerantFeaturesError, err)
+	} else if err != nil {
 		return err
 	}
 
@@ -3130,10 +3140,14 @@ func (d *VirtualMachineController) SyncVirtualMachine(client cmdclient.LauncherC
 		return err
 	}
 	if err = client.SyncVirtualMachine(vmi, options); err != nil {
-		return err
+		if !strings.Contains(err.Error(), api.DiskExpansionFailed) {
+			return err
+		}
+		// Only the disk expansion failed, the rest of the VMI spec is applied.
+		err = &diskExpansionError{err.Error()}
 	}
 	d.checksumCtrl.Set(control)
-	return nil
+	return err
 }
 
 func (d *VirtualMachineController) HotplugHostDevices(client cmdclient.LauncherClient, vmi *v1.VirtualMachineInstance) error {
