@@ -35,6 +35,7 @@ import (
 	diskutils "kubevirt.io/kubevirt/pkg/ephemeral-disk-utils"
 	"kubevirt.io/kubevirt/pkg/util"
 	"kubevirt.io/kubevirt/pkg/util/net/ip"
+	kvtls "kubevirt.io/kubevirt/pkg/util/tls"
 	virtconfig "kubevirt.io/kubevirt/pkg/virt-config"
 )
 
@@ -56,6 +57,11 @@ type ProxyManager interface {
 	GetSourceListenerFiles(key string) []string
 	StopSourceListener(key string)
 
+	// UsePinnedTLS switches the proxies of key to an ephemeral key pinned to the peer
+	// (a decentralized migration). It returns the pin of the own key to publish to the
+	// peer; peerPin is read at handshake time, as the peer publishes its pin later.
+	UsePinnedTLS(key string, peerPin func() string) (string, error)
+
 	OpenListenerCount() int
 
 	InitiateGracefulShutdown()
@@ -69,9 +75,16 @@ type migrationProxyManager struct {
 	serverTLSConfig    *tls.Config
 	clientTLSConfig    *tls.Config
 	migrationTLSConfig *tls.Config
+	pinned             map[string]*pinnedTLS
 
 	isShuttingDown bool
 	config         *virtconfig.ClusterConfig
+}
+
+type pinnedTLS struct {
+	pin    string
+	server *tls.Config
+	client *tls.Config
 }
 
 type MigrationProxyListener interface {
@@ -128,8 +141,28 @@ func NewMigrationProxyManager(portRange *PortRange, serverTLSConfig *tls.Config,
 		serverTLSConfig:    serverTLSConfig,
 		clientTLSConfig:    clientTLSConfig,
 		migrationTLSConfig: migrationTLSConfig,
+		pinned:             make(map[string]*pinnedTLS),
 		config:             config,
 	}
+}
+
+func (m *migrationProxyManager) UsePinnedTLS(key string, peerPin func() string) (string, error) {
+	m.managerLock.Lock()
+	defer m.managerLock.Unlock()
+
+	if p, ok := m.pinned[key]; ok {
+		return p.pin, nil
+	}
+	id, err := kvtls.NewEphemeralIdentity(key)
+	if err != nil {
+		return "", fmt.Errorf("generate the migration proxy key for %s: %w", key, err)
+	}
+	m.pinned[key] = &pinnedTLS{
+		pin:    id.Pin,
+		server: id.ServerConfig(peerPin),
+		client: id.ClientConfig(peerPin, key),
+	}
+	return id.Pin, nil
 }
 
 func SourceUnixFile(baseDir string, key string) string {
@@ -184,6 +217,9 @@ func (m *migrationProxyManager) StartTargetListener(key string, targetUnixFiles 
 	serverTLSConfig := m.serverTLSConfig
 	if m.config.GetMigrationConfiguration().DisableTLS != nil && *m.config.GetMigrationConfiguration().DisableTLS {
 		serverTLSConfig = nil
+	}
+	if p, ok := m.pinned[key]; ok {
+		serverTLSConfig = p.server
 	}
 
 	if m.portRange != nil {
@@ -294,6 +330,7 @@ func (m *migrationProxyManager) StopTargetListener(key string) {
 			delete(m.targetProxies, key)
 		}
 	}
+	delete(m.pinned, key)
 }
 
 func (m *migrationProxyManager) StartSourceListener(key string, targetAddress string, destSrcPortMap map[string]int, baseDir string) error {
@@ -341,6 +378,11 @@ func (m *migrationProxyManager) StartSourceListener(key string, targetAddress st
 		clientTLSConfig = nil
 		migrationTLSConfig = nil
 	}
+	// A decentralized migration authenticates with the key pinned for it, without a fallback.
+	if p, ok := m.pinned[key]; ok {
+		clientTLSConfig = p.client
+		migrationTLSConfig = p.client
+	}
 	proxiesList := []*migrationProxy{}
 	for destPort, srcPort := range destSrcPortMap {
 		proxyKey := ConstructProxyKey(key, srcPort)
@@ -380,6 +422,7 @@ func (m *migrationProxyManager) StopSourceListener(key string) {
 		}
 		delete(m.sourceProxies, key)
 	}
+	delete(m.pinned, key)
 }
 
 // SRC POD ENV(migration unix socket) <-> HOST ENV (tcp client) <-----> HOST ENV (tcp server) <-> TARGET POD ENV (virtqemud unix socket)

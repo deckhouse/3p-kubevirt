@@ -808,8 +808,10 @@ status:
         nodeSelectorsKey: nodeSelectorsValue
       persistentStatePVCName: persistentStatePVCNameValue
       pod: podValue
+      proxyPin: proxyPinValue
       selinuxContext: selinuxContextValue
       syncAddress: syncAddressValue
+      syncPin: syncPinValue
       virtualMachineInstanceUID: virtualMachineInstanceUIDValue
     startTimestamp: "1986-01-01T01:01:01Z"
     targetAttachmentPodUID: targetAttachmentPodUIDValue
@@ -841,8 +843,10 @@ status:
       nodeTopology: nodeTopologyValue
       persistentStatePVCName: persistentStatePVCNameValue
       pod: podValue
+      proxyPin: proxyPinValue
       selinuxContext: selinuxContextValue
       syncAddress: syncAddressValue
+      syncPin: syncPinValue
       virtualMachineInstanceUID: virtualMachineInstanceUIDValue
     transferPermitRequired: true
     transferPermitted: true

@@ -123,7 +123,7 @@ func addCurrentRules(currentRules, newRules []*devices.Rule) ([]*devices.Rule, e
 
 func getSourceBlockToFsMigratedVolumes(vmi *v1.VirtualMachineInstance, host string) map[string]bool {
 	vols := make(map[string]bool)
-	if vmi.Status.MigrationState != nil && vmi.Status.MigrationState.SourceNode != host {
+	if vmi.IsMigrationTarget() || (vmi.Status.MigrationState != nil && vmi.Status.MigrationState.SourceNode != host) {
 		return vols
 	}
 	for _, vol := range vmi.Status.MigratedVolumes {

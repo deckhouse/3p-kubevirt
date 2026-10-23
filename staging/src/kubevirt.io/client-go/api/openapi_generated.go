@@ -27690,6 +27690,20 @@ func schema_kubevirtio_api_core_v1_VirtualMachineInstanceCommonMigrationState(re
 							Format:      "",
 						},
 					},
+					"syncPin": {
+						SchemaProps: spec.SchemaProps{
+							Description: "SyncPin is the pin (sha256 of the public key) of the synchronization controller key of this side, generated for this migration.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"proxyPin": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ProxyPin is the pin (sha256 of the public key) of the migration proxy key of this side, generated for this migration.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
 					"persistentStatePVCName": {
 						SchemaProps: spec.SchemaProps{
 							Description: "If the VMI being migrated uses persistent features (backend-storage), its source PVC name is saved here",
@@ -28494,6 +28508,20 @@ func schema_kubevirtio_api_core_v1_VirtualMachineInstanceMigrationSourceState(re
 							Format:      "",
 						},
 					},
+					"syncPin": {
+						SchemaProps: spec.SchemaProps{
+							Description: "SyncPin is the pin (sha256 of the public key) of the synchronization controller key of this side, generated for this migration.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"proxyPin": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ProxyPin is the pin (sha256 of the public key) of the migration proxy key of this side, generated for this migration.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
 					"persistentStatePVCName": {
 						SchemaProps: spec.SchemaProps{
 							Description: "If the VMI being migrated uses persistent features (backend-storage), its source PVC name is saved here",
@@ -28995,6 +29023,20 @@ func schema_kubevirtio_api_core_v1_VirtualMachineInstanceMigrationTargetState(re
 					"syncAddress": {
 						SchemaProps: spec.SchemaProps{
 							Description: "The ip address/fqdn:port combination to use to synchronize the VMI with the target.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"syncPin": {
+						SchemaProps: spec.SchemaProps{
+							Description: "SyncPin is the pin (sha256 of the public key) of the synchronization controller key of this side, generated for this migration.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"proxyPin": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ProxyPin is the pin (sha256 of the public key) of the migration proxy key of this side, generated for this migration.",
 							Type:        []string{"string"},
 							Format:      "",
 						},

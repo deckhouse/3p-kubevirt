@@ -1043,31 +1043,6 @@ func createMigrationPodAntiAffinityRule(templatePod *k8sv1.Pod, vmi *virtv1.Virt
 	}
 }
 
-func createDecentralizedMigrationPodAntiAffinity(templatePod *k8sv1.Pod, vmi *virtv1.VirtualMachineInstance) {
-	// Node anti affinity set create anti affinity rules
-	// for the migration target pod
-	if templatePod.Spec.Affinity == nil {
-		templatePod.Spec.Affinity = &k8sv1.Affinity{}
-	}
-	if templatePod.Spec.Affinity.NodeAffinity == nil {
-		templatePod.Spec.Affinity.NodeAffinity = &k8sv1.NodeAffinity{}
-	}
-	if templatePod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution == nil {
-		templatePod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution = &k8sv1.NodeSelector{}
-	}
-	if templatePod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms == nil {
-		templatePod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms = []k8sv1.NodeSelectorTerm{}
-		templatePod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms = append(templatePod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms, k8sv1.NodeSelectorTerm{})
-	}
-	templatePod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms[0].MatchExpressions = append(templatePod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms[0].MatchExpressions,
-		k8sv1.NodeSelectorRequirement{
-			Key:      k8sv1.LabelHostname,
-			Operator: k8sv1.NodeSelectorOpNotIn,
-			Values:   []string{vmi.Status.MigrationState.SourceState.Node},
-		},
-	)
-}
-
 func (c *Controller) createTargetPod(migration *virtv1.VirtualMachineInstanceMigration, vmi *virtv1.VirtualMachineInstance, sourcePod *k8sv1.Pod) error {
 	if !c.pvcExpectations.SatisfiedExpectations(controller.MigrationKey(migration)) {
 		// Give time to the PVC informer to update itself
@@ -1081,7 +1056,8 @@ func (c *Controller) createTargetPod(migration *virtv1.VirtualMachineInstanceMig
 	}
 
 	if migration.IsDecentralizedTarget() {
-		createDecentralizedMigrationPodAntiAffinity(templatePod, vmi)
+		// No anti-affinity to the source node: it is a node of another cluster, and its name only
+		// excludes a node of the same name here.
 		selinuxContext = vmi.Status.MigrationState.SourceState.SelinuxContext
 	} else {
 		createMigrationPodAntiAffinityRule(templatePod, vmi)

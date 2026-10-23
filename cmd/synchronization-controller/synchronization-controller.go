@@ -32,7 +32,6 @@ import (
 	"syscall"
 	"time"
 
-	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/leaderelection"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	"k8s.io/client-go/util/certificate"
@@ -46,7 +45,6 @@ import (
 	"github.com/deckhouse/kube-api-rewriter/pkg/proxy"
 	kubevirtrules "github.com/deckhouse/virtualization/src/kubevirt-rules"
 
-	"kubevirt.io/kubevirt/pkg/healthz"
 	"kubevirt.io/kubevirt/pkg/service"
 	kvtls "kubevirt.io/kubevirt/pkg/util/tls"
 	"kubevirt.io/kubevirt/pkg/virt-controller/leaderelectionconfig"
@@ -56,6 +54,7 @@ import (
 	"kubevirt.io/client-go/kubevirt/scheme"
 	"kubevirt.io/client-go/log"
 	clientutil "kubevirt.io/client-go/util"
+	"kubevirt.io/client-go/version"
 
 	"kubevirt.io/kubevirt/pkg/certificates/bootstrap"
 	"kubevirt.io/kubevirt/pkg/controller"
@@ -85,10 +84,6 @@ const (
 	leaseName                      = "virt-synchronization-controller"
 )
 
-var (
-	apiHealthVersion = new(healthz.KubeApiHealthzVersion)
-)
-
 type synchronizationControllerApp struct {
 	service.ServiceListen
 
@@ -104,19 +99,14 @@ type synchronizationControllerApp struct {
 	externallyManaged  bool
 	ip                 string
 
-	serverTLSConfig       *tls.Config
-	clientTLSConfig       *tls.Config
-	clientcertmanager     certificate.Manager
 	servercertmanager     certificate.Manager
 	clusterConfig         *virtconfig.ClusterConfig
 	reloadableRateLimiter *ratelimiter.ReloadableRateLimiter
-	caManager             kvtls.ClientCAManager
 
 	ctx context.Context
 }
 
 func (app *synchronizationControllerApp) prepareCertManager() (err error) {
-	app.clientcertmanager = bootstrap.NewFileCertificateManager(app.clientCertFilePath, app.clientKeyFilePath)
 	app.servercertmanager = bootstrap.NewFileCertificateManager(app.serverCertFilePath, app.serverKeyFilePath)
 	return
 }
@@ -145,22 +135,6 @@ func (app *synchronizationControllerApp) shouldChangeRateLimiter() {
 	log.Log.V(2).Infof("setting rate limiter to %v QPS and %v Burst", qps, burst)
 }
 
-func (app *synchronizationControllerApp) setupTLS(factory controller.KubeInformerFactory) error {
-	kubevirtCAConfigInformer := factory.KubeVirtCAConfigMap()
-	if err := kubevirtCAConfigInformer.SetWatchErrorHandler(func(r *cache.Reflector, err error) {
-		apiHealthVersion.Clear()
-		cache.DefaultWatchErrorHandler(context.TODO(), r, err)
-	}); err != nil {
-		return err
-	}
-
-	app.caManager = kvtls.NewCAManager(kubevirtCAConfigInformer.GetStore(), app.namespace, app.caConfigMapName)
-
-	app.serverTLSConfig = kvtls.SetupTLSForVirtSynchronizationControllerServer(app.caManager, app.servercertmanager, app.externallyManaged, app.clusterConfig)
-	app.clientTLSConfig = kvtls.SetupTLSForVirtSynchronizationControllerClients(app.caManager, app.clientcertmanager, app.externallyManaged)
-	return nil
-}
-
 func (app *synchronizationControllerApp) Run() {
 	var err error
 
@@ -174,6 +148,14 @@ func (app *synchronizationControllerApp) Run() {
 		ip = envIP
 	}
 	app.ip = ip
+	// Listen on the address virt-operator publishes to other clusters, not on every address of the host
+	// (the pod runs in the host network when the clusters do not route pod addresses).
+	if app.BindAddress == "" {
+		app.BindAddress = ip
+		if app.BindAddress == "" {
+			app.BindAddress = defaultHost
+		}
+	}
 
 	app.LeaderElection = leaderelectionconfig.DefaultLeaderElectionConfiguration()
 
@@ -219,6 +201,7 @@ func (app *synchronizationControllerApp) Run() {
 		os.Exit(2)
 	}
 	log.Log.V(1).Infof("running in namespace %s", app.namespace)
+	log.Log.Infof("virt-synchronization-controller %s (%s)", version.Get().GitVersion, version.Get().GitCommit)
 	factory := controller.NewKubeInformerFactory(app.virtCli.RestClient(), app.virtCli, app.virtCli, nil, app.namespace)
 
 	vmiInformer := factory.VMI()
@@ -237,11 +220,6 @@ func (app *synchronizationControllerApp) Run() {
 	app.clusterConfig.SetConfigModifiedCallback(app.shouldChangeLogVerbosity)
 	// set rate limiter
 	app.clusterConfig.SetConfigModifiedCallback(app.shouldChangeRateLimiter)
-
-	if err := app.setupTLS(factory); err != nil {
-		log.Log.Criticalf("Error constructing migration tls config: %v", err)
-		os.Exit(2)
-	}
 
 	stop := app.ctx.Done()
 
@@ -262,8 +240,6 @@ func (app *synchronizationControllerApp) Run() {
 		app.virtCli,
 		vmiInformer,
 		migrationInformer,
-		app.clientTLSConfig,
-		app.serverTLSConfig,
 		app.BindAddress,
 		app.Port,
 		app.ip,
@@ -272,7 +248,6 @@ func (app *synchronizationControllerApp) Run() {
 		panic(err)
 	}
 
-	go app.clientcertmanager.Start()
 	go app.servercertmanager.Start()
 
 	factory.Start(stop)
@@ -282,10 +257,15 @@ func (app *synchronizationControllerApp) Run() {
 func (app *synchronizationControllerApp) runWithLeaderElection(synchronizationController *synchronization.SynchronizationController, stop <-chan struct{}) {
 	recorder := app.getNewRecorder(k8sv1.NamespaceAll, leaseName)
 
-	id, err := os.Hostname()
-	if err != nil {
-		log.Log.Criticalf("unable to get hostname: %v", err)
-		panic(err)
+	// The pod name, as virt-operator looks the leader pod up by the identity to publish its address; the
+	// hostname is the node name in the host network.
+	id := os.Getenv("POD_NAME")
+	if id == "" {
+		var err error
+		if id, err = os.Hostname(); err != nil {
+			log.Log.Criticalf("unable to get hostname: %v", err)
+			panic(err)
+		}
 	}
 
 	tlsConfig := kvtls.SetupPromTLS(app.servercertmanager, app.clusterConfig)
@@ -390,9 +370,8 @@ func (app *synchronizationControllerApp) getNewRecorder(namespace string, compon
 }
 
 func (app *synchronizationControllerApp) close() {
-	log.Log.V(1).Info("stopping client and server cert managers")
+	log.Log.V(1).Info("stopping the server cert manager")
 	// release resources associated with the application
-	app.clientcertmanager.Stop()
 	app.servercertmanager.Stop()
 }
 
@@ -404,9 +383,6 @@ func (app *synchronizationControllerApp) AddFlags() {
 	app.InitFlags()
 	app.AddCommonFlags()
 
-	if app.BindAddress == "" {
-		app.BindAddress = defaultHost
-	}
 	if app.Port == 0 {
 		app.Port = defaultPort
 	}

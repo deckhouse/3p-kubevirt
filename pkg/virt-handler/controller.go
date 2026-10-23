@@ -270,7 +270,7 @@ func (c *BaseController) getDomainFromCache(key string) (domain *api.Domain, exi
 }
 
 func (c *BaseController) isMigrationSource(vmi *v1.VirtualMachineInstance) bool {
-	return vmi.Status.MigrationState != nil &&
+	return !vmi.IsMigrationTarget() && vmi.Status.MigrationState != nil &&
 		vmi.Status.MigrationState.SourceNode == c.host &&
 		(!vmi.IsDecentralizedMigration() || vmi.IsMigrationSource()) &&
 		vmi.Status.MigrationState.TargetNodeAddress != "" &&

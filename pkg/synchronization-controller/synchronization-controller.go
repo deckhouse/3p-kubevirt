@@ -45,11 +45,15 @@ import (
 
 	context "golang.org/x/net/context"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/peer"
+	"google.golang.org/grpc/status"
 	"kubevirt.io/client-go/kubecli"
 	"kubevirt.io/client-go/log"
 
 	syncv1 "kubevirt.io/kubevirt/pkg/synchronizer-com/synchronization/v1"
+	kvtls "kubevirt.io/kubevirt/pkg/util/tls"
 )
 
 const (
@@ -79,13 +83,13 @@ type SynchronizationController struct {
 	vmiInformer       cache.SharedIndexInformer
 	migrationInformer cache.SharedIndexInformer
 
-	listener        net.Listener
-	bindAddress     string
-	bindPort        int
-	ip              string
-	clientTLSConfig *tls.Config
-	serverTLSConfig *tls.Config
-	timeout         int
+	listener    net.Listener
+	bindAddress string
+	bindPort    int
+	ip          string
+	timeout     int
+	// identities holds the ephemeral TLS key of each decentralized migration by its ID.
+	identities sync.Map
 
 	queue     workqueue.TypedRateLimitingInterface[string]
 	hasSynced func() bool
@@ -100,8 +104,6 @@ func NewSynchronizationController(
 	client kubecli.KubevirtClient,
 	vmiInformer cache.SharedIndexInformer,
 	migrationInformer cache.SharedIndexInformer,
-	clientTLSConfig,
-	serverTLSConfig *tls.Config,
 	bindAddress string,
 	bindPort int,
 	ip string,
@@ -109,8 +111,6 @@ func NewSynchronizationController(
 	syncController := &SynchronizationController{
 		vmiInformer:       vmiInformer,
 		migrationInformer: migrationInformer,
-		clientTLSConfig:   clientTLSConfig,
-		serverTLSConfig:   serverTLSConfig,
 		timeout:           defaultTimeout,
 		bindAddress:       bindAddress,
 		bindPort:          bindPort,
@@ -158,7 +158,9 @@ func NewSynchronizationController(
 		return nil, err
 	}
 
-	syncController.grpcServer = grpc.NewServer(grpc.Creds(credentials.NewTLS(serverTLSConfig)))
+	syncController.grpcServer = grpc.NewServer(grpc.Creds(credentials.NewTLS(&tls.Config{
+		GetConfigForClient: syncController.pinnedServerConfig,
+	})))
 	syncv1.RegisterSynchronizeServer(syncController.grpcServer, syncController)
 
 	return syncController, nil
@@ -201,18 +203,81 @@ func (s *SynchronizationController) deleteMigrationFunc(delObj interface{}) {
 		if !migration.IsDecentralized() {
 			return
 		}
+		// The key goes with the migration, not with the connection: a connection closed on the final state
+		// may be reopened, and the peer holds the pin of this very key.
 		if migration.Spec.Receive != nil {
+			s.identities.Delete(migration.Spec.Receive.MigrationID)
 			log.Log.V(4).Object(migration).Infof("closing receiving connection for migrationID %s", migration.Spec.Receive.MigrationID)
 			if err := s.closeConnectionForMigrationID(s.syncReceivingConnectionMap, migration.Spec.Receive.MigrationID); err != nil {
 				log.Log.Reason(err).Infof("unable to close connection for migrationID %s, possibly leaked connection", migration.Spec.Receive.MigrationID)
 			}
 		} else if migration.Spec.SendTo != nil {
+			s.identities.Delete(migration.Spec.SendTo.MigrationID)
 			log.Log.V(4).Object(migration).Infof("closing outbound connection for migrationID %s", migration.Spec.SendTo.MigrationID)
 			if err := s.closeConnectionForMigrationID(s.syncOutboundConnectionMap, migration.Spec.SendTo.MigrationID); err != nil {
 				log.Log.Reason(err).Infof("unable to close connection for migrationID %s, possibly leaked connection", migration.Spec.SendTo.MigrationID)
 			}
 		}
 	}
+}
+
+// The peers of a decentralized migration share no CA: each synchronization controller
+// generates a key for the migration and the peers verify each other by the pin of the
+// public key. The own pin is published in the VMI, the pin of the peer arrives in the
+// migration annotation, both handed over by the management layer out of band. The
+// client sends the migration ID as SNI for the server to pick the matching key.
+
+func (s *SynchronizationController) identity(migrationID string) (*kvtls.Identity, error) {
+	if obj, ok := s.identities.Load(migrationID); ok {
+		return obj.(*kvtls.Identity), nil
+	}
+	id, err := kvtls.NewEphemeralIdentity(migrationID)
+	if err != nil {
+		return nil, fmt.Errorf("generate the synchronization key for migration %s: %w", migrationID, err)
+	}
+	obj, _ := s.identities.LoadOrStore(migrationID, id)
+	return obj.(*kvtls.Identity), nil
+}
+
+func (s *SynchronizationController) pinnedServerConfig(hello *tls.ClientHelloInfo) (*tls.Config, error) {
+	migrationID := hello.ServerName
+	obj, ok := s.identities.Load(migrationID)
+	if !ok {
+		return nil, fmt.Errorf("no synchronization key for migration %q: unknown or over", migrationID)
+	}
+	config := obj.(*kvtls.Identity).ServerConfig(func() string { return s.peerSyncPin(migrationID) })
+	config.NextProtos = []string{"h2"}
+	return config, nil
+}
+
+func (s *SynchronizationController) peerSyncPin(migrationID string) string {
+	migration, _ := s.findTargetMigrationFromMigrationID(migrationID)
+	if migration == nil {
+		migration, _ = s.findSourceMigrationFromMigrationID(migrationID)
+	}
+	if migration == nil {
+		return ""
+	}
+	return migration.Annotations[virtv1.MigrationPeerSyncPinAnnotation]
+}
+
+// publishSyncPin stores the pin of the own synchronization key in the VMI for the
+// management layer to hand it to the peer cluster.
+func (s *SynchronizationController) publishSyncPin(vmi *virtv1.VirtualMachineInstance, migrationID string, state *virtv1.VirtualMachineInstanceCommonMigrationState) error {
+	id, err := s.identity(migrationID)
+	if err != nil {
+		return err
+	}
+	if state.SyncPin == id.Pin {
+		return nil
+	}
+	origVMI := vmi.DeepCopy()
+	state.SyncPin = id.Pin
+	if err := s.patchVMI(context.Background(), origVMI, vmi); err != nil {
+		return err
+	}
+	log.Log.Object(vmi).Infof("published the synchronization pin for migration %s", migrationID)
+	return nil
 }
 
 func (s *SynchronizationController) closeConnectionForMigrationID(syncMap *sync.Map, migrationID string) error {
@@ -390,7 +455,7 @@ func (s *SynchronizationController) execute(key string) error {
 		if err := s.clearDecentralizedLiveMigrationFailure(vmi); err != nil {
 			return err
 		}
-		log.Log.Object(vmi).V(4).Info("no active decentralized migration found for VMI")
+		log.Log.Object(vmi).V(2).Info("no active decentralized migration found for VMI")
 		return nil
 	}
 }
@@ -618,7 +683,15 @@ func (s *SynchronizationController) getOutboundConnectionByMigrationID(vmi *virt
 	log.Log.Object(vmi).V(4).Infof("found migration ID %s", migrationID)
 	obj, ok := connectionMap.Load(migrationID)
 	if !ok {
-		grpcClientConnection, err := s.createOutboundConnection(syncAddress)
+		if s.peerSyncPin(migrationID) == "" {
+			log.Log.Object(vmi).V(4).Infof("the pin of the peer synchronization controller for migration %s is not known yet", migrationID)
+			return nil, nil
+		}
+		id, err := s.identity(migrationID)
+		if err != nil {
+			return nil, err
+		}
+		grpcClientConnection, err := s.createOutboundConnection(syncAddress, id.ClientConfig(func() string { return s.peerSyncPin(migrationID) }, migrationID))
 		if err != nil {
 			return nil, err
 		}
@@ -643,12 +716,23 @@ func (s *SynchronizationController) handleSourceState(vmi *virtv1.VirtualMachine
 		// No migration state, don't do anything
 		return nil
 	}
-	if vmi.Status.MigrationState.SourceState == nil || vmi.Status.MigrationState.TargetState == nil {
-		// No migration state, don't do anything
+	if vmi.Status.MigrationState.SourceState == nil {
+		log.Log.Object(vmi).V(2).Info("source: no source state yet")
 		return nil
 	}
-
+	// The own pin goes out before anything of the peer is known: the peer waits for it to start.
+	// Without the migration object (the final push after an abort) there is no key to publish:
+	// the key went with the migration, and only a connection still open reaches the peer.
 	sourceState := vmi.Status.MigrationState.SourceState
+	if migration != nil && migration.Spec.SendTo != nil {
+		if err := s.publishSyncPin(vmi, migration.Spec.SendTo.MigrationID, &sourceState.VirtualMachineInstanceCommonMigrationState); err != nil {
+			return err
+		}
+	}
+	if vmi.Status.MigrationState.TargetState == nil {
+		log.Log.Object(vmi).V(2).Info("source: waiting for the target state")
+		return nil
+	}
 	if sourceState.SyncAddress == nil || *sourceState.SyncAddress == "" {
 		syncAddress, err := s.getLocalSynchronizationAddress()
 		if err != nil {
@@ -697,15 +781,24 @@ func (s *SynchronizationController) handleTargetState(vmi *virtv1.VirtualMachine
 		// No migration state, don't do anything
 		return nil
 	}
-	if vmi.Status.MigrationState.TargetState == nil || vmi.Status.MigrationState.SourceState == nil {
-		// No migration state, don't do anything
+	if vmi.Status.MigrationState.TargetState == nil {
+		log.Log.Object(vmi).V(2).Infof("target: no target state yet for migration %s", migration.Spec.Receive.MigrationID)
+		return nil
+	}
+	// The own pin goes out before anything of the source is known: the source state arrives through
+	// the synchronization, which the source starts only once it holds this pin.
+	targetState := vmi.Status.MigrationState.TargetState
+	if err := s.publishSyncPin(vmi, migration.Spec.Receive.MigrationID, &targetState.VirtualMachineInstanceCommonMigrationState); err != nil {
+		return err
+	}
+	if vmi.Status.MigrationState.SourceState == nil {
+		log.Log.Object(vmi).V(2).Infof("target: waiting for the source state of migration %s", migration.Spec.Receive.MigrationID)
 		return nil
 	}
 
 	var outboundConnection *SynchronizationConnection
 	var err error
 	sourceState := vmi.Status.MigrationState.SourceState
-	targetState := vmi.Status.MigrationState.TargetState
 	if targetState.SyncAddress == nil || *targetState.SyncAddress == "" {
 		syncAddress, err := s.getLocalSynchronizationAddress()
 		if err != nil {
@@ -899,11 +992,11 @@ func (s *SynchronizationController) getLocalSynchronizationAddress() (string, er
 	return s.listener.Addr().String(), nil
 }
 
-func (s *SynchronizationController) createOutboundConnection(connectionURL string) (*grpc.ClientConn, error) {
+func (s *SynchronizationController) createOutboundConnection(connectionURL string, tlsConfig *tls.Config) (*grpc.ClientConn, error) {
 	logger := log.Log.With("outbound", connectionURL)
 	logger.Info("creating new synchronization grpc connection")
 
-	client, err := grpc.NewClient(connectionURL, grpc.WithTransportCredentials(credentials.NewTLS(s.clientTLSConfig)))
+	client, err := grpc.NewClient(connectionURL, grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)))
 	return client, err
 }
 
@@ -947,6 +1040,9 @@ func (s *SynchronizationController) findMigrationFromMigrationIDByIndex(indexNam
 }
 
 func (s *SynchronizationController) SyncSourceMigrationStatus(ctx context.Context, request *syncv1.VMIStatusRequest) (*syncv1.VMIStatusResponse, error) {
+	if err := authorizeMigration(ctx, request.MigrationID); err != nil {
+		return nil, err
+	}
 	if request.VmiStatus == nil || len(request.VmiStatus.VmiStatusJson) == 0 {
 		return &syncv1.VMIStatusResponse{
 			Message: noSourceStatusErrorMsg,
@@ -1087,6 +1183,9 @@ func getMergedSourceMigratedVolumes(vmiMigratedVolumes []virtv1.StorageMigratedV
 }
 
 func (s *SynchronizationController) SyncTargetMigrationStatus(ctx context.Context, request *syncv1.VMIStatusRequest) (*syncv1.VMIStatusResponse, error) {
+	if err := authorizeMigration(ctx, request.MigrationID); err != nil {
+		return nil, err
+	}
 	if request.VmiStatus == nil || len(request.VmiStatus.VmiStatusJson) == 0 {
 		return &syncv1.VMIStatusResponse{
 			Message: noTargetStatusErrorMsg,
@@ -1465,6 +1564,10 @@ func (s *SynchronizationController) runConnectionCleanup() {
 }
 
 func (s *SynchronizationController) CancelMigration(ctx context.Context, request *syncv1.MigrationCancelRequest) (*syncv1.MigrationCancelResponse, error) {
+	authenticatedID, err := authenticatedMigrationID(ctx)
+	if err != nil {
+		return nil, err
+	}
 	migrationUID := request.MigrationUID
 
 	migration, err := s.findMigrationFromMigrationIDByIndex("byUID", migrationUID)
@@ -1473,16 +1576,45 @@ func (s *SynchronizationController) CancelMigration(ctx context.Context, request
 			Message: fmt.Sprintf("unable to find migration to cancel for migrationUID %s", migrationUID),
 		}, err
 	}
-	if migration != nil {
-		log.Log.V(2).Object(migration).Infof("found migration to cancel for migrationUID %s", migrationUID)
-		if err := s.client.VirtualMachineInstanceMigration(migration.Namespace).Delete(ctx, migration.Name, metav1.DeleteOptions{}); err != nil {
-			return &syncv1.MigrationCancelResponse{
-				Message: fmt.Sprintf("unable to cancel migration for migrationUID %s", migrationUID),
-			}, err
-		}
-		log.Log.V(2).Object(migration).Infof("successfully deleted migration %s/%s for migrationUID %s", migration.Namespace, migration.Name, migrationUID)
+	if migration == nil {
+		return nil, status.Error(codes.NotFound, "migration not found")
 	}
+	if (migration.Spec.SendTo == nil && migration.Spec.Receive == nil) ||
+		(migration.Spec.SendTo != nil && migration.Spec.SendTo.MigrationID != authenticatedID) ||
+		(migration.Spec.Receive != nil && migration.Spec.Receive.MigrationID != authenticatedID) {
+		return nil, status.Error(codes.PermissionDenied, "TLS migration identity does not match the migration to cancel")
+	}
+	log.Log.V(2).Object(migration).Infof("found migration to cancel for migrationUID %s", migrationUID)
+	if err := s.client.VirtualMachineInstanceMigration(migration.Namespace).Delete(ctx, migration.Name, metav1.DeleteOptions{}); err != nil {
+		return &syncv1.MigrationCancelResponse{
+			Message: fmt.Sprintf("unable to cancel migration for migrationUID %s", migrationUID),
+		}, err
+	}
+	log.Log.V(2).Object(migration).Infof("successfully deleted migration %s/%s for migrationUID %s", migration.Namespace, migration.Name, migrationUID)
 	return &syncv1.MigrationCancelResponse{
 		Message: "migration canceled",
 	}, nil
+}
+
+func authenticatedMigrationID(ctx context.Context) (string, error) {
+	remote, ok := peer.FromContext(ctx)
+	if !ok || remote == nil {
+		return "", status.Error(codes.Unauthenticated, "TLS migration identity is required")
+	}
+	info, ok := remote.AuthInfo.(credentials.TLSInfo)
+	if !ok || info.State.ServerName == "" {
+		return "", status.Error(codes.Unauthenticated, "TLS migration identity is required")
+	}
+	return info.State.ServerName, nil
+}
+
+func authorizeMigration(ctx context.Context, migrationID string) error {
+	authenticatedID, err := authenticatedMigrationID(ctx)
+	if err != nil {
+		return err
+	}
+	if migrationID != authenticatedID {
+		return status.Error(codes.PermissionDenied, "TLS migration identity does not match the requested migration")
+	}
+	return nil
 }

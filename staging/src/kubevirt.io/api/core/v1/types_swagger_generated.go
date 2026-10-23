@@ -283,6 +283,8 @@ func (VirtualMachineInstanceCommonMigrationState) SwaggerDoc() map[string]string
 		"domainName":                "The name of the domain on the source libvirt domain",
 		"domainNamespace":           "Namespace used in the name of the source libvirt domain. Can be used to find and modify paths in the domain",
 		"syncAddress":               "The ip address/fqdn:port combination to use to synchronize the VMI with the target.",
+		"syncPin":                   "SyncPin is the pin (sha256 of the public key) of the synchronization controller key of this side, generated for this migration.",
+		"proxyPin":                  "ProxyPin is the pin (sha256 of the public key) of the migration proxy key of this side, generated for this migration.",
 		"persistentStatePVCName":    "If the VMI being migrated uses persistent features (backend-storage), its source PVC name is saved here",
 		"selinuxContext":            "SELinuxContext is the actual SELinux context of the pod",
 		"virtualMachineInstanceUID": "VirtualMachineInstanceUID is the UID of the target virtual machine instance",

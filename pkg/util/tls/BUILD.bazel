@@ -5,6 +5,7 @@ go_library(
     name = "go_default_library",
     srcs = [
         "ca-manager.go",
+        "pinned.go",
         "tls.go",
     ],
     importpath = "kubevirt.io/kubevirt/pkg/util/tls",
@@ -28,6 +29,7 @@ go_test(
     name = "go_default_test",
     srcs = [
         "ca-manager_test.go",
+        "pinned_test.go",
         "tls_suite_test.go",
         "tls_test.go",
     ],

@@ -772,6 +772,15 @@ func NewSynchronizationControllerDeployment(config *operatorutil.KubeVirtDeploym
 				FieldPath: "status.podIP",
 			},
 		},
+	}, corev1.EnvVar{
+		// The leader identity: virt-operator finds the leader pod by it to publish its address. The
+		// hostname is the node name when the pod runs in the host network.
+		Name: "POD_NAME",
+		ValueFrom: &corev1.EnvVarSource{
+			FieldRef: &corev1.ObjectFieldSelector{
+				FieldPath: "metadata.name",
+			},
+		},
 	})
 
 	deployment := newBaseDeployment(deploymentName, imageName, config.GetNamespace(), config.GetImageRegistry(), config.GetSynchronizationControllerVersion(), productName, productVersion, productComponent, config.VirtSynchronizationControllerImage, config.GetImagePullPolicy(), config.GetImagePullSecrets(), podAntiAffinity, env)

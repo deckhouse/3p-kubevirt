@@ -35,6 +35,7 @@ import (
 	"go.uber.org/mock/gomock"
 	"golang.org/x/sys/unix"
 
+	k8sv1 "k8s.io/api/core/v1"
 	v1 "kubevirt.io/api/core/v1"
 
 	"kubevirt.io/kubevirt/pkg/safepath"
@@ -631,3 +632,19 @@ func (e *fakeDirEntry) Type() fs.FileMode {
 	return 0
 }
 func (e *fakeDirEntry) Info() (fs.FileInfo, error) { return nil, nil }
+
+var _ = Describe("Source migrated volume role", func() {
+	It("excludes an explicit target with the same source node name", func() {
+		mode := k8sv1.PersistentVolumeBlock
+		vmi := &v1.VirtualMachineInstance{}
+		vmi.Status.MigrationState = &v1.VirtualMachineInstanceMigrationState{SourceNode: "host", TargetNode: "host"}
+		vmi.Status.MigratedVolumes = []v1.StorageMigratedVolumeInfo{{VolumeName: "disk", SourcePVCInfo: &v1.PersistentVolumeClaimInfo{VolumeMode: &mode}}}
+		Expect(getSourceBlockToFsMigratedVolumes(vmi, "host")).To(HaveKey("disk"))
+		vmi.Annotations = map[string]string{v1.CreateMigrationTarget: "true"}
+		Expect(getSourceBlockToFsMigratedVolumes(vmi, "host")).To(BeEmpty())
+		vmi.Status.MigrationState = nil
+		Expect(getSourceBlockToFsMigratedVolumes(vmi, "host")).To(BeEmpty())
+		delete(vmi.Annotations, v1.CreateMigrationTarget)
+		Expect(getSourceBlockToFsMigratedVolumes(vmi, "host")).To(HaveKey("disk"))
+	})
+})
