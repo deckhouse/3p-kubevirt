@@ -14437,6 +14437,10 @@ var CRDsValidation map[string]string = map[string]string{
                 pod:
                   description: The source pod that the VMI is originated on
                   type: string
+                proxyPin:
+                  description: ProxyPin is the pin (sha256 of the public key) of the
+                    migration proxy key of this side, generated for this migration.
+                  type: string
                 selinuxContext:
                   description: SELinuxContext is the actual SELinux context of the
                     pod
@@ -14444,6 +14448,11 @@ var CRDsValidation map[string]string = map[string]string{
                 syncAddress:
                   description: The ip address/fqdn:port combination to use to synchronize
                     the VMI with the target.
+                  type: string
+                syncPin:
+                  description: SyncPin is the pin (sha256 of the public key) of the
+                    synchronization controller key of this side, generated for this
+                    migration.
                   type: string
                 virtualMachineInstanceUID:
                   description: VirtualMachineInstanceUID is the UID of the target
@@ -14556,6 +14565,10 @@ var CRDsValidation map[string]string = map[string]string{
                 pod:
                   description: The source pod that the VMI is originated on
                   type: string
+                proxyPin:
+                  description: ProxyPin is the pin (sha256 of the public key) of the
+                    migration proxy key of this side, generated for this migration.
+                  type: string
                 selinuxContext:
                   description: SELinuxContext is the actual SELinux context of the
                     pod
@@ -14563,6 +14576,11 @@ var CRDsValidation map[string]string = map[string]string{
                 syncAddress:
                   description: The ip address/fqdn:port combination to use to synchronize
                     the VMI with the target.
+                  type: string
+                syncPin:
+                  description: SyncPin is the pin (sha256 of the public key) of the
+                    synchronization controller key of this side, generated for this
+                    migration.
                   type: string
                 virtualMachineInstanceUID:
                   description: VirtualMachineInstanceUID is the UID of the target
@@ -15105,6 +15123,10 @@ var CRDsValidation map[string]string = map[string]string{
                 pod:
                   description: The source pod that the VMI is originated on
                   type: string
+                proxyPin:
+                  description: ProxyPin is the pin (sha256 of the public key) of the
+                    migration proxy key of this side, generated for this migration.
+                  type: string
                 selinuxContext:
                   description: SELinuxContext is the actual SELinux context of the
                     pod
@@ -15112,6 +15134,11 @@ var CRDsValidation map[string]string = map[string]string{
                 syncAddress:
                   description: The ip address/fqdn:port combination to use to synchronize
                     the VMI with the target.
+                  type: string
+                syncPin:
+                  description: SyncPin is the pin (sha256 of the public key) of the
+                    synchronization controller key of this side, generated for this
+                    migration.
                   type: string
                 virtualMachineInstanceUID:
                   description: VirtualMachineInstanceUID is the UID of the target
@@ -15224,6 +15251,10 @@ var CRDsValidation map[string]string = map[string]string{
                 pod:
                   description: The source pod that the VMI is originated on
                   type: string
+                proxyPin:
+                  description: ProxyPin is the pin (sha256 of the public key) of the
+                    migration proxy key of this side, generated for this migration.
+                  type: string
                 selinuxContext:
                   description: SELinuxContext is the actual SELinux context of the
                     pod
@@ -15231,6 +15262,11 @@ var CRDsValidation map[string]string = map[string]string{
                 syncAddress:
                   description: The ip address/fqdn:port combination to use to synchronize
                     the VMI with the target.
+                  type: string
+                syncPin:
+                  description: SyncPin is the pin (sha256 of the public key) of the
+                    synchronization controller key of this side, generated for this
+                    migration.
                   type: string
                 virtualMachineInstanceUID:
                   description: VirtualMachineInstanceUID is the UID of the target

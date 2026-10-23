@@ -211,7 +211,12 @@ func NewMigrationTargetController(
 	return c, nil
 }
 
-func (c *MigrationTargetController) resolveMigrationIP() (string, error) {
+func (c *MigrationTargetController) resolveMigrationIP(vmi *v1.VirtualMachineInstance) (string, error) {
+	// A migration from another cluster comes from nodes that have no route into the migration network
+	// of this cluster: the target of a decentralized migration listens on the address of the node.
+	if vmi.IsMigrationTarget() {
+		return c.podIpAddress, nil
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	node, err := c.clientset.CoreV1().Nodes().Get(ctx, c.host, metav1.GetOptions{})
@@ -361,6 +366,16 @@ func (c *MigrationTargetController) updateStatus(vmi *v1.VirtualMachineInstance,
 			vmi.Status.MigrationState.TargetState.NodeAddress = pointer.P(boundAddress)
 			vmi.Status.MigrationState.TargetState.DirectMigrationNodePorts = destSrcPortsMap
 		}
+	}
+	// The target publishes its pin only once it holds the pin of the source: a source
+	// that sees the target pin knows the target accepts its key and may connect.
+	if vmi.IsMigrationTarget() && vmi.Status.MigrationState.TargetState != nil &&
+		vmi.Status.MigrationState.SourceState != nil && vmi.Status.MigrationState.SourceState.ProxyPin != "" {
+		pin, err := c.migrationProxy.UsePinnedTLS(vmiUID, c.sourceProxyPin(controller.VirtualMachineInstanceKey(vmi)))
+		if err != nil {
+			return err
+		}
+		vmi.Status.MigrationState.TargetState.ProxyPin = pin
 	}
 
 	// If the migrated VMI requires dedicated CPUs, report the new pod CPU set to the source node
@@ -682,15 +697,35 @@ func (c *MigrationTargetController) handleTargetMigrationProxy(vmi *v1.VirtualMa
 	if err != nil {
 		return err
 	}
-	bindAddress, err := c.resolveMigrationIP()
+	bindAddress, err := c.resolveMigrationIP(vmi)
 	if err != nil {
 		return fmt.Errorf("resolve migration IP for vmi %s: %w", vmiUID, err)
+	}
+	if vmi.IsMigrationTarget() {
+		if _, err := c.migrationProxy.UsePinnedTLS(vmiUID, c.sourceProxyPin(controller.VirtualMachineInstanceKey(vmi))); err != nil {
+			return err
+		}
 	}
 	err = c.migrationProxy.StartTargetListener(vmiUID, migrationTargetSockets, bindAddress)
 	if err != nil {
 		return err
 	}
 	return nil
+}
+
+// sourceProxyPin reads the pin of the source migration proxy from the VMI, where the
+// synchronization controller relays it; the source publishes it after the listener is up.
+func (c *MigrationTargetController) sourceProxyPin(key string) func() string {
+	return func() string {
+		obj, exists, _ := c.vmiStore.GetByKey(key)
+		if !exists {
+			return ""
+		}
+		if state := obj.(*v1.VirtualMachineInstance).Status.MigrationState; state != nil && state.SourceState != nil {
+			return state.SourceState.ProxyPin
+		}
+		return ""
+	}
 }
 
 func replaceMigratedVolumesStatus(vmi *v1.VirtualMachineInstance) {

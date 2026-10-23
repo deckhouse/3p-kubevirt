@@ -505,7 +505,7 @@ func (c *VirtualMachineController) execute(key string) error {
 		return nil
 	}
 
-	if vmiExists && vmi.IsMigrationSource() {
+	if vmiExists && !vmi.IsMigrationTarget() && vmi.IsMigrationSource() && !isMigratedHere(vmi, c.host) {
 		log.Log.Object(vmi).V(4).Info("ignoring vmi as it is a migration source")
 		return nil
 	}
@@ -3092,4 +3092,14 @@ func (d *VirtualMachineController) HotplugHostDevices(client cmdclient.LauncherC
 
 func (d *VirtualMachineController) StopMigrationProxyInVirtLauncher(client cmdclient.LauncherClient) error {
 	return client.MigrationProxy(cmdclient.MigrationProxyActionStop)
+}
+
+// isMigratedHere tells a VMI whose migration completed onto this node. The target state of a decentralized
+// migration keeps the synchronization and node addresses, so the VMI still looks like a migration source;
+// when the synchronization controller restarts in the middle of the migration nothing clears them, and the
+// handler of the node that runs the VMI ignored it, leaving it Scheduled with the guest running.
+func isMigratedHere(vmi *v1.VirtualMachineInstance, host string) bool {
+	ms := vmi.Status.MigrationState
+	return ms != nil && ms.Completed && !ms.Failed && ms.TargetState != nil &&
+		ms.TargetState.Node == host && vmi.Status.NodeName == host
 }

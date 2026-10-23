@@ -96,3 +96,36 @@ var _ = Describe("isMigrationInProgress", func() {
 		),
 	)
 })
+
+var _ = Describe("Migration source role", func() {
+	DescribeTable("excludes explicit receiving VMIs", func(target, synchronized, completed bool) {
+		vmi := &v1.VirtualMachineInstance{}
+		vmi.Status.NodeName = "same-host"
+		vmi.Status.MigrationState = &v1.VirtualMachineInstanceMigrationState{
+			SourceNode: "same-host", TargetNode: "same-host", TargetNodeAddress: "address", Completed: completed,
+		}
+		if target {
+			vmi.Annotations = map[string]string{v1.CreateMigrationTarget: "true"}
+		}
+		if synchronized {
+			vmi.Status.MigrationState.SourceState = &v1.VirtualMachineInstanceMigrationSourceState{
+				VirtualMachineInstanceCommonMigrationState: v1.VirtualMachineInstanceCommonMigrationState{SyncAddress: pointer.P("source")},
+			}
+			vmi.Status.MigrationState.TargetState = &v1.VirtualMachineInstanceMigrationTargetState{
+				VirtualMachineInstanceCommonMigrationState: v1.VirtualMachineInstanceCommonMigrationState{SyncAddress: pointer.P("target")}, NodeAddress: pointer.P("address"),
+			}
+		}
+		base := &BaseController{host: "same-host"}
+		source := &MigrationSourceController{BaseController: base}
+		Expect(base.isMigrationSource(vmi)).To(Equal(!target && !completed))
+		Expect(source.isMigrationSource(vmi)).To(Equal(!target))
+		vmi.Status.MigrationState = nil
+		Expect(base.isMigrationSource(vmi)).To(BeFalse())
+		Expect(source.isMigrationSource(vmi)).To(BeFalse())
+	}, Entry("ordinary source", false, false, false),
+		Entry("ordinary completed source", false, false, true),
+		Entry("synchronized source", false, true, false),
+		Entry("synchronized target", true, true, false),
+		Entry("receiving before synchronization", true, false, false),
+		Entry("completed target", true, true, true))
+})

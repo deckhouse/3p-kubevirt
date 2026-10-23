@@ -93,6 +93,7 @@ go_test(
     srcs = [
         "controller_test.go",
         "ksm_test.go",
+        "migrated_here_test.go",
         "migration-source_test.go",
         "migration-target_test.go",
         "migration_test.go",

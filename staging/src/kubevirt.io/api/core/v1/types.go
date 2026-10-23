@@ -1069,6 +1069,10 @@ type VirtualMachineInstanceCommonMigrationState struct {
 	DomainNamespace *string `json:"domainNamespace,omitempty"`
 	// The ip address/fqdn:port combination to use to synchronize the VMI with the target.
 	SyncAddress *string `json:"syncAddress,omitempty"`
+	// SyncPin is the pin (sha256 of the public key) of the synchronization controller key of this side, generated for this migration.
+	SyncPin string `json:"syncPin,omitempty"`
+	// ProxyPin is the pin (sha256 of the public key) of the migration proxy key of this side, generated for this migration.
+	ProxyPin string `json:"proxyPin,omitempty"`
 	// If the VMI being migrated uses persistent features (backend-storage), its source PVC name is saved here
 	PersistentStatePVCName *string `json:"persistentStatePVCName,omitempty"`
 	// SELinuxContext is the actual SELinux context of the pod
@@ -1452,6 +1456,9 @@ const (
 
 	// This annotation is used to mark a VMI as a migration target, and to start a receiver pod.
 	CreateMigrationTarget = "kubevirt.io/create-migration-target"
+	// MigrationPeerSyncPinAnnotation on a decentralized VirtualMachineInstanceMigration carries the pin of the
+	// synchronization controller key of the peer cluster, handed over out of band by the management layer.
+	MigrationPeerSyncPinAnnotation = "virtualization.deckhouse.io/peer-sync-pin"
 	// This annotation is to keep virt launcher container alive when an VMI encounters a failure for debugging purpose
 	KeepLauncherAfterFailureAnnotation string = "kubevirt.io/keep-launcher-alive-after-failure"
 

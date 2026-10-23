@@ -525,6 +525,9 @@ func (c *MigrationSourceController) execute(key string) error {
 }
 
 func (c *MigrationSourceController) isMigrationSource(vmi *v1.VirtualMachineInstance) bool {
+	if vmi.IsMigrationTarget() {
+		return false
+	}
 	if vmi.IsDecentralizedMigration() {
 		return vmi.Status.MigrationState != nil &&
 			vmi.Status.MigrationState.SourceNode == c.host &&
@@ -544,7 +547,8 @@ func (c *MigrationSourceController) handleSourceMigrationProxy(vmi *v1.VirtualMa
 	// the migration-proxy is no longer shared via host mount, so we
 	// pass in the virt-launcher's baseDir to reach the unix sockets.
 	baseDir := fmt.Sprintf(filepath.Join(c.virtLauncherFSRunDirPattern, "kubevirt"), res.Pid())
-	if vmi.Status.MigrationState.TargetDirectMigrationNodePorts == nil {
+	if vmi.Status.MigrationState.TargetDirectMigrationNodePorts == nil ||
+		(vmi.IsDecentralizedMigration() && vmi.Status.MigrationState.TargetState.ProxyPin == "") {
 		return errWaitingForTargetPorts
 	}
 
@@ -696,7 +700,38 @@ func isMigrationDone(state *v1.VirtualMachineInstanceMigrationState) bool {
 	return state == nil || (state.EndTimestamp != nil && (state.Completed || state.Failed))
 }
 
+// A decentralized source authenticates to the target proxy with a key of its own for
+// this migration and publishes the pin for the target to accept it.
+func (c *MigrationSourceController) pinSourceProxy(vmi *v1.VirtualMachineInstance) error {
+	// A done migration has its proxy stopped; a new key would only replace the published pin.
+	if !vmi.IsDecentralizedMigration() || isMigrationDone(vmi.Status.MigrationState) {
+		return nil
+	}
+	pin, err := c.migrationProxy.UsePinnedTLS(string(vmi.UID), c.targetProxyPin(controller.VirtualMachineInstanceKey(vmi)))
+	if err != nil {
+		return err
+	}
+	vmi.Status.MigrationState.SourceState.ProxyPin = pin
+	return nil
+}
+
+func (c *MigrationSourceController) targetProxyPin(key string) func() string {
+	return func() string {
+		obj, exists, _ := c.vmiStore.GetByKey(key)
+		if !exists {
+			return ""
+		}
+		if state := obj.(*v1.VirtualMachineInstance).Status.MigrationState; state != nil && state.TargetState != nil {
+			return state.TargetState.ProxyPin
+		}
+		return ""
+	}
+}
+
 func (c *MigrationSourceController) processVMI(vmi *v1.VirtualMachineInstance, domain *api.Domain) error {
+	if err := c.pinSourceProxy(vmi); err != nil {
+		return err
+	}
 	domainAlive := domain != nil &&
 		domain.Status.Status != api.Shutoff &&
 		domain.Status.Status != api.Crashed &&
