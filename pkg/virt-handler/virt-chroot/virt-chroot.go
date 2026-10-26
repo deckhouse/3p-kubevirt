@@ -139,6 +139,13 @@ func UmountChroot(path *safepath.Path) *exec.Cmd {
 	return UnsafeUmountChroot(trimProcPrefix(path))
 }
 
+// UmountStaleChroot unmounts the mount target name inside dir without opening the
+// target itself, for a mount whose NFS export is gone.
+func UmountStaleChroot(dir *safepath.Path, name string) *exec.Cmd {
+	args := append(getBaseArgs(), "umount", "--stale", trimProcPrefix(dir)+"/"+name)
+	return exec.Command(binaryPath, args...)
+}
+
 // Deprecated: UnsafeUmountChroot is used to connect to code which needs to be refactored
 // to handle mounts securely.
 func UnsafeUmountChroot(path string) *exec.Cmd {

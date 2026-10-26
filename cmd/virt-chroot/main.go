@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/user"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -191,6 +192,19 @@ func main() {
 		Short: "unmount in a specific mount namespace",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if stale, _ := cmd.Flags().GetBool("stale"); stale {
+				// The target of a mount whose NFS export is gone cannot be opened
+				// (ESTALE), so only its directory is opened and the mount is
+				// removed by name.
+				dir, err := safepath.NewPathNoFollow(filepath.Dir(args[0]))
+				if err != nil {
+					return fmt.Errorf("mount target invalid: %v", err)
+				}
+				if err := safepath.UnmountAtNoFollow(dir, filepath.Base(args[0])); err != nil {
+					return fmt.Errorf("umount failed: %v", err)
+				}
+				return nil
+			}
 			// Ensure that targetFile is a real path. It will be kept open until used
 			// by the syscall via the file descriptor path in proc (SafePath) to ensure
 			// that no symlink injection can happen after the check.
@@ -210,6 +224,7 @@ func main() {
 			return nil
 		},
 	}
+	umntCmd.Flags().Bool("stale", false, "unmount a target that cannot be opened because its NFS export is gone")
 
 	selinuxCmd := &cobra.Command{
 		Use:   "selinux",

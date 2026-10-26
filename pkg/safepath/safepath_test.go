@@ -252,6 +252,24 @@ var _ = Describe("safepath", func() {
 		Expect(err).To(HaveOccurred())
 	})
 
+	It("should refuse to unmount anything but a single name inside the directory", func() {
+		root, err := JoinAndResolveWithRelativeRoot("/", GinkgoT().TempDir())
+		Expect(err).ToNot(HaveOccurred())
+		for _, name := range []string{"", ".", "..", "a/b", "/a", "a/"} {
+			Expect(UnmountAtNoFollow(root, name)).To(MatchError(ContainSubstring("single non-relative path segment")), "name %q", name)
+		}
+	})
+
+	It("should not unmount a name that is not a mount", func() {
+		root, err := JoinAndResolveWithRelativeRoot("/", GinkgoT().TempDir())
+		Expect(err).ToNot(HaveOccurred())
+		Expect(TouchAtNoFollow(root, "test", os.ModePerm)).To(Succeed())
+		// EINVAL as root, EPERM otherwise: either way nothing is unmounted.
+		Expect(UnmountAtNoFollow(root, "test")).To(Or(MatchError(syscall.EINVAL), MatchError(syscall.EPERM)))
+		_, err = os.Stat(filepath.Join(unsafepath.UnsafeAbsolute(root.Raw()), "test"))
+		Expect(err).ToNot(HaveOccurred())
+	})
+
 	It("should return base and relative paths correctly", func() {
 		baseDir := GinkgoT().TempDir()
 		root, err := JoinAndResolveWithRelativeRoot(baseDir)
