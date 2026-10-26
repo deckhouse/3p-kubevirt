@@ -95,6 +95,8 @@ var (
 	orgMknodCommand        = mknodCommand
 	orgMountCommand        = mountCommand
 	orgUnMountCommand      = unmountCommand
+	orgUnmountStale        = unmountStaleCommand
+	orgOpenMountTarget     = openMountTarget
 	orgIsMounted           = isMounted
 	orgIsBlockDevice       = isBlockDevice
 	orgFindMntByPID        = findMntByPID
@@ -810,6 +812,8 @@ var _ = Describe("HotplugVolume", func() {
 			deviceBasePath = orgDeviceBasePath
 			mountCommand = orgMountCommand
 			unmountCommand = orgUnMountCommand
+			unmountStaleCommand = orgUnmountStale
+			openMountTarget = orgOpenMountTarget
 			isMounted = orgIsMounted
 			statSourceDevice = orgStatSourceCommand
 			statDevice = orgStatCommand
@@ -1055,8 +1059,8 @@ var _ = Describe("HotplugVolume", func() {
 				return false, fmt.Errorf("error checking for block device: %w", syscall.ESTALE)
 			}
 			unmountCalled := false
-			unmountCommand = func(diskPath *safepath.Path) ([]byte, error) {
-				Expect(unsafepath.UnsafeAbsolute(diskPath.Raw())).To(Equal(stalePathAbs))
+			unmountStaleCommand = func(dir *safepath.Path, name string) ([]byte, error) {
+				Expect(filepath.Join(unsafepath.UnsafeAbsolute(dir.Raw()), name)).To(Equal(stalePathAbs))
 				unmountCalled = true
 				return []byte("Success"), nil
 			}
@@ -1068,6 +1072,92 @@ var _ = Describe("HotplugVolume", func() {
 			Expect(err).To(HaveOccurred(), "stale volume file still exists %s", stalePathAbs)
 			_, err = os.Stat(filepath.Join(tempDir, string(vmi.UID)))
 			Expect(err).To(HaveOccurred(), "the record should have been deleted")
+		})
+
+		It("Unmount should unmount an unplugged volume whose NFS export is gone", func() {
+			stalePath, err := newFile(targetPodPath, "stalevolume.img")
+			Expect(err).ToNot(HaveOccurred())
+			stalePathAbs := unsafepath.UnsafeAbsolute(stalePath.Raw())
+
+			Expect(m.setMountTargetRecord(vmi, &vmiMountTargetRecord{
+				UsesSafePaths:      true,
+				MountTargetEntries: []vmiMountTargetEntry{{TargetFile: stalePathAbs}},
+			})).To(Succeed())
+
+			openMountTarget = func(path string) (*safepath.File, error) {
+				if path == stalePathAbs {
+					return nil, &os.PathError{Op: "open", Path: path, Err: syscall.ESTALE}
+				}
+				return safepath.NewFileNoFollow(path)
+			}
+			unmountCalled := false
+			unmountStaleCommand = func(dir *safepath.Path, name string) ([]byte, error) {
+				Expect(filepath.Join(unsafepath.UnsafeAbsolute(dir.Raw()), name)).To(Equal(stalePathAbs))
+				unmountCalled = true
+				return nil, nil
+			}
+
+			Expect(m.Unmount(vmi, cgroupManagerMock)).To(Succeed())
+			Expect(unmountCalled).To(BeTrue())
+
+			_, err = os.Stat(stalePathAbs)
+			Expect(err).To(MatchError(os.ErrNotExist), "stale volume file still exists %s", stalePathAbs)
+		})
+
+		Context("when the mount target itself cannot be opened because its NFS export is gone", func() {
+			var stalePathAbs string
+
+			BeforeEach(func() {
+				stalePath, err := newFile(targetPodPath, "stalevolume.img")
+				Expect(err).ToNot(HaveOccurred())
+				stalePathAbs = unsafepath.UnsafeAbsolute(stalePath.Raw())
+
+				Expect(m.setMountTargetRecord(vmi, &vmiMountTargetRecord{
+					UsesSafePaths:      true,
+					MountTargetEntries: []vmiMountTargetEntry{{TargetFile: stalePathAbs}},
+				})).To(Succeed())
+
+				openMountTarget = func(path string) (*safepath.File, error) {
+					if path == stalePathAbs {
+						return nil, &os.PathError{Op: "open", Path: path, Err: syscall.ESTALE}
+					}
+					return safepath.NewFileNoFollow(path)
+				}
+				unmountCommand = func(diskPath *safepath.Path) ([]byte, error) {
+					Fail("the stale mount target must not be unmounted through an opened path")
+					return nil, nil
+				}
+			})
+
+			It("UnmountAll should unmount it by name in its directory and remove the file", func() {
+				var unmountedDir, unmountedName string
+				unmountStaleCommand = func(dir *safepath.Path, name string) ([]byte, error) {
+					unmountedDir, unmountedName = unsafepath.UnsafeAbsolute(dir.Raw()), name
+					return nil, nil
+				}
+
+				Expect(m.UnmountAll(vmi, cgroupManagerMock)).To(Succeed())
+				Expect(unmountedDir).To(Equal(filepath.Dir(stalePathAbs)))
+				Expect(unmountedName).To(Equal("stalevolume.img"))
+
+				_, err := os.Stat(stalePathAbs)
+				Expect(err).To(MatchError(os.ErrNotExist), "stale volume file still exists %s", stalePathAbs)
+				_, err = os.Stat(filepath.Join(tempDir, string(vmi.UID)))
+				Expect(err).To(HaveOccurred(), "the record should have been deleted")
+			})
+
+			It("UnmountAll should keep the record and fail when the unmount fails", func() {
+				unmountStaleCommand = func(dir *safepath.Path, name string) ([]byte, error) {
+					return []byte("busy"), fmt.Errorf("exit status 1")
+				}
+
+				Expect(m.UnmountAll(vmi, cgroupManagerMock)).To(MatchError(ContainSubstring("failed to unmount stale hotplug disk")))
+
+				_, err := os.Stat(stalePathAbs)
+				Expect(err).ToNot(HaveOccurred(), "stale volume file must stay until it is unmounted")
+				_, err = os.Stat(filepath.Join(tempDir, string(vmi.UID)))
+				Expect(err).ToNot(HaveOccurred(), "the record must be kept for the next attempt")
+			})
 		})
 
 		It("UnmountAll should unmount a mount missing from the mount target record", func() {

@@ -106,6 +106,11 @@ var (
 	unmountCommand = func(diskPath *safepath.Path) ([]byte, error) {
 		return virt_chroot.UmountChroot(diskPath).CombinedOutput()
 	}
+	unmountStaleCommand = func(dir *safepath.Path, name string) ([]byte, error) {
+		return virt_chroot.UmountStaleChroot(dir, name).CombinedOutput()
+	}
+	openMountTarget = safepath.NewFileNoFollow
+
 	isMounted = func(path *safepath.Path) (bool, error) {
 		return isolation.IsMounted(path)
 	}
@@ -759,10 +764,16 @@ func (m *volumeMounter) Unmount(vmi *v1.VirtualMachineInstance, cgroupManager cg
 		}
 
 		for _, entry := range record.MountTargetEntries {
-			fd, err := safepath.NewFileNoFollow(entry.TargetFile)
+			fd, err := openMountTarget(entry.TargetFile)
 			if err != nil {
 				if errors.Is(err, os.ErrNotExist) {
 					log.Log.Object(vmi).Infof("Volume %v is not mounted anymore, continuing", entry.TargetFile)
+				} else if errors.Is(err, syscall.ESTALE) {
+					// A stale volume that is still in the spec has already failed
+					// above, so this one has been unplugged.
+					if err := unmountStaleTarget(entry.TargetFile); err != nil {
+						logErrAndKeepMount(entry.TargetFile, "Unable to unmount stale volume at path %s: %v", entry.TargetFile, err)
+					}
 				} else {
 					logErrAndKeepMount(entry.TargetFile, "Unable to unmount volume at path %s: %v", entry.TargetFile, err)
 				}
@@ -916,10 +927,18 @@ func (m *volumeMounter) UnmountAll(vmi *v1.VirtualMachineInstance, cgroupManager
 		var unmountErrors []error
 
 		for _, entry := range mountTargetEntries {
-			diskPath, err := safepath.NewFileNoFollow(entry.TargetFile)
+			diskPath, err := openMountTarget(entry.TargetFile)
 			if err != nil {
 				if errors.Is(err, os.ErrNotExist) {
 					logger.Infof("Device %v is not mounted anymore, continuing.", entry.TargetFile)
+					continue
+				}
+				if errors.Is(err, syscall.ESTALE) {
+					logger.Infof("unmounting stale hotplug volume mount at path %s", entry.TargetFile)
+					if err := unmountStaleTarget(entry.TargetFile); err != nil {
+						logger.Warningf("Unable to unmount stale volume at path %s: %v", entry.TargetFile, err)
+						unmountErrors = append(unmountErrors, err)
+					}
 					continue
 				}
 				err = fmt.Errorf("failed to open mount target %s: %w", entry.TargetFile, err)
@@ -935,14 +954,10 @@ func (m *volumeMounter) UnmountAll(vmi *v1.VirtualMachineInstance, cgroupManager
 				// from tearing down the pod directory. A block device node
 				// cannot be stale, so unmount it as a filesystem mount without
 				// further checks.
-				logger.Infof("unmounting stale hotplug volume mount at path %s", diskPath)
-				if out, unmountErr := unmountCommand(diskPath.Path()); unmountErr != nil {
-					unmountErr = fmt.Errorf("failed to unmount stale hotplug disk %v: %v: %w", diskPath, string(out), unmountErr)
-					logger.Warningf("Unable to unmount volume at path %s: %v", diskPath, unmountErr)
-					unmountErrors = append(unmountErrors, unmountErr)
-				} else if unlinkErr := safepath.UnlinkAtNoFollow(diskPath.Path()); unlinkErr != nil {
-					logger.Warningf("Unable to remove stale hotplug disk file at path %s: %v", diskPath, unlinkErr)
-					unmountErrors = append(unmountErrors, unlinkErr)
+				logger.Infof("unmounting stale hotplug volume mount at path %s", entry.TargetFile)
+				if err := unmountStaleTarget(entry.TargetFile); err != nil {
+					logger.Warningf("Unable to unmount stale volume at path %s: %v", entry.TargetFile, err)
+					unmountErrors = append(unmountErrors, err)
 				}
 			} else if err != nil {
 				logger.Warningf("Unable to unmount volume at path %s: %v", diskPath, err)
@@ -993,6 +1008,42 @@ func (m *volumeMounter) UnmountAll(vmi *v1.VirtualMachineInstance, cgroupManager
 		}
 	}
 	return nil
+}
+
+// maxStaleMountLayers bounds how many stale mounts stacked on one target are
+// removed in a single pass: a volume mounted into the same pod twice leaves two.
+const maxStaleMountLayers = 4
+
+// unmountStaleTarget unmounts a filesystem hotplug volume whose NFS export is
+// already gone. Such a mount target cannot be opened (ESTALE), so it is unmounted
+// by name through its parent directory, which is local, and removed once it is a
+// plain file again.
+func unmountStaleTarget(target string) error {
+	dir, err := safepath.NewPathNoFollow(filepath.Dir(target))
+	if err != nil {
+		return fmt.Errorf("failed to open the directory of stale hotplug disk %s: %w", target, err)
+	}
+	name := filepath.Base(target)
+	for range maxStaleMountLayers {
+		if out, err := unmountStaleCommand(dir, name); err != nil {
+			return fmt.Errorf("failed to unmount stale hotplug disk %s: %s: %w", target, string(out), err)
+		}
+		diskPath, err := safepath.JoinNoFollow(dir, name)
+		if errors.Is(err, syscall.ESTALE) {
+			continue
+		}
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("failed to open unmounted stale hotplug disk %s: %w", target, err)
+		}
+		if err := safepath.UnlinkAtNoFollow(diskPath); err != nil {
+			return fmt.Errorf("failed to remove stale hotplug disk file %s: %w", target, err)
+		}
+		return nil
+	}
+	return fmt.Errorf("stale hotplug disk %s is still mounted after %d unmounts", target, maxStaleMountLayers)
 }
 
 // getHotplugTargetEntriesInWorld lists the entries that exist under the

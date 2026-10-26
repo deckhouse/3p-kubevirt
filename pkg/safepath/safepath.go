@@ -420,6 +420,19 @@ func UnlinkAtNoFollow(path *Path) error {
 	return nil
 }
 
+// UnmountAtNoFollow lazily unmounts the mount on name inside dir without opening
+// the mount target itself, which fails with ESTALE once an NFS export behind it
+// is gone. umount(2) does not revalidate its target, and a symlink in place of
+// name is not followed.
+func UnmountAtNoFollow(dir *Path, name string) error {
+	if err := isSingleElement(name); err != nil {
+		return err
+	}
+	return dir.ExecuteNoFollow(func(safeDir string) error {
+		return unix.Unmount(filepath.Join(safeDir, name), unix.MNT_DETACH|unix.UMOUNT_NOFOLLOW)
+	})
+}
+
 // ListenUnixNoFollow safely creates a socket in user-owned path
 // Since there exists no socketat on unix, first a safe delete is performed,
 // then the socket is created.
