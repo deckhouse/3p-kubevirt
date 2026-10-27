@@ -1018,7 +1018,7 @@ const VMCloneCreateMutatePath = "/vm-clone-mutate-create"
 
 const VirtLauncherPodMutatePath = "/virt-launcher-pod-mutate"
 
-const VirtLauncherPodMutatingWebhookName = "virt-launcher-pod-mutator"
+const VirtLauncherPodMutatingWebhookName = "virt-internal-virtualization-launcher-pod-mutator"
 
 func NewVirtLauncherPodMutatingWebhookConfiguration(installNamespace string) *admissionregistrationv1.MutatingWebhookConfiguration {
 	path := VirtLauncherPodMutatePath
