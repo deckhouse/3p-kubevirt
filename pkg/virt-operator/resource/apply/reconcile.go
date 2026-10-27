@@ -22,6 +22,7 @@ package apply
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -405,7 +406,7 @@ func (r *Reconciler) Sync(queue workqueue.TypedRateLimitingInterface[string]) (b
 	apiDeploymentsRolledOver := haveApiDeploymentsRolledOver(r.targetStrategy, r.kv, r.stores)
 	controllerDeploymentsRolledOver := haveControllerDeploymentsRolledOver(r.targetStrategy, r.kv, r.stores)
 
-	exportProxyDeploymentsRolledOver := haveExportProxyDeploymentsRolledOver(r.targetStrategy, r.kv, r.stores)
+	exportProxyDeploymentsRolledOver := !r.exportProxyEnabled() || haveExportProxyDeploymentsRolledOver(r.targetStrategy, r.kv, r.stores)
 	synchronizationControllerEnabled := r.isFeatureGateEnabled(featuregate.DecentralizedLiveMigration)
 	synchronizationControllerDeploymentRolledOver := !synchronizationControllerEnabled || haveSynchronizationControllerDeploymentsRolledOver(r.targetStrategy, r.kv, r.stores)
 	virtTemplateDeploymentEnabled := r.virtTemplateDeploymentEnabled()
@@ -614,6 +615,12 @@ func (r *Reconciler) createOrRollBackSystem(apiDeploymentsRolledOver bool) (bool
 
 	// create/update ExportProxy Deployments
 	for _, deployment := range r.targetStrategy.ExportProxyDeployments() {
+		if !r.exportProxyEnabled() {
+			if err := r.deleteDeployment(deployment); err != nil {
+				return false, err
+			}
+			continue
+		}
 		deployment, err := r.syncDeployment(deployment)
 		if err != nil {
 			return false, err
@@ -1223,6 +1230,14 @@ func (r *Reconciler) deleteObjectsNotInInstallStrategy() error {
 
 func (r *Reconciler) isFeatureGateEnabled(fg string) bool {
 	return featuregate.IsEnabled(fg, r.kv.Spec.Configuration.DeveloperConfiguration)
+}
+
+// exportProxyEnabled reports whether virt-exportproxy is deployed. VMExport is GA since
+// KubeVirt 1.9, but the proxy is still deployed only when the gate is listed explicitly,
+// as before 1.9: the platform does not use VM exports and does not ship the proxy image.
+func (r *Reconciler) exportProxyEnabled() bool {
+	devConfig := r.kv.Spec.Configuration.DeveloperConfiguration
+	return devConfig != nil && slices.Contains(devConfig.FeatureGates, featuregate.VMExportGate)
 }
 
 func (r *Reconciler) commonInstancetypesDeploymentEnabled() bool {

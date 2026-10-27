@@ -24,6 +24,7 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -408,6 +409,11 @@ func (k *KubeVirtTestData) shouldExpectKubeVirtUpdateStatusFailureCondition(reas
 }
 
 func (k *KubeVirtTestData) addKubeVirt(kv *v1.KubeVirt) {
+	// The fork deploys virt-exportproxy only when VMExport is listed explicitly,
+	// the upstream tests expect it to be deployed.
+	if !exportProxyRequested(kv) {
+		enableFeatureGate(kv, featuregate.VMExportGate)
+	}
 	k.controller.stores.KubeVirtCache.Add(kv)
 	key, err := kubecontroller.KeyFunc(kv)
 	Expect(err).To(Not(HaveOccurred()))
@@ -1220,6 +1226,11 @@ func enableFeatureGate(kv *v1.KubeVirt, fg string) {
 		kv.Spec.Configuration.DeveloperConfiguration.FeatureGates,
 		fg,
 	)
+}
+
+func exportProxyRequested(kv *v1.KubeVirt) bool {
+	devConfig := kv.Spec.Configuration.DeveloperConfiguration
+	return devConfig != nil && slices.Contains(devConfig.FeatureGates, featuregate.VMExportGate)
 }
 
 func enableContainerPathVolumesFeatureGate(kv *v1.KubeVirt) {

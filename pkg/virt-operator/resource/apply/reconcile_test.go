@@ -32,6 +32,7 @@ import (
 
 	v1 "kubevirt.io/api/core/v1"
 
+	"kubevirt.io/kubevirt/pkg/virt-config/featuregate"
 	"kubevirt.io/kubevirt/pkg/virt-operator/resource/generate/install"
 	installstrategy "kubevirt.io/kubevirt/pkg/virt-operator/resource/generate/install"
 	"kubevirt.io/kubevirt/pkg/virt-operator/util"
@@ -169,4 +170,18 @@ var _ = Describe("Apply", func() {
 			Expect(id).To(Equal("fakeid"))
 		})
 	})
+})
+
+var _ = Describe("virt-exportproxy deployment", func() {
+	DescribeTable("should deploy virt-exportproxy only when VMExport is listed explicitly",
+		func(devConfig *v1.DeveloperConfiguration, expected bool) {
+			r := &Reconciler{kv: &v1.KubeVirt{Spec: v1.KubeVirtSpec{
+				Configuration: v1.KubeVirtConfiguration{DeveloperConfiguration: devConfig},
+			}}}
+			Expect(r.exportProxyEnabled()).To(Equal(expected))
+		},
+		Entry("no developer configuration", nil, false),
+		Entry("other feature gates", &v1.DeveloperConfiguration{FeatureGates: []string{featuregate.HotplugVolumesGate}}, false),
+		Entry("VMExport listed", &v1.DeveloperConfiguration{FeatureGates: []string{featuregate.VMExportGate}}, true),
+	)
 })
