@@ -321,6 +321,20 @@ var _ = Describe("DRA Status Controller", func() {
 			Expect(err).ToNot(HaveOccurred())
 			Expect(info.pciAddress).To(Equal("0000:00:01.0"))
 		})
+
+		It("should find a device of a slice without a node name from any node", func() {
+			slice := getTestResourceSliceWithAttributes("resourceslice1", "", "usb-device1", "virtualization-usb",
+				map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+					USBAddressAttributeKey: {StringValue: ptr.To("003:002")},
+				}, true)
+			slice.Spec.NodeName = nil
+			slice.Spec.PerDeviceNodeSelection = ptr.To(true)
+			controller := testDRAStatusController(nil, nil, nil, nil, slice)
+
+			info, err := controller.getDeviceInfo("othernode", "usb-device1", "virtualization-usb")
+			Expect(err).ToNot(HaveOccurred())
+			Expect(info.usbAddress).To(Equal(&v1.USBAddress{Bus: 3, DeviceNumber: 2}))
+		})
 	})
 
 	Context("isAllDRAGPUsReconciled", func() {

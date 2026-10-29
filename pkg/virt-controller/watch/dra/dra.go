@@ -795,10 +795,12 @@ func indexResourceSliceByNodeName(obj interface{}) ([]string, error) {
 	if !ok {
 		return nil, nil
 	}
-	if rs.Spec.NodeName == nil {
-		return nil, nil
+	if rs.Spec.NodeName != nil {
+		return []string{*rs.Spec.NodeName}, nil
 	}
-	return []string{*rs.Spec.NodeName}, nil
+	// A slice without a node name (perDeviceNodeSelection, allNodes, nodeSelector) is shared:
+	// its devices can be used from any node, as the USB driver does for devices exported over USB/IP.
+	return []string{""}, nil
 }
 
 func (c *DRAStatusController) getHostDevicesFromVMISpec(vmi *v1.VirtualMachineInstance, pod *k8sv1.Pod) ([]DeviceInfo, error) {
