@@ -118,7 +118,8 @@ var _ = Describe("[sig-monitoring][rfe_id:3187][crit:medium][vendor:cnv-qe@redha
 		op := ops.Items[0]
 		Expect(op).ToNot(BeNil(), "virt-handler pod should not be nil")
 
-		var ep *k8sv1.Endpoints //nolint:staticcheck // TODO: migrate to discoveryv1.EndpointSlice
+		// staticcheck does not report SA1019 here in every run, so nolintlint must not call the directive unused.
+		var ep *k8sv1.Endpoints //nolint:staticcheck,nolintlint // TODO: migrate to discoveryv1.EndpointSlice
 		By("finding Prometheus endpoint")
 		Eventually(func() bool {
 			ep, err = virtClient.CoreV1().Endpoints(flags.PrometheusNamespace).Get(context.Background(), "prometheus-k8s", metav1.GetOptions{})
