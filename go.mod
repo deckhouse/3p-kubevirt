@@ -7,7 +7,7 @@ require (
 	github.com/cheggaaa/pb/v3 v3.1.0
 	github.com/cilium/ebpf v0.22.0
 	github.com/containernetworking/cni v1.3.0
-	github.com/containernetworking/plugins v1.7.1
+	github.com/containernetworking/plugins v1.9.0
 	github.com/containers/common v0.64.2
 	github.com/coreos/go-semver v0.3.1
 	github.com/coreos/go-systemd/v22 v22.6.0
@@ -22,7 +22,7 @@ require (
 	github.com/godbus/dbus/v5 v5.1.0
 	github.com/gogo/protobuf v1.3.2
 	github.com/golang/protobuf v1.5.4
-	github.com/google/cel-go v0.26.0
+	github.com/google/cel-go v0.29.0
 	github.com/google/go-cmp v0.7.0
 	github.com/google/go-github/v83 v83.0.0
 	github.com/google/goexpect v0.0.0-20190425035906-112704a48083
@@ -102,7 +102,7 @@ require (
 	cyphar.com/go-pathrs v0.2.1 // indirect
 	github.com/Masterminds/semver/v3 v3.4.0 // indirect
 	github.com/VividCortex/ewma v1.2.0 // indirect
-	github.com/antlr4-go/antlr/v4 v4.13.0 // indirect
+	github.com/antlr4-go/antlr/v4 v4.13.1 // indirect
 	github.com/asaskevich/govalidator v0.0.0-20230301143203-a9d515a09cc2 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
@@ -161,7 +161,6 @@ require (
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/seccomp/libseccomp-golang v0.11.0 // indirect
 	github.com/sirupsen/logrus v1.9.4 // indirect
-	github.com/stoewer/go-strcase v1.3.1 // indirect
 	github.com/tidwall/gjson v1.18.0 // indirect
 	github.com/tidwall/match v1.1.1 // indirect
 	github.com/tidwall/pretty v1.2.1 // indirect
