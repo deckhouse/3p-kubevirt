@@ -20,6 +20,7 @@
 package hostdisk
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -49,6 +50,26 @@ const (
 	EventTypeToleratedSmallPV   = k8sv1.EventTypeNormal
 )
 
+// SourceVolumeSizesAnnotation gives a VMI that receives a migration from another cluster the sizes of the
+// source images by volume name, as JSON: the VMI here has not run, so its volume status has no sizes, and
+// the target image must have exactly the size of the source one.
+const SourceVolumeSizesAnnotation = "virtualization.deckhouse.io/source-volume-sizes"
+
+// sourceVolumeSize is the size of the source image of the volume from SourceVolumeSizesAnnotation, 0 if
+// the VMI does not carry it.
+func sourceVolumeSize(vmi *v1.VirtualMachineInstance, volumeName string) int64 {
+	raw := vmi.Annotations[SourceVolumeSizesAnnotation]
+	if raw == "" {
+		return 0
+	}
+	var sizes map[string]int64
+	if err := json.Unmarshal([]byte(raw), &sizes); err != nil {
+		log.Log.Object(vmi).Reason(err).Warningf("ignoring the annotation %s", SourceVolumeSizesAnnotation)
+		return 0
+	}
+	return sizes[volumeName]
+}
+
 func ReplacePVCByHostDisk(vmi *v1.VirtualMachineInstance) error {
 	// If PVC is defined and it's not a BlockMode PVC, then it is replaced by HostDisk
 	// Filesystem PersistenVolumeClaim is mounted into pod as directory from node filesystem
@@ -60,6 +81,9 @@ func ReplacePVCByHostDisk(vmi *v1.VirtualMachineInstance) error {
 	pvcVolume := make(map[string]v1.VolumeStatus)
 	hotplugVolumes := make(map[string]bool)
 	for _, volumeStatus := range vmi.Status.VolumeStatus {
+		if volumeStatus.Size == 0 {
+			volumeStatus.Size = sourceVolumeSize(vmi, volumeStatus.Name)
+		}
 		if volumeStatus.HotplugVolume != nil {
 			hotplugVolumes[volumeStatus.Name] = true
 		}

@@ -118,8 +118,10 @@ func NewSynchronizationController(
 		ip:                ip,
 	}
 
+	// The peer refuses the connection until it learns the pin of this cluster, which takes a few seconds:
+	// the default limiter would put the next attempt minutes away after a second of refusals.
 	queue := workqueue.NewTypedRateLimitingQueueWithConfig[string](
-		workqueue.DefaultTypedControllerRateLimiter[string](),
+		workqueue.NewTypedItemExponentialFailureRateLimiter[string](5*time.Millisecond, 5*time.Second),
 		workqueue.TypedRateLimitingQueueConfig[string]{Name: "sync-vmi-status"},
 	)
 	syncController.queue = queue

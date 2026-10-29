@@ -456,6 +456,9 @@ func (c *Controller) execute(key string) error {
 	}
 
 	if migration.IsFinal() {
+		if err = c.clearMigratedVolumesOfFailedSource(migration, vmi); err != nil {
+			return err
+		}
 		err = c.garbageCollectFinalizedMigrations(vmi)
 		if err != nil {
 			return err

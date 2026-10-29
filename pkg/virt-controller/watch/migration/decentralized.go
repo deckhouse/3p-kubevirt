@@ -144,6 +144,27 @@ func (c *Controller) patchMigratedVolumesForDecentralizedMigration(vmi *v1.Virtu
 	return nil
 }
 
+// clearMigratedVolumesOfFailedSource drops the volumes a failed decentralized migration marked as migrated
+// while the VMI stays here: a later local migration would otherwise copy its shared volumes onto themselves.
+func (c *Controller) clearMigratedVolumesOfFailedSource(migration *v1.VirtualMachineInstanceMigration, vmi *v1.VirtualMachineInstance) error {
+	if vmi == nil || !migration.IsDecentralizedSource() || migration.Status.Phase != v1.MigrationFailed || len(vmi.Status.MigratedVolumes) == 0 {
+		return nil
+	}
+	state := vmi.Status.MigrationState
+	if state == nil || state.SourceState == nil || state.SourceState.MigrationUID != migration.UID {
+		return nil
+	}
+	patchBytes, err := patch.New(
+		patch.WithTest("/status/migratedVolumes", vmi.Status.MigratedVolumes),
+		patch.WithRemove("/status/migratedVolumes"),
+	).GeneratePayload()
+	if err != nil {
+		return err
+	}
+	_, err = c.clientset.VirtualMachineInstance(vmi.Namespace).Patch(context.Background(), vmi.Name, types.JSONPatchType, patchBytes, metav1.PatchOptions{})
+	return err
+}
+
 func (c *Controller) updateVMIMigrationSourceWithPodInfo(migration *v1.VirtualMachineInstanceMigration, vmi *v1.VirtualMachineInstance) error {
 	if !migration.IsDecentralized() {
 		return nil
@@ -170,7 +191,9 @@ func (c *Controller) updateVMIMigrationSourceWithPodInfo(migration *v1.VirtualMa
 }
 
 func (c *Controller) handlePostHandoffMigrationCancel(migration *v1.VirtualMachineInstanceMigration, vmi *v1.VirtualMachineInstance) error {
-	if !vmi.IsDecentralizedMigration() {
+	// Ask the migration, not the VMI: a VMI that arrived by a decentralized migration keeps its sync
+	// addresses, and its pod is the running one when a later local migration is canceled.
+	if !migration.IsDecentralized() {
 		// Do not delete the pod if it is not a decentralized migration
 		return nil
 	}
