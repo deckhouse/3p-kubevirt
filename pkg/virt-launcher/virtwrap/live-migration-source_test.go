@@ -405,6 +405,43 @@ var _ = Describe("Live migration source", func() {
 			Expect(result).To(ContainSubstring("<source startupPolicy='optional'>"))
 		})
 
+		It("replaces the mandatory startupPolicy of non-migratable hotplug host devices with optional", func() {
+			// Real dest XML from a migration log: libvirtxml keeps startupPolicy of a USB source.
+			data := `<domain><name>test</name><devices>
+    <hostdev mode="subsystem" type="usb" managed="no">
+      <source startupPolicy="mandatory">
+        <address bus="3" device="5"></address>
+      </source>
+      <alias name="ua-dra-hotplug-hostdevice-usb-bd52a52fabad2350a0655d9c030d77f2f109a49c"></alias>
+      <address type="usb" bus="0" port="2"></address>
+    </hostdev>
+  </devices></domain>`
+			vmi := &v1.VirtualMachineInstance{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						v1.USBMigrationStrategyAnn: string(v1.USBMigrationStrategyIgnore),
+					},
+				},
+				Status: v1.VirtualMachineInstanceStatus{
+					DeviceStatus: &v1.DeviceStatus{
+						HostDeviceStatuses: []v1.DeviceStatusInfo{
+							{
+								Name: "usb-bd52a52fabad2350a0655d9c030d77f2f109a49c",
+								DeviceResourceClaimStatus: &v1.DeviceResourceClaimStatus{
+									AllowMultipleAllocations: true,
+									BindsToNode:              true,
+								},
+								Hotplug: &v1.HotplugDeviceStatus{},
+							},
+						},
+					},
+				},
+			}
+			result := configureHotplugHostDevicesForMigrate(data, vmi)
+			Expect(result).To(ContainSubstring("<source startupPolicy='optional'>"))
+			Expect(result).ToNot(ContainSubstring("mandatory"))
+		})
+
 		It("does not add startupPolicy for hotplug host devices not in nonMigratable list", func() {
 			data := "<domain><name>test</name>" + destXMLFragment + "</domain>"
 			vmi := &v1.VirtualMachineInstance{

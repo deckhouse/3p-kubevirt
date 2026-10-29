@@ -23,6 +23,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -1353,6 +1354,13 @@ func configureLocalDiskToMigrate(dom *libvirtxml.Domain, vmi *v1.VirtualMachineI
 	return nil
 }
 
+var (
+	hostDeviceSourceTag = regexp.MustCompile(`<source(\s[^>]*)?>`)
+	// libvirtxml keeps the startupPolicy of a USB source since v1.12002.0, so the
+	// domain XML carries startupPolicy="mandatory" set on hotplug.
+	startupPolicyAttr = regexp.MustCompile(`\s+startupPolicy=("[^"]*"|'[^']*')`)
+)
+
 // find all hotplug host devices in destination domain xml and add startupPolicy='optional' to them
 func configureHotplugHostDevicesForMigrate(data string, vmi *v1.VirtualMachineInstance) string {
 	if vmi == nil || vmi.Status.DeviceStatus == nil {
@@ -1420,9 +1428,10 @@ func configureHotplugHostDevicesForMigrate(data string, vmi *v1.VirtualMachineIn
 
 		afterContent := parts[i][endIdx:]
 
-		if strings.Contains(content, "<source>") {
-			content = strings.ReplaceAll(content, "<source>", "<source startupPolicy='optional'>")
-		}
+		content = hostDeviceSourceTag.ReplaceAllStringFunc(content, func(tag string) string {
+			attrs := startupPolicyAttr.ReplaceAllString(strings.TrimSuffix(strings.TrimPrefix(tag, "<source"), ">"), "")
+			return "<source" + attrs + " startupPolicy='optional'>"
+		})
 
 		parts[i] = beforeContent + content + afterContent
 	}
