@@ -1979,6 +1979,54 @@ var _ = Describe("Migration watcher", func() {
 			Entry("in failed state and pod does not exist", virtv1.MigrationFailed, false, k8sv1.PodFailed, false),
 		)
 
+		It("should drop the migrated volumes of a VMI whose decentralized migration failed", func() {
+			vmi := newVirtualMachine("testvmi", virtv1.Running)
+			addNodeNameToVMI(vmi, "node02")
+			migration := newMigration("testmigration", vmi.Name, virtv1.MigrationFailed)
+			migration.Spec.SendTo = &virtv1.VirtualMachineInstanceMigrationSource{MigrationID: "mid", ConnectURL: "10.0.0.2:9185"}
+			vmi.Status.MigrationState = &virtv1.VirtualMachineInstanceMigrationState{
+				MigrationUID: migration.UID,
+				Failed:       true,
+				SourceState:  &virtv1.VirtualMachineInstanceMigrationSourceState{VirtualMachineInstanceCommonMigrationState: virtv1.VirtualMachineInstanceCommonMigrationState{MigrationUID: migration.UID}},
+				TargetState:  &virtv1.VirtualMachineInstanceMigrationTargetState{},
+			}
+			vmi.Status.MigratedVolumes = []virtv1.StorageMigratedVolumeInfo{{VolumeName: "vd-d1", SourcePVCInfo: &virtv1.PersistentVolumeClaimInfo{ClaimName: "pvc"}, DestinationPVCInfo: &virtv1.PersistentVolumeClaimInfo{ClaimName: "pvc"}}}
+			addMigration(migration)
+			addVirtualMachineInstance(vmi)
+			addPod(newSourcePodForVirtualMachine(vmi))
+
+			sanityExecute()
+
+			updated, err := virtClientset.KubevirtV1().VirtualMachineInstances(vmi.Namespace).Get(context.Background(), vmi.Name, metav1.GetOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(updated.Status.MigratedVolumes).To(BeEmpty())
+		})
+
+		It("should keep the running pod of a VMI that arrived by a decentralized migration when its local target pod fails", func() {
+			vmi := newVirtualMachine("testvmi", virtv1.Running)
+			addNodeNameToVMI(vmi, "node02")
+			migration := newMigration("testmigration", vmi.Name, virtv1.MigrationTargetReady)
+			vmi.Status.MigrationState = &virtv1.VirtualMachineInstanceMigrationState{
+				MigrationUID: migration.UID,
+				TargetNode:   "node01",
+				SourceNode:   "node02",
+				SourceState:  &virtv1.VirtualMachineInstanceMigrationSourceState{VirtualMachineInstanceCommonMigrationState: virtv1.VirtualMachineInstanceCommonMigrationState{SyncAddress: pointer.P("10.0.0.1:9185")}},
+				TargetState:  &virtv1.VirtualMachineInstanceMigrationTargetState{},
+			}
+			addMigration(migration)
+			addVirtualMachineInstance(vmi)
+			addPod(newSourcePodForVirtualMachine(vmi))
+			targetPod := newTargetPodForVirtualMachine(vmi, migration, k8sv1.PodFailed)
+			targetPod.Spec.NodeName = "node01"
+			addPod(targetPod)
+
+			sanityExecute()
+
+			testutils.ExpectEvent(recorder, virtcontroller.FailedMigrationReason)
+			testutils.ExpectEvent(recorder, virtcontroller.FailedMigrationReason)
+			expectMigrationFailedState(migration.Namespace, migration.Name)
+		})
+
 		DescribeTable("with CPU mode which is", func(toDefineHostModelCPU bool) {
 			const nodeName = "testNode"
 

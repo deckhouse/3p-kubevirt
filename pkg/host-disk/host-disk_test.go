@@ -455,6 +455,19 @@ var _ = Describe("HostDisk", func() {
 			),
 		)
 
+		It("in filemode sizes a received VMI by the source image", func() {
+			mode := k8sv1.PersistentVolumeFilesystem
+			overhead := v1.Percent("0.055")
+			info := vmi.Status.VolumeStatus[0].PersistentVolumeClaimInfo
+			info.VolumeMode, info.FilesystemOverhead = &mode, &overhead
+			info.Capacity = k8sv1.ResourceList{k8sv1.ResourceStorage: resource.MustParse("2Gi")}
+			info.Requests = k8sv1.ResourceList{k8sv1.ResourceStorage: resource.MustParse("2Gi")}
+			vmi.Annotations = map[string]string{SourceVolumeSizesAnnotation: `{"` + volumeName + `": 2028994560}`}
+
+			Expect(ReplacePVCByHostDisk(vmi)).To(Succeed())
+			assertHostDiskWithSize(resource.MustParse("1935Mi"))
+		})
+
 		It("in filemode without capacity or requested PVC size should fail", func() {
 			mode := k8sv1.PersistentVolumeFilesystem
 			vmi.Status.VolumeStatus[0].PersistentVolumeClaimInfo.VolumeMode = &mode
@@ -462,5 +475,28 @@ var _ = Describe("HostDisk", func() {
 			vmi.Status.VolumeStatus[0].PersistentVolumeClaimInfo.Requests = k8sv1.ResourceList{}
 			Expect(ReplacePVCByHostDisk(vmi)).ToNot(Succeed())
 		})
+	})
+})
+
+var _ = Describe("PVCDiskImgCreator", func() {
+	It("creates the image of a received hotplug volume with the size of the source image", func() {
+		mode := k8sv1.PersistentVolumeFilesystem
+		overhead := v1.Percent("0.055")
+		size := k8sv1.ResourceList{k8sv1.ResourceStorage: resource.MustParse("2Gi")}
+		vmi := libvmi.New()
+		vmi.Annotations = map[string]string{SourceVolumeSizesAnnotation: `{"vd-d1":2028994560}`}
+		vmi.Status.VolumeStatus = []v1.VolumeStatus{{
+			Name:          "vd-d1",
+			HotplugVolume: &v1.HotplugVolumeStatus{},
+			PersistentVolumeClaimInfo: &v1.PersistentVolumeClaimInfo{
+				ClaimName: "vd-d1", VolumeMode: &mode, FilesystemOverhead: &overhead, Capacity: size, Requests: size,
+			},
+		}}
+		c := NewPVCDiskImgCreator(record.NewFakeRecorder(10), 0, 0)
+		c.diskImgCreator.dirBytesAvailableFunc = func(string, uint64) (uint64, error) { return 4 << 30, nil }
+		img := filepath.Join(GinkgoT().TempDir(), "vd-d1.img")
+
+		Expect(c.Create(vmi, "vd-d1", img)).To(Succeed())
+		Expect(virtualSize(img)).To(Equal(int64(2028994560)))
 	})
 })

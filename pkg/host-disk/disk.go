@@ -75,8 +75,12 @@ func (c PVCDiskImgCreator) Create(vmi *v1.VirtualMachineInstance, volumeName, di
 	if isHotplugged(vmi, volumeName) {
 		if volumeStatus := getVolumeStatus(vmi, volumeName); volumeStatus != nil {
 			if volumeStatus.PersistentVolumeClaimInfo != nil && volumeStatus.PersistentVolumeClaimInfo.FilesystemOverhead != nil {
-				if volumeStatus.Size > 0 && volumeStatus.Size < requestedSize {
-					requestedSize = util.AlignImageSizeTo1MiB(volumeStatus.Size, log.Log)
+				size := volumeStatus.Size
+				if size == 0 {
+					size = sourceVolumeSize(vmi, volumeName)
+				}
+				if size > 0 && size < requestedSize {
+					requestedSize = util.AlignImageSizeTo1MiB(size, log.Log)
 				}
 			}
 		}

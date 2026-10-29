@@ -67,8 +67,11 @@ const liveMigrationFailed = "Live migration failed."
 
 const (
 	monitorSleepPeriodMS = 400
-	monitorLogPeriodMS   = 4000
-	monitorLogInterval   = monitorLogPeriodMS / monitorSleepPeriodMS
+	// migrationErrWait bounds the wait for the error of the migrate call once the job has failed: the job
+	// reports the failure before the call returns the error that says why.
+	migrationErrWait   = 5 * time.Second
+	monitorLogPeriodMS = 4000
+	monitorLogInterval = monitorLogPeriodMS / monitorSleepPeriodMS
 )
 
 type migrationDisks struct {
@@ -784,6 +787,12 @@ func (m *migrationMonitor) startMonitor() {
 			return
 		case libvirt.DOMAIN_JOB_FAILED:
 			logger.Info("Migration job failed")
+			if m.migrationFailedWithError == nil {
+				select {
+				case m.migrationFailedWithError = <-m.migrationErr:
+				case <-time.After(migrationErrWait):
+				}
+			}
 
 			reason := strings.Builder{}
 			reason.WriteString("Domain job failed")

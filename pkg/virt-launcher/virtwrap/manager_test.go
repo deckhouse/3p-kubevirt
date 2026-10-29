@@ -1927,6 +1927,41 @@ var _ = Describe("Manager", func() {
 			monitor := newMigrationMonitor(vmi, manager, options, migrationErrorChan)
 			monitor.startMonitor()
 		})
+		It("migration failure should carry the error of the migrate call that comes after the failed job", func() {
+			migrationErrorChan := make(chan error, 1)
+			options := &cmdclient.MigrationOptions{
+				Bandwidth:               resource.MustParse("64Mi"),
+				ProgressTimeout:         150,
+				CompletionTimeoutPerGiB: 150,
+			}
+			vmi := newVMI(testNamespace, testVmName)
+			vmi.Status.MigrationState = &v1.VirtualMachineInstanceMigrationState{
+				MigrationUID: "111222333",
+			}
+			manager := &LibvirtDomainManager{
+				virConn:       mockLibvirt.VirtConnection,
+				virtShareDir:  testVirtShareDir,
+				metadataCache: metadataCache,
+				cpuSetGetter:  fakeCpuSetGetter,
+			}
+
+			mockLibvirt.ConnectionEXPECT().LookupDomainByName(testDomainName).DoAndReturn(mockDomainWithFreeExpectation)
+			mockLibvirt.DomainEXPECT().GetJobStats(libvirt.DomainGetJobStatsFlags(0)).DoAndReturn(func(libvirt.DomainGetJobStatsFlags) (*libvirt.DomainJobInfo, error) {
+				go func() {
+					time.Sleep(100 * time.Millisecond)
+					migrationErrorChan <- fmt.Errorf("operation failed: migration of disk vda failed: Source and target image have different sizes")
+				}()
+				return &libvirt.DomainJobInfo{Type: libvirt.DOMAIN_JOB_FAILED}, nil
+			})
+
+			metadataCache.Migration.Store(api.MigrationMetadata{UID: "111222333"})
+			monitor := newMigrationMonitor(vmi, manager, options, migrationErrorChan)
+			monitor.startMonitor()
+
+			migration, _ := metadataCache.Migration.Load()
+			Expect(migration.Failed).To(BeTrue())
+			Expect(migration.FailureReason).To(ContainSubstring("Source and target image have different sizes"))
+		})
 		It("migration should be canceled if timeout has been reached", func() {
 			migrationErrorChan := make(chan error)
 			defer close(migrationErrorChan)
