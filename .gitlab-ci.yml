@@ -130,6 +130,9 @@ check:vendor:
 check:generate:
   stage: lint
   timeout: 1h
+  # hack/dockerized builds in one docker volume per runner and generate-verify-local kills every
+  # bazel-server container there: two of these jobs on one runner break each other.
+  resource_group: generate-verify
   needs:
     - job: build:images
       artifacts: true
