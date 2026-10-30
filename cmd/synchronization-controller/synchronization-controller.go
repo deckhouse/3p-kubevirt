@@ -66,6 +66,8 @@ import (
 const (
 	// Default port that virt-handler listens on.
 	defaultPort = 9185
+	// Default port of the health check.
+	defaultHealthPort = 8443
 	// Default address that virt-handler listens on.
 	defaultHost = "0.0.0.0"
 
@@ -100,6 +102,7 @@ type synchronizationControllerApp struct {
 	ip                 string
 
 	consoleServerPort     int
+	healthPort            int
 	servercertmanager     certificate.Manager
 	clusterConfig         *virtconfig.ClusterConfig
 	reloadableRateLimiter *ratelimiter.ReloadableRateLimiter
@@ -276,7 +279,7 @@ func (app *synchronizationControllerApp) runWithLeaderElection(synchronizationCo
 	log.Log.V(2).Infof("Listing on %s", app.Address())
 
 	server := &http.Server{
-		Addr:      "0.0.0.0:8443",
+		Addr:      fmt.Sprintf("0.0.0.0:%d", app.healthPort),
 		Handler:   mux,
 		TLSConfig: tlsConfig,
 		// Disable HTTP/2
@@ -387,6 +390,8 @@ func (app *synchronizationControllerApp) AddFlags() {
 	if app.Port == 0 {
 		app.Port = defaultPort
 	}
+	flag.IntVar(&app.healthPort, "health-port", defaultHealthPort,
+		"The port of the health check")
 	flag.StringVar(&app.caConfigMapName, "ca-configmap-name", defaultCAConfigMapName,
 		"The name of configmap containing CA certificates to authenticate requests presenting client certificates with matching CommonName")
 
