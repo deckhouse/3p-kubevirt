@@ -1960,7 +1960,7 @@ func (c *VirtualMachineController) processVmCleanup(vmi *v1.VirtualMachineInstan
 			log.Log.Object(vmi).Warningf("failed to get virt-launcher client: %v", err)
 		}
 	}
-	c.migrationProxy.StopTargetListener(vmiId)
+	stopTargetListener(c.migrationProxy, vmi)
 	c.migrationProxy.StopSourceListener(vmiId)
 
 	c.downwardMetricsManager.StopServer(vmi)

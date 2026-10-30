@@ -874,3 +874,29 @@ var _ = Describe("refreshInterfacesAfterCrossClusterMigration", func() {
 		Expect(options.InterfaceMigration).To(BeEmpty())
 	})
 })
+
+type stoppedTargetListeners struct {
+	migrationproxy.ProxyManager
+	keys []string
+}
+
+func (s *stoppedTargetListeners) StopTargetListener(key string) {
+	s.keys = append(s.keys, key)
+}
+
+var _ = Describe("stopTargetListener", func() {
+	It("stops the proxies of a VMI received from another cluster under the UID of the source", func() {
+		vmi := &v1.VirtualMachineInstance{}
+		vmi.UID = "local"
+		vmi.Status.MigrationState = &v1.VirtualMachineInstanceMigrationState{
+			SourceState: &v1.VirtualMachineInstanceMigrationSourceState{
+				VirtualMachineInstanceCommonMigrationState: v1.VirtualMachineInstanceCommonMigrationState{
+					VirtualMachineInstanceUID: pointer.P(types.UID("remote")),
+				},
+			},
+		}
+		proxy := &stoppedTargetListeners{}
+		stopTargetListener(proxy, vmi)
+		Expect(proxy.keys).To(ConsistOf("local", "remote"))
+	})
+})

@@ -486,7 +486,7 @@ func (c *MigrationTargetController) finalCleanup(vmi *v1.VirtualMachineInstance,
 		}
 	}
 
-	defer c.migrationProxy.StopTargetListener(string(vmi.UID))
+	defer stopTargetListener(c.migrationProxy, vmi)
 	if c.conntrackSync != nil {
 		defer c.conntrackSync.Cleanup(vmi.UID)
 	}
@@ -602,7 +602,7 @@ func (c *MigrationTargetController) execute(key string) error {
 		}
 		c.netStat.Teardown(vmi)
 		c.launcherClients.CloseLauncherClient(vmi)
-		c.migrationProxy.StopTargetListener(string(vmi.UID))
+		stopTargetListener(c.migrationProxy, vmi)
 		if c.conntrackSync != nil {
 			c.conntrackSync.Cleanup(vmi.UID)
 		}
@@ -651,6 +651,13 @@ func migrationNeedsFinalization(migrationState *v1.VirtualMachineInstanceMigrati
 		migrationState.EndTimestamp != nil &&
 		!migrationState.Completed &&
 		!migrationState.Failed
+}
+
+// stopTargetListener stops the target proxies of the VMI and returns their ports. A VMI received from
+// another cluster has them under the UID of the source VMI, not under its own.
+func stopTargetListener(proxy migrationproxy.ProxyManager, vmi *v1.VirtualMachineInstance) {
+	proxy.StopTargetListener(string(vmi.UID))
+	proxy.StopTargetListener(resolveSourceVMIUID(vmi))
 }
 
 func resolveSourceVMIUID(vmi *v1.VirtualMachineInstance) string {
@@ -1014,7 +1021,7 @@ func (c *MigrationTargetController) deleteFunc(obj interface{}) {
 		}
 	}
 	if vmi != nil {
-		c.migrationProxy.StopTargetListener(string(vmi.UID))
+		stopTargetListener(c.migrationProxy, vmi)
 		if c.conntrackSync != nil {
 			c.conntrackSync.Cleanup(vmi.UID)
 		}
