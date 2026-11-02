@@ -653,16 +653,18 @@ func migrationNeedsFinalization(migrationState *v1.VirtualMachineInstanceMigrati
 		!migrationState.Failed
 }
 
-// stopTargetListener stops the target proxies of the VMI and returns their ports. A VMI received from
-// another cluster has them under the UID of the source VMI, not under its own.
+// stopTargetListener stops the target proxies of the VMI. A VMI received from another cluster has
+// them under the UID of the source VMI, so the proxies under both UIDs are stopped.
 func stopTargetListener(proxy migrationproxy.ProxyManager, vmi *v1.VirtualMachineInstance) {
 	proxy.StopTargetListener(string(vmi.UID))
-	proxy.StopTargetListener(resolveSourceVMIUID(vmi))
+	if ms := vmi.Status.MigrationState; ms != nil && ms.SourceState != nil && ms.SourceState.VirtualMachineInstanceUID != nil {
+		proxy.StopTargetListener(string(*ms.SourceState.VirtualMachineInstanceUID))
+	}
 }
 
 func resolveSourceVMIUID(vmi *v1.VirtualMachineInstance) string {
-	if vmi.Status.MigrationState.SourceState != nil && vmi.Status.MigrationState.SourceState.VirtualMachineInstanceUID != nil {
-		return string(*vmi.Status.MigrationState.SourceState.VirtualMachineInstanceUID)
+	if ms := vmi.Status.MigrationState; ms != nil && ms.SourceState != nil && ms.SourceState.VirtualMachineInstanceUID != nil {
+		return string(*ms.SourceState.VirtualMachineInstanceUID)
 	}
 	return string(vmi.UID)
 }

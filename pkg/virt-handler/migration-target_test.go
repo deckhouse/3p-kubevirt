@@ -899,4 +899,13 @@ var _ = Describe("stopTargetListener", func() {
 		stopTargetListener(proxy, vmi)
 		Expect(proxy.keys).To(ConsistOf("local", "remote"))
 	})
+
+	It("stops the proxies of a VMI that was never migrated under its own UID", func() {
+		vmi := &v1.VirtualMachineInstance{}
+		vmi.UID = "local"
+		proxy := &stoppedTargetListeners{}
+		stopTargetListener(proxy, vmi)
+		Expect(proxy.keys).To(ConsistOf("local"))
+		Expect(resolveSourceVMIUID(vmi)).To(Equal("local"))
+	})
 })
