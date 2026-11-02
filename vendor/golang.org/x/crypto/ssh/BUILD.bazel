@@ -18,6 +18,8 @@ go_library(
         "keys.go",
         "mac.go",
         "messages.go",
+        "mldsa.go",
+        "mldsa_unsupported.go",
         "mlkem.go",
         "mux.go",
         "server.go",

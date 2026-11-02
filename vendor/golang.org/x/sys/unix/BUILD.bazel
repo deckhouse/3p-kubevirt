@@ -107,7 +107,6 @@ go_library(
         "syscall_solaris_amd64.go",
         "syscall_unix.go",
         "syscall_unix_gc.go",
-        "syscall_unix_gc_ppc64x.go",
         "sysvshm_linux.go",
         "sysvshm_unix.go",
         "sysvshm_unix_other.go",
