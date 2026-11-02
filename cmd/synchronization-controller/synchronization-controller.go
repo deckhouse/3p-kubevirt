@@ -22,7 +22,6 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"net/http"
@@ -44,6 +43,7 @@ import (
 
 	"github.com/deckhouse/kube-api-rewriter/pkg/proxy"
 	kubevirtrules "github.com/deckhouse/virtualization/src/kubevirt-rules"
+	flag "github.com/spf13/pflag"
 
 	"kubevirt.io/kubevirt/pkg/service"
 	"kubevirt.io/kubevirt/pkg/virt-controller/leaderelectionconfig"
