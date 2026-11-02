@@ -6,6 +6,8 @@ go_library(
         "chacha_arm64.go",
         "chacha_arm64.s",
         "chacha_generic.go",
+        "chacha_loong64.go",
+        "chacha_loong64.s",
         "chacha_noasm.go",
         "chacha_ppc64x.go",
         "chacha_ppc64x.s",
@@ -18,10 +20,6 @@ go_library(
     visibility = ["//visibility:public"],
     deps = [
         "//vendor/golang.org/x/crypto/internal/alias:go_default_library",
-    ] + select({
-        "@io_bazel_rules_go//go/platform:s390x": [
-            "//vendor/golang.org/x/sys/cpu:go_default_library",
-        ],
-        "//conditions:default": [],
-    }),
+        "//vendor/golang.org/x/sys/cpu:go_default_library",
+    ],
 )
