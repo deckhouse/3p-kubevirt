@@ -141,6 +141,25 @@ var _ = Describe("Qemu agent poller", func() {
 			Expect(agentStore.AgentUpdated).ToNot(Receive())
 		})
 
+		It("should keep the guest info in an event fired for a key it does not carry", func() {
+			agentStore.Store(GetFSFreezeStatus, fakeFSFreezeStatus)
+			Expect(agentStore.AgentUpdated).To(Receive(Equal(AgentUpdatedEvent{
+				DomainInfo: api.DomainGuestInfo{
+					FSFreezeStatus: &fakeFSFreezeStatus,
+				},
+			})))
+
+			// guest-info has no place in DomainInfo, and its reply changes on every freeze: the
+			// agent disables the commands it cannot run while frozen. The event it fires must
+			// still carry the freeze status, or the receiver takes the empty one for the truth.
+			agentStore.Store(GetAgent, AgentInfo{Version: "4.1"})
+			Expect(agentStore.AgentUpdated).To(Receive(Equal(AgentUpdatedEvent{
+				DomainInfo: api.DomainGuestInfo{
+					FSFreezeStatus: &fakeFSFreezeStatus,
+				},
+			})))
+		})
+
 		It("should fire an event for new sysinfo data", func() {
 			agentStore.Store(libvirt.DOMAIN_GUEST_INFO_OS, fakeInfo)
 			Expect(agentStore.AgentUpdated).To(Receive(Equal(AgentUpdatedEvent{

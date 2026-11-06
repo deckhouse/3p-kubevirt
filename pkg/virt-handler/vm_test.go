@@ -713,6 +713,43 @@ var _ = Describe("VirtualMachineInstance", func() {
 			))
 		})
 
+		It("should not judge the agent unsupported while the guest filesystem is frozen", func() {
+			vmi := api2.NewMinimalVMI("testvmi")
+			vmi.UID = vmiTestUUID
+			vmi.Status.Phase = v1.Running
+			vmi.Status.Conditions = []v1.VirtualMachineInstanceCondition{
+				{
+					Type:          v1.VirtualMachineInstanceAgentConnected,
+					LastProbeTime: metav1.Now(),
+					Status:        k8sv1.ConditionTrue,
+				},
+			}
+
+			domain := api.NewMinimalDomainWithUUID("testvmi", vmiTestUUID)
+			domain.Status.Status = api.Running
+			domain.Spec.Devices.Channels = []api.Channel{
+				{
+					Type: "unix",
+					Target: &api.ChannelTarget{
+						Name:  "org.qemu.guest_agent.0",
+						State: "connected",
+					},
+				},
+			}
+
+			// A frozen agent answers guest-info with every command outside its freeze allowlist
+			// disabled, which is indistinguishable from an agent that never had them.
+			client.EXPECT().GetGuestInfo().Return(&v1.VirtualMachineInstanceGuestAgentInfo{
+				FSFreezeStatus: api.FSFrozen,
+			}, nil)
+
+			condManager := virtcontroller.NewVirtualMachineInstanceConditionManager()
+			Expect(controller.updateGuestAgentConditions(vmi, domain, condManager)).To(Succeed())
+
+			Expect(condManager.HasCondition(vmi, v1.VirtualMachineInstanceAgentConnected)).To(BeTrue())
+			Expect(condManager.HasCondition(vmi, v1.VirtualMachineInstanceUnsupportedAgent)).To(BeFalse())
+		})
+
 		It("should maintain unsupported user agent condition when it's already set", func() {
 			vmi := api2.NewMinimalVMI("testvmi")
 			vmi.UID = vmiTestUUID

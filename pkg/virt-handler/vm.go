@@ -1032,6 +1032,15 @@ func (c *VirtualMachineController) updateGuestAgentConditions(vmi *v1.VirtualMac
 			return err
 		}
 
+		// While the guest filesystem is frozen the agent answers guest-info, but reports every
+		// command outside its freeze allowlist (qemu-ga's ga_freeze_allowlist) as not enabled -
+		// the required commands among them. That says the filesystem is frozen, not that the
+		// agent is unsupported, and the command set cannot change for as long as the freeze
+		// holds. Keep the verdict reached before the freeze until the guest thaws.
+		if guestInfo.FSFreezeStatus == api.FSFrozen {
+			return nil
+		}
+
 		var supported = false
 		var reason = ""
 

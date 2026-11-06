@@ -71,6 +71,13 @@ func NewAsyncAgentStore() AsyncAgentStore {
 
 // Store saves the value with a key to the storage, when there is a change in data
 // it fires up updated event
+//
+// The event carries the guest info the store holds right now, not only the key that changed:
+// the receiver keeps what it gets as the current state of the domain, so a partially filled
+// event would drop the fields left out of it. A key with no representation in DomainInfo
+// (guest-info, the filesystem list, users, hostname, timezone) still fires the event - it is
+// what wakes the receiver up - and now carries the other fields unchanged instead of blanking
+// them.
 func (s *AsyncAgentStore) Store(key, value any) {
 	oldData, _ := s.store.Load(key)
 	updated := (oldData == nil) || !equality.Semantic.DeepEqual(oldData, value)
@@ -78,16 +85,12 @@ func (s *AsyncAgentStore) Store(key, value any) {
 	s.store.Store(key, value)
 
 	if updated {
-		domainInfo := api.DomainGuestInfo{}
-		switch key {
-		case libvirt.DOMAIN_GUEST_INFO_OS, libvirt.DOMAIN_GUEST_INFO_INTERFACES, GetFSFreezeStatus:
-			domainInfo.OSInfo = s.GetGuestOSInfo()
-			domainInfo.Interfaces = s.GetInterfaceStatus()
-			domainInfo.FSFreezeStatus = s.GetFSFreezeStatus()
-		}
-
 		s.AgentUpdated <- AgentUpdatedEvent{
-			DomainInfo: domainInfo,
+			DomainInfo: api.DomainGuestInfo{
+				OSInfo:         s.GetGuestOSInfo(),
+				Interfaces:     s.GetInterfaceStatus(),
+				FSFreezeStatus: s.GetFSFreezeStatus(),
+			},
 		}
 	}
 }
