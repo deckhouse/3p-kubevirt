@@ -20,6 +20,7 @@
 package agentpoller
 
 import (
+	"fmt"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -27,6 +28,8 @@ import (
 	"go.uber.org/mock/gomock"
 
 	"libvirt.org/go/libvirt"
+
+	v1 "kubevirt.io/api/core/v1"
 
 	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/api"
 	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/testing"
@@ -105,6 +108,58 @@ var _ = Describe("Qemu agent poller", func() {
 		})
 	})
 
+	Context("polling guest-info", func() {
+		const guestInfoReply = `{"return":{"version":"4.1","supported_commands":[{"name":"guest-get-osinfo","enabled":true}]}}`
+		const frozenGuestInfoReply = `{"return":{"version":"4.1","supported_commands":[{"name":"guest-get-osinfo","enabled":false}]}}`
+		const guestInfoCmd = `{"execute":"guest-info"}`
+		const fsFreezeStatusCmd = `{"execute":"guest-fsfreeze-status"}`
+
+		var agentPoller *AgentPoller
+
+		BeforeEach(func() {
+			agentPoller = &AgentPoller{
+				Connection: mockLibvirt.VirtConnection,
+				domainName: "fake",
+				agentStore: &agentStore,
+			}
+		})
+
+		It("should store the agent information from a thawed guest", func() {
+			mockLibvirt.ConnectionEXPECT().QemuAgentCommand(guestInfoCmd, "fake").Return(guestInfoReply, nil)
+			mockLibvirt.ConnectionEXPECT().QemuAgentCommand(fsFreezeStatusCmd, "fake").Return(`{"return":"thawed"}`, nil)
+
+			executeAgentCommands([]AgentCommand{GetAgent}, agentPoller)
+
+			Expect(agentStore.GetGA().SupportedCommands).To(ConsistOf(
+				v1.GuestAgentCommandInfo{Name: "guest-get-osinfo", Enabled: true},
+			))
+		})
+
+		It("should keep the agent information from before the freeze while the guest is frozen", func() {
+			mockLibvirt.ConnectionEXPECT().QemuAgentCommand(guestInfoCmd, "fake").Return(guestInfoReply, nil)
+			mockLibvirt.ConnectionEXPECT().QemuAgentCommand(fsFreezeStatusCmd, "fake").Return(`{"return":"thawed"}`, nil)
+			executeAgentCommands([]AgentCommand{GetAgent}, agentPoller)
+
+			// A frozen agent reports every command outside its freeze allowlist as disabled.
+			mockLibvirt.ConnectionEXPECT().QemuAgentCommand(guestInfoCmd, "fake").Return(frozenGuestInfoReply, nil)
+			mockLibvirt.ConnectionEXPECT().QemuAgentCommand(fsFreezeStatusCmd, "fake").Return(`{"return":"frozen"}`, nil)
+			executeAgentCommands([]AgentCommand{GetAgent}, agentPoller)
+
+			Expect(agentStore.GetGA().SupportedCommands).To(ConsistOf(
+				v1.GuestAgentCommandInfo{Name: "guest-get-osinfo", Enabled: true},
+			))
+		})
+
+		It("should store the agent information when the freeze status is unknown", func() {
+			mockLibvirt.ConnectionEXPECT().QemuAgentCommand(guestInfoCmd, "fake").Return(guestInfoReply, nil)
+			mockLibvirt.ConnectionEXPECT().QemuAgentCommand(fsFreezeStatusCmd, "fake").Return("", fmt.Errorf("agent is not responding"))
+
+			executeAgentCommands([]AgentCommand{GetAgent}, agentPoller)
+
+			Expect(agentStore.GetGA().Version).To(Equal("4.1"))
+		})
+	})
+
 	Context("with AsyncAgentStore", func() {
 		It("should store and load the data", func() {
 			agentVersion := AgentInfo{Version: "4.1"}
@@ -139,6 +194,25 @@ var _ = Describe("Qemu agent poller", func() {
 
 			agentStore.Store(GetFSFreezeStatus, fakeFSFreezeStatus)
 			Expect(agentStore.AgentUpdated).ToNot(Receive())
+		})
+
+		It("should keep the guest info in an event fired for a key it does not carry", func() {
+			agentStore.Store(GetFSFreezeStatus, fakeFSFreezeStatus)
+			Expect(agentStore.AgentUpdated).To(Receive(Equal(AgentUpdatedEvent{
+				DomainInfo: api.DomainGuestInfo{
+					FSFreezeStatus: &fakeFSFreezeStatus,
+				},
+			})))
+
+			// guest-info has no place in DomainInfo, and its reply changes on every freeze: the
+			// agent disables the commands it cannot run while frozen. The event it fires must
+			// still carry the freeze status, or the receiver takes the empty one for the truth.
+			agentStore.Store(GetAgent, AgentInfo{Version: "4.1"})
+			Expect(agentStore.AgentUpdated).To(Receive(Equal(AgentUpdatedEvent{
+				DomainInfo: api.DomainGuestInfo{
+					FSFreezeStatus: &fakeFSFreezeStatus,
+				},
+			})))
 		})
 
 		It("should fire an event for new sysinfo data", func() {
