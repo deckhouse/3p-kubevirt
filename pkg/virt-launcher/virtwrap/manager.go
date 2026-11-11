@@ -2166,13 +2166,15 @@ func (l *LibvirtDomainManager) FreezeVMI(vmi *v1.VirtualMachineInstance, unfreez
 	return nil
 }
 
+// UnfreezeVMI thaws the guest filesystems. The safety unfreeze is canceled only once the guest is known to
+// be thawed, so a thaw that fails leaves it scheduled.
 func (l *LibvirtDomainManager) UnfreezeVMI(vmi *v1.VirtualMachineInstance) error {
-	l.cancelSafetyUnfreeze()
 	domainName := api.VMINamespaceKeyFunc(vmi)
 	fsfreezeStatus, err := l.getParsedFSStatus(domainName)
 	if err == nil {
 		// prevent initating fs thaw to prevent rerunning the thaw hook
 		if fsfreezeStatus == api.FSThawed {
+			l.cancelSafetyUnfreeze()
 			return nil
 		}
 	}
@@ -2188,6 +2190,7 @@ func (l *LibvirtDomainManager) UnfreezeVMI(vmi *v1.VirtualMachineInstance) error
 		log.Log.Errorf("Failed to unfreeze vmi, %s", err.Error())
 		return err
 	}
+	l.cancelSafetyUnfreeze()
 	return nil
 }
 

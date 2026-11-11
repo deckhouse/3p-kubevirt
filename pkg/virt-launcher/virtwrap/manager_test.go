@@ -675,6 +675,26 @@ var _ = Describe("Manager", func() {
 			// wait for the unfreeze timeout
 			time.Sleep(unfreezeTimeout + 2*time.Second)
 		})
+		It("should keep the unfreeze timeout scheduled when an unfreeze fails", func() {
+			vmi := newVMI(testNamespace, testVmName)
+
+			mockLibvirt.ConnectionEXPECT().QemuAgentCommand(`{"execute":"`+string(agentpoller.GetFSFreezeStatus)+`"}`, testDomainName).Return(expectedThawedOutput, nil)
+			mockLibvirt.ConnectionEXPECT().QemuAgentCommand(`{"execute":"`+string(agentpoller.GetFSFreezeStatus)+`"}`, testDomainName).Return(expectedFrozenOutput, nil).Times(2)
+			mockLibvirt.ConnectionEXPECT().LookupDomainByName(testDomainName).Return(mockLibvirt.VirtDomain, nil).Times(3)
+			mockLibvirt.DomainEXPECT().Free().Times(3)
+			mockLibvirt.DomainEXPECT().FSFreeze(nil, uint32(0)).Times(1)
+			mockLibvirt.DomainEXPECT().FSThaw(nil, uint32(0)).Return(fmt.Errorf("guest agent is not responding"))
+			mockLibvirt.DomainEXPECT().FSThaw(nil, uint32(0)).Return(nil)
+
+			manager, _ := newLibvirtDomainManagerDefault()
+
+			var unfreezeTimeout time.Duration = 3 * time.Second
+			Expect(manager.FreezeVMI(vmi, int32(unfreezeTimeout.Seconds()))).To(Succeed())
+			time.Sleep(time.Second)
+			Expect(manager.UnfreezeVMI(vmi)).NotTo(Succeed())
+			// wait for the unfreeze timeout
+			time.Sleep(unfreezeTimeout + 2*time.Second)
+		})
 		It("should update domain with memory dump info when completed successfully", func() {
 			mockLibvirt.ConnectionEXPECT().LookupDomainByName(testDomainName).DoAndReturn(mockDomainWithFreeExpectation)
 			mockLibvirt.DomainEXPECT().CoreDumpWithFormat(testDumpPath, libvirt.DOMAIN_CORE_DUMP_FORMAT_RAW, libvirt.DUMP_MEMORY_ONLY).Return(nil)
