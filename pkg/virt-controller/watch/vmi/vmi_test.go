@@ -4868,6 +4868,44 @@ var _ = Describe("VirtualMachineInstance watcher", func() {
 			),
 		)
 	})
+
+	DescribeTable("keeps an unsuccessful migration target waiting for synchronization",
+		func(phase virtv1.VirtualMachineInstancePhase, podPhase k8sv1.PodPhase, failed bool) {
+			vmi := newPendingVirtualMachine("testvmi")
+			vmi.Status.Phase = phase
+			vmi.Status.NodeName = "targetnode"
+			vmi.Annotations[virtv1.CreateMigrationTarget] = "true"
+			vmi.Status.MigrationState = &virtv1.VirtualMachineInstanceMigrationState{
+				TargetNode: "targetnode", SourceNode: "sourcenode", Failed: failed, Completed: failed,
+			}
+			pod := newPodForVirtualMachine(vmi, podPhase)
+			pod.Spec.NodeName = "targetnode"
+			addVirtualMachine(vmi)
+			addActivePods(vmi, pod.UID, "targetnode")
+			addPod(pod)
+			sanityExecute()
+			expectVMIBeInPhase(vmi.Namespace, vmi.Name, virtv1.WaitingForSync)
+		},
+		Entry("scheduling with a failed pod", virtv1.Scheduling, k8sv1.PodFailed, false),
+		Entry("scheduling with a succeeded pod", virtv1.Scheduling, k8sv1.PodSucceeded, false),
+		Entry("scheduled with a failed pod", virtv1.Scheduled, k8sv1.PodFailed, false),
+		Entry("scheduled with a succeeded pod", virtv1.Scheduled, k8sv1.PodSucceeded, false),
+		Entry("scheduled with a failed migration and running pod", virtv1.Scheduled, k8sv1.PodRunning, true),
+		Entry("waiting with a failed pod", virtv1.WaitingForSync, k8sv1.PodFailed, false),
+		Entry("waiting with a succeeded pod", virtv1.WaitingForSync, k8sv1.PodSucceeded, false),
+		Entry("waiting with a failed migration and running pod", virtv1.WaitingForSync, k8sv1.PodRunning, true),
+	)
+
+	It("should transition running non-target VMI to Failed when pod disappears", func() {
+		vmi := newPendingVirtualMachine("testvmi")
+		vmi.Status.Phase = virtv1.Running
+		vmi.Status.NodeName = "somenode"
+
+		addVirtualMachine(vmi)
+
+		sanityExecute()
+		expectVMIBeInPhase(vmi.Namespace, vmi.Name, virtv1.Failed)
+	})
 })
 
 func newDv(namespace string, name string, phase cdiv1.DataVolumePhase) *cdiv1.DataVolume {
@@ -4992,7 +5030,7 @@ func newDv(namespace string, name string, phase cdiv1.DataVolumePhase) *cdiv1.Da
 	return dv
 }
 
-func newPvc(namespace string, name string) *k8sv1.PersistentVolumeClaim {
+func newPvc(namespace, name string) *k8sv1.PersistentVolumeClaim {
 	return &k8sv1.PersistentVolumeClaim{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       "PersistentVolumeClaim",
@@ -5004,7 +5042,7 @@ func newPvc(namespace string, name string) *k8sv1.PersistentVolumeClaim {
 	}
 }
 
-func newPvcWithOwner(namespace string, name string, ownerName string, isController *bool) *k8sv1.PersistentVolumeClaim {
+func newPvcWithOwner(namespace, name, ownerName string, isController *bool) *k8sv1.PersistentVolumeClaim {
 	return &k8sv1.PersistentVolumeClaim{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       "PersistentVolumeClaim",

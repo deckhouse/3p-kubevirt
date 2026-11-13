@@ -114,12 +114,39 @@ func PVCForMigrationTarget(pvcStore cache.Store, migration *corev1.VirtualMachin
 }
 
 func RecoverFromBrokenMigration(client kubecli.KubevirtClient, migration *corev1.VirtualMachineInstanceMigration, pvcStore cache.Store, vmi *corev1.VirtualMachineInstance, launcherImage string) error {
+	if migration.IsDecentralizedTarget() {
+		// The source PVC belongs to another cluster and must never be mounted here.
+		// Only a recorded success can hand off the target backend storage.
+		state := migration.Status.MigrationState
+		if state != nil && state.Completed && !state.Failed {
+			if err := MigrationHandoff(client, pvcStore, migration); err != nil {
+				return err
+			}
+			migration.Status.Phase = corev1.MigrationSucceeded
+		} else {
+			if err := MigrationAbort(client, migration); err != nil {
+				return err
+			}
+			migration.Status.Phase = corev1.MigrationFailed
+		}
+		return nil
+	}
 	if migration.Status.MigrationState == nil ||
-		migration.Status.MigrationState.TargetPersistentStatePVCName == migration.Status.MigrationState.SourcePersistentStatePVCName {
+		(!migration.IsDecentralized() &&
+			migration.Status.MigrationState.TargetPersistentStatePVCName == migration.Status.MigrationState.SourcePersistentStatePVCName) {
 		// The migration either didn't actually start, or the backend storage is RWX.
 		// In both cases we consider the migration as failed.
 		migration.Status.Phase = corev1.MigrationFailed
 		return nil
+	}
+
+	source, err := client.CoreV1().PersistentVolumeClaims(migration.Namespace).Get(context.Background(),
+		migration.Status.MigrationState.SourcePersistentStatePVCName, metav1.GetOptions{})
+	if err != nil {
+		return err
+	}
+	if source.Labels[PVCPrefix] != migration.Spec.VMIName {
+		return fmt.Errorf("source PVC %s/%s does not belong to VMI %s", migration.Namespace, source.Name, migration.Spec.VMIName)
 	}
 
 	// An interrupted migration exists. Using a job to check if the source PVC contains /meta/migrated,
@@ -168,7 +195,7 @@ func RecoverFromBrokenMigration(client kubecli.KubevirtClient, migration *corev1
 					_ = client.BatchV1().Jobs(job.Namespace).Delete(context.Background(), job.Name, metav1.DeleteOptions{
 						PropagationPolicy: pointer.P(metav1.DeletePropagationBackground),
 					})
-					return fmt.Errorf(c.Message)
+					return fmt.Errorf("%s", c.Message)
 				}
 			}
 		default:
@@ -294,6 +321,10 @@ func IsBackendStorageNeededForVM(vm *corev1.VirtualMachine) bool {
 // MigrationHandoff runs at the end of a successful live migration.
 // It labels the target backend-storage PVC as current for the VM and deletes the source backend-storage PVC.
 func MigrationHandoff(client kubecli.KubevirtClient, pvcStore cache.Store, migration *corev1.VirtualMachineInstanceMigration) error {
+	if migration != nil && migration.IsDecentralizedSource() {
+		// The target is remote. The source backend storage remains with the source VM.
+		return nil
+	}
 	if migration == nil || migration.Status.MigrationState == nil ||
 		(migration.Status.MigrationState.SourcePersistentStatePVCName == "" && !migration.IsDecentralized()) ||
 		migration.Status.MigrationState.TargetPersistentStatePVCName == "" {
@@ -303,14 +334,14 @@ func MigrationHandoff(client kubecli.KubevirtClient, pvcStore cache.Store, migra
 	sourcePVC := migration.Status.MigrationState.SourcePersistentStatePVCName
 	targetPVC := migration.Status.MigrationState.TargetPersistentStatePVCName
 
-	if sourcePVC == targetPVC {
+	if !migration.IsDecentralized() && sourcePVC == targetPVC {
 		// RWX backend-storage, nothing to do
 		return nil
 	}
 
 	// Let's label the target first, then remove the source.
 	// The target might already be labelled if this function was already called for this migration
-	target := pvcForMigrationTargetFromStore(pvcStore, migration)
+	target := PVCForMigrationTarget(pvcStore, migration)
 	if target == nil {
 		return fmt.Errorf("target PVC not found for migration %s/%s", migration.Namespace, migration.Name)
 	}
@@ -325,12 +356,19 @@ func MigrationHandoff(client kubecli.KubevirtClient, pvcStore cache.Store, migra
 	}
 
 	if _, migrationLabelExists := target.Labels[corev1.MigrationNameLabel]; migrationLabelExists {
-		labelPatchPayload, err := patch.New(
-			patch.WithReplace("/metadata/labels/"+PVCPrefix, migration.Spec.VMIName),
+		labelPatch := patch.New()
+		if target.UID != "" {
+			labelPatch.AddOption(patch.WithTest("/metadata/uid", target.UID))
+		}
+		if target.ResourceVersion != "" {
+			labelPatch.AddOption(patch.WithTest("/metadata/resourceVersion", target.ResourceVersion))
+		}
+		labelPatch.AddOption(
+			patch.WithAdd("/metadata/labels/"+PVCPrefix, migration.Spec.VMIName),
 			patch.WithTest("/metadata/labels/"+patch.EscapeJSONPointer(corev1.MigrationNameLabel), migration.Name),
 			patch.WithRemove("/metadata/labels/"+patch.EscapeJSONPointer(corev1.MigrationNameLabel)),
-		).GeneratePayload()
-
+		)
+		labelPatchPayload, err := labelPatch.GeneratePayload()
 		if err != nil {
 			return fmt.Errorf("failed to generate PVC patch: %v", err)
 		}
@@ -338,13 +376,12 @@ func MigrationHandoff(client kubecli.KubevirtClient, pvcStore cache.Store, migra
 		if err != nil {
 			return fmt.Errorf("failed to patch PVC: %v", err)
 		}
+	} else if existing != migration.Spec.VMIName {
+		return fmt.Errorf("target PVC %s/%s does not belong to migration %s", migration.Namespace, target.Name, migration.Name)
 	}
 
-	if sourcePVC != "" {
-		err := client.CoreV1().PersistentVolumeClaims(migration.Namespace).Delete(context.Background(), sourcePVC, metav1.DeleteOptions{})
-		if err != nil && !k8serrors.IsNotFound(err) {
-			return fmt.Errorf("failed to delete PVC: %v", err)
-		}
+	if sourcePVC != "" && !migration.IsDecentralizedTarget() {
+		return deleteMigrationPVC(client, migration, sourcePVC, PVCPrefix, migration.Spec.VMIName)
 	}
 
 	return nil
@@ -361,16 +398,45 @@ func MigrationAbort(client kubecli.KubevirtClient, migration *corev1.VirtualMach
 	sourcePVC := migration.Status.MigrationState.SourcePersistentStatePVCName
 	targetPVC := migration.Status.MigrationState.TargetPersistentStatePVCName
 
-	if sourcePVC == targetPVC {
+	if !migration.IsDecentralized() && sourcePVC == targetPVC {
 		// RWX backend-storage, nothing to delete
 		return nil
 	}
 
-	err := client.CoreV1().PersistentVolumeClaims(migration.Namespace).Delete(context.Background(), targetPVC, metav1.DeleteOptions{})
-	if err != nil && !k8serrors.IsNotFound(err) {
-		return fmt.Errorf("failed to delete PVC: %v", err)
+	if migration.IsDecentralizedSource() {
+		// The target PVC is in the peer cluster.
+		return nil
 	}
+	return deleteMigrationPVC(client, migration, targetPVC, corev1.MigrationNameLabel, migration.Name)
+}
 
+// deleteMigrationPVC checks the live ownership labels before deleting a local PVC.
+// Preconditions protect against replacement or reassignment after the check.
+func deleteMigrationPVC(
+	client kubecli.KubevirtClient, migration *corev1.VirtualMachineInstanceMigration, name, ownerLabel, owner string,
+) error {
+	pvcs := client.CoreV1().PersistentVolumeClaims(migration.Namespace)
+	pvc, err := pvcs.Get(context.Background(), name, metav1.GetOptions{})
+	if k8serrors.IsNotFound(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	owned := pvc.Labels[ownerLabel] == owner
+	if ownerLabel == corev1.MigrationNameLabel && pvc.Labels[ownerLabel] == "" && pvc.Labels[PVCPrefix] == migration.Spec.VMIName {
+		// Handoff may already have promoted the target before the migration failed.
+		owned = true
+	}
+	if !owned || (pvc.Labels[PVCPrefix] != "" && pvc.Labels[PVCPrefix] != migration.Spec.VMIName) {
+		return fmt.Errorf("PVC %s/%s does not belong to migration %s", migration.Namespace, name, migration.Name)
+	}
+	err = pvcs.Delete(context.Background(), name, metav1.DeleteOptions{Preconditions: &metav1.Preconditions{
+		UID: &pvc.UID, ResourceVersion: &pvc.ResourceVersion,
+	}})
+	if err != nil && !k8serrors.IsNotFound(err) {
+		return fmt.Errorf("failed to delete PVC: %w", err)
+	}
 	return nil
 }
 

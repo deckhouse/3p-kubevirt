@@ -27,6 +27,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"libvirt.org/go/libvirtxml"
@@ -47,8 +48,6 @@ import (
 
 	hotplugdisk "kubevirt.io/kubevirt/pkg/hotplug-disk"
 	checksum_controller "kubevirt.io/kubevirt/pkg/virt-handler/checksum-controller"
-
-	"syscall"
 
 	"kubevirt.io/kubevirt/pkg/controller"
 	cmdv1 "kubevirt.io/kubevirt/pkg/handler-launcher-com/cmd/v1"
@@ -326,7 +325,17 @@ func (c *MigrationTargetController) updateStatus(vmi *v1.VirtualMachineInstance,
 	if domainExists &&
 		domain.Spec.Metadata.KubeVirt.Migration != nil &&
 		domain.Spec.Metadata.KubeVirt.Migration.EndTimestamp != nil {
-		c.ackMigrationCompletion(vmi, domain)
+		if domainIsActiveOnTarget(domain) {
+			c.ackMigrationCompletion(vmi, domain)
+		} else {
+			// An aborted domain must not transfer VMI ownership to this node.
+			vmi.Status.MigrationState.EndTimestamp = domain.Spec.Metadata.KubeVirt.Migration.EndTimestamp
+			if vmi.Status.MigrationState.StartTimestamp == nil && domain.Spec.Metadata.KubeVirt.Migration.StartTimestamp != nil {
+				vmi.Status.MigrationState.StartTimestamp = domain.Spec.Metadata.KubeVirt.Migration.StartTimestamp
+			}
+			vmi.Status.MigrationState.Failed = true
+			vmi.Status.MigrationState.Completed = true
+		}
 	}
 
 	if migrations.IsMigrating(vmi) {
@@ -528,7 +537,11 @@ func (c *MigrationTargetController) finalCleanup(vmi *v1.VirtualMachineInstance,
 
 	// Effectively removes the VMI from our VMI informer
 	delete(vmi.Labels, v1.MigrationTargetNodeNameLabel)
-	delete(vmi.Annotations, v1.CreateMigrationTarget)
+	if !vmi.Status.MigrationState.Failed {
+		delete(vmi.Annotations, v1.CreateMigrationTarget)
+		// The synchronization controller clears SourceState/TargetState after sending
+		// the final status. Clearing them here can lose the final update to the source.
+	}
 	return c.updateVMI(vmi, oldStatus, oldLabels)
 }
 
@@ -549,6 +562,21 @@ func (c *MigrationTargetController) sync(vmi *v1.VirtualMachineInstance, domain 
 		log.Log.Object(vmi).Infof("VMI is in phase: %v | Domain does not exist", vmi.Status.Phase)
 	}
 
+	// Persist a stopped target's outcome before attempting launcher commands. Its
+	// command socket can already be gone; the next reconcile performs final cleanup.
+	if !domainIsActiveOnTarget(domain) && targetMigrationEnded(vmi, domain) {
+		state := vmi.Status.MigrationState
+		if state.EndTimestamp == nil && domain != nil && domain.Spec.Metadata.KubeVirt.Migration != nil {
+			metadata := domain.Spec.Metadata.KubeVirt.Migration
+			state.EndTimestamp = metadata.EndTimestamp
+			if state.StartTimestamp == nil {
+				state.StartTimestamp = metadata.StartTimestamp
+			}
+		}
+		state.Failed = true
+		state.Completed = true
+		return c.updateVMI(vmi, &oldStatus, oldLabels)
+	}
 	syncErr := c.processVMI(vmi)
 	if syncErr != nil {
 		c.recorder.Event(vmi, k8sv1.EventTypeWarning, v1.SyncFailed.String(), syncErr.Error())
@@ -627,7 +655,7 @@ func (c *MigrationTargetController) execute(key string) error {
 		domain.Status.Status != api.Crashed &&
 		domain.Status.Status != ""
 
-	if domainExists && !domainAlive {
+	if domainExists && !domainAlive && !targetMigrationEnded(vmi, domain) {
 		log.Log.V(4).Object(vmi).Info("domain is not alive")
 		return nil
 	}
@@ -643,6 +671,30 @@ func (c *MigrationTargetController) execute(key string) error {
 	}
 
 	return c.sync(vmi, domain)
+}
+
+// targetMigrationEnded also recognizes terminal launcher metadata before its end
+// timestamp has reached the VMI status.
+func targetMigrationEnded(vmi *v1.VirtualMachineInstance, domain *api.Domain) bool {
+	state := vmi.Status.MigrationState
+	if state == nil {
+		return false
+	}
+	if state.EndTimestamp != nil {
+		return true
+	}
+	if domain == nil || domain.Spec.Metadata.KubeVirt.Migration == nil {
+		return false
+	}
+	metadata := domain.Spec.Metadata.KubeVirt.Migration
+	if metadata.EndTimestamp == nil || metadata.UID == "" {
+		return false
+	}
+	// A VMI can return to a node that still caches its previous migrated domain.
+	// Only the current migration (or its remote source) may finalize this receive.
+	return metadata.UID == state.MigrationUID ||
+		(state.SourceState != nil && metadata.UID == state.SourceState.MigrationUID) ||
+		(state.TargetState != nil && metadata.UID == state.TargetState.MigrationUID)
 }
 
 func migrationNeedsFinalization(migrationState *v1.VirtualMachineInstanceMigrationState) bool {

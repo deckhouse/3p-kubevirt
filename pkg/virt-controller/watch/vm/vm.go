@@ -1050,7 +1050,10 @@ func (c *Controller) syncRunStrategy(vm *virtv1.VirtualMachine, vmi *virtv1.Virt
 				log.Log.Object(vm).Infof("processing forced restart request for VMI with phase %s and VM runStrategy: %s", vmi.Status.Phase, runStrategy)
 			}
 			if forceRestart || vmi.IsFinal() {
-				if vmi.IsDecentralizedMigration() {
+				migrationState := vmi.Status.MigrationState
+				// Only the successful source has moved away; failed sources and receivers still restart normally.
+				if vmi.IsDecentralizedMigration() && !migrationState.Failed && migrationState.MigrationUID != "" &&
+					migrationState.MigrationUID == migrationState.SourceState.MigrationUID {
 					if vmi.IsMigrationCompleted() {
 						log.Log.Object(vm).Infof("decentralized migration completed, setting runStrategy to halted")
 						// decentralized migration completed, mark the VM as halted. In this case the VM is now in a different

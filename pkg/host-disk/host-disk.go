@@ -53,7 +53,7 @@ const (
 // SourceVolumeSizesAnnotation gives a VMI that receives a migration from another cluster the sizes of the
 // source images by volume name, as JSON: the VMI here has not run, so its volume status has no sizes, and
 // the target image must have exactly the size of the source one.
-const SourceVolumeSizesAnnotation = "virtualization.deckhouse.io/source-volume-sizes"
+const SourceVolumeSizesAnnotation = "internal.virtualization.deckhouse.io/source-volume-sizes"
 
 // sourceVolumeSize is the size of the source image of the volume from SourceVolumeSizesAnnotation, 0 if
 // the VMI does not carry it.

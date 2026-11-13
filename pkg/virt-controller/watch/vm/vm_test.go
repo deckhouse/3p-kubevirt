@@ -6420,6 +6420,57 @@ var _ = Describe("VirtualMachine", func() {
 		})
 
 		Context("decentralized migration", func() {
+			DescribeTable("restarts only VMIs that did not successfully move away", func(
+				sourceMigrationUID string, completed, failed, restart bool,
+			) {
+				vm, _ := watchtesting.DefaultVirtualMachine(true)
+				vm, err := virtFakeClient.KubevirtV1().VirtualMachines(vm.Namespace).Create(context.TODO(), vm, metav1.CreateOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				addVirtualMachine(vm)
+				sanityExecute(vm)
+				clearExpectations(vm)
+				vmi, err := virtFakeClient.KubevirtV1().VirtualMachineInstances(vm.Namespace).Get(context.TODO(), vm.Name, metav1.GetOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				vmi.Status.MigrationState = &v1.VirtualMachineInstanceMigrationState{
+					MigrationUID: "local", Completed: completed, Failed: failed,
+					SourceState: &v1.VirtualMachineInstanceMigrationSourceState{
+						VirtualMachineInstanceCommonMigrationState: v1.VirtualMachineInstanceCommonMigrationState{
+							MigrationUID: types.UID(sourceMigrationUID), SyncAddress: pointer.P("source:9185"),
+						},
+					},
+					TargetState: &v1.VirtualMachineInstanceMigrationTargetState{
+						VirtualMachineInstanceCommonMigrationState: v1.VirtualMachineInstanceCommonMigrationState{
+							SyncAddress: pointer.P("target:9185"),
+						},
+					},
+				}
+				vmi.Status.Phase = v1.Failed
+				vmi, err = virtFakeClient.KubevirtV1().VirtualMachineInstances(vm.Namespace).Update(context.TODO(), vmi, metav1.UpdateOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(controller.vmiIndexer.Add(vmi)).To(Succeed())
+				key, err := virtcontroller.KeyFunc(vm)
+				Expect(err).NotTo(HaveOccurred())
+				controller.Queue.Add(key)
+				sanityExecute(vm)
+				vm, err = virtFakeClient.KubevirtV1().VirtualMachines(vm.Namespace).Get(context.TODO(), vm.Name, metav1.GetOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(vm.Spec.RunStrategy).NotTo(Equal(pointer.P(v1.RunStrategyHalted)))
+				_, err = virtFakeClient.KubevirtV1().VirtualMachineInstances(vm.Namespace).Get(context.TODO(), vmi.Name, metav1.GetOptions{})
+				if restart {
+					Expect(k8serrors.IsNotFound(err)).To(BeTrue(), "the old VMI is removed so Always can restart it")
+				} else {
+					Expect(err).NotTo(HaveOccurred(), "a source still waiting for completion must not restart")
+				}
+			},
+				Entry("source after a failed move", "local", true, true, true),
+				Entry("failed source before completion was synchronized", "local", false, true, true),
+				Entry("receiver after a successful move with retained sync state", "remote", true, false, true),
+				Entry("receiver after a failed move", "remote", true, true, true),
+				Entry("receiver before completion was synchronized", "remote", false, false, true),
+				Entry("VMI without a recorded source migration identity", "", true, false, true),
+				Entry("source waiting for completion", "local", false, false, false),
+			)
+
 			It("should stop the VM if the VMI is reporting that the migration is succeeded and the migration reports it is succeeded", func() {
 				vm, _ := watchtesting.DefaultVirtualMachine(true)
 				key, err := virtcontroller.KeyFunc(vm)

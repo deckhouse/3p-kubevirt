@@ -348,7 +348,12 @@ var _ = Describe("VirtualMachineInstance migration target", func() {
 					SourceNode:        host,
 					TargetNodeAddress: "10.0.0.2",
 					SourceState:       &v1.VirtualMachineInstanceMigrationSourceState{VirtualMachineInstanceCommonMigrationState: v1.VirtualMachineInstanceCommonMigrationState{SyncAddress: pointer.P("10.0.0.1:9185")}},
-					TargetState:       &v1.VirtualMachineInstanceMigrationTargetState{VirtualMachineInstanceCommonMigrationState: v1.VirtualMachineInstanceCommonMigrationState{SyncAddress: pointer.P("10.0.0.2:9185")}},
+					TargetState: &v1.VirtualMachineInstanceMigrationTargetState{
+						VirtualMachineInstanceCommonMigrationState: v1.VirtualMachineInstanceCommonMigrationState{
+							SyncAddress: pointer.P("10.0.0.2:9185"),
+						},
+						NodeAddress: pointer.P("10.0.0.2"),
+					},
 				}),
 			)))
 		}
@@ -358,6 +363,11 @@ var _ = Describe("VirtualMachineInstance migration target", func() {
 		newDomain := func(end *metav1.Time) *api.Domain {
 			d := api.NewMinimalDomainWithUUID("test", "1234")
 			d.Spec.Metadata.KubeVirt.Migration = &api.MigrationMetadata{UID: "1234", EndTimestamp: end}
+			if end != nil {
+				d.Status.Status = api.Shutoff
+				d.Status.Reason = api.ReasonMigrated
+			}
+
 			return d
 		}
 
@@ -636,7 +646,7 @@ var _ = Describe("VirtualMachineInstance migration target", func() {
 			)
 
 			DescribeTable("should not configure multiple threads", func(allowPostcopy bool, vmiLimits k8sv1.ResourceList) {
-				var migrationConfiguration = &v1.MigrationConfiguration{
+				migrationConfiguration := &v1.MigrationConfiguration{
 					BandwidthPerMigration:   pointer.P(resource.MustParse("0Mi")),
 					ProgressTimeout:         pointer.P(int64(150)),
 					AllowAutoConverge:       pointer.P(false),
@@ -798,6 +808,7 @@ var _ = Describe("VirtualMachineInstance migration target", func() {
 		Entry("permitted", true, true, 1),
 		Entry("handed off by a virt-controller that requires no permit", false, false, 1),
 	)
+
 })
 
 type stubSourcePasstRepairHandler struct {

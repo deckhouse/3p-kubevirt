@@ -725,6 +725,30 @@ var _ = Describe("Migration watcher", func() {
 			Expect(migration.Status.MigrationState).To(BeNil())
 		})
 
+		It("records source backend storage after a completed decentralized receive", func() {
+			vmi := newBackendStorageVMI()
+			vmi.Status.MigrationState = &virtv1.VirtualMachineInstanceMigrationState{
+				Completed: true,
+				SourceState: &virtv1.VirtualMachineInstanceMigrationSourceState{
+					VirtualMachineInstanceCommonMigrationState: virtv1.VirtualMachineInstanceCommonMigrationState{
+						SyncAddress: pointer.P("source:9185"),
+					},
+				},
+				TargetState: &virtv1.VirtualMachineInstanceMigrationTargetState{
+					VirtualMachineInstanceCommonMigrationState: virtv1.VirtualMachineInstanceCommonMigrationState{
+						SyncAddress: pointer.P("target:9185"),
+					},
+				},
+			}
+			Expect(vmi.IsDecentralizedMigration()).To(BeTrue())
+			Expect(vmi.IsMigrationSource()).To(BeFalse())
+			migration := newMigration("next-migration", vmi.Name, virtv1.MigrationPending)
+			addPVC(newStatePVC(targetStatePVC, map[string]string{virtv1.MigrationNameLabel: migration.Name}))
+			Expect(controller.handleBackendStorage(migration, vmi)).To(Succeed())
+			Expect(migration.Status.MigrationState.SourcePersistentStatePVCName).To(Equal(sourceStatePVC))
+			Expect(migration.Status.MigrationState.TargetPersistentStatePVCName).To(Equal(targetStatePVC))
+		})
+
 		It("should leave the source PVC name empty on a decentralized target", func() {
 			// No VMI status yet: the decision must come from the migration spec, since the
 			// status arrives asynchronously from the synchronization controller.
@@ -742,6 +766,32 @@ var _ = Describe("Migration watcher", func() {
 			Expect(migration.Status.MigrationState.TargetPersistentStatePVCName).To(Equal(targetStatePVC))
 		})
 	})
+
+	DescribeTable("applies quota exclusion only to a target in the source cluster", func(receive bool) {
+		vmi := newVirtualMachine("quota-vmi", virtv1.Running)
+		vmi.Status.SelinuxContext = "system_u:system_r:container_t:s0:c1,c2"
+		migration := newMigration("quota-migration", vmi.Name, virtv1.MigrationPending)
+		if receive {
+			migration.Spec.Receive = &virtv1.VirtualMachineInstanceMigrationTarget{MigrationID: "peer-receive"}
+			vmi.Status.MigrationState = &virtv1.VirtualMachineInstanceMigrationState{
+				SourceState: &virtv1.VirtualMachineInstanceMigrationSourceState{
+					VirtualMachineInstanceCommonMigrationState: virtv1.VirtualMachineInstanceCommonMigrationState{
+						SelinuxContext: vmi.Status.SelinuxContext,
+					},
+				},
+			}
+		}
+		Expect(controller.createTargetPod(migration, vmi, newSourcePodForVirtualMachine(vmi))).To(Succeed())
+		pods, err := kubeClient.CoreV1().Pods(vmi.Namespace).List(context.Background(), metav1.ListOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(pods.Items).To(HaveLen(1))
+		testutils.ExpectEvent(recorder, virtcontroller.SuccessfulCreatePodReason)
+		if receive {
+			Expect(pods.Items[0].Labels).NotTo(HaveKey(virtv1.ResourceQuotaExclusionLabel))
+		} else {
+			Expect(pods.Items[0].Labels).To(HaveKeyWithValue(virtv1.ResourceQuotaExclusionLabel, "true"))
+		}
+	}, Entry("local migration", false), Entry("cross-cluster receive", true))
 
 	Context("Migration object in pending state", func() {
 		It("should not change VMI RuntimeUser during migration", func() {
@@ -2734,7 +2784,7 @@ var _ = Describe("Migration watcher", func() {
 	})
 
 	Context("Migration target SELinux level", func() {
-		expectTargetPodWithSELinuxLevel := func(namespace string, uid types.UID, migrationUid types.UID, level string) {
+		expectTargetPodWithSELinuxLevel := func(namespace string, uid, migrationUid types.UID, level string) {
 			pods, err := kubeClient.CoreV1().Pods(namespace).List(context.Background(), metav1.ListOptions{
 				LabelSelector: fmt.Sprintf("%s=%s,%s=%s", virtv1.MigrationJobLabel, string(migrationUid), virtv1.CreatedByLabel, string(uid)),
 			})
@@ -3161,6 +3211,75 @@ var _ = Describe("Migration watcher", func() {
 			Expect(message).To(ContainSubstring(nodeB))
 		})
 	})
+	DescribeTable("preserves successful completion when the target pod later fails", func(decentralized bool) {
+		vmi := newVirtualMachine("testvmi", v1.Running)
+		addNodeNameToVMI(vmi, "node02")
+		migration := newMigration("testmigration", vmi.Name, v1.MigrationFailed)
+		past := metav1.NewTime(time.Now().Add(-time.Minute).Truncate(time.Second))
+		vmi.Status.MigrationState = &v1.VirtualMachineInstanceMigrationState{
+			MigrationUID: migration.UID, SourceNode: "node02", TargetNode: "node01",
+			StartTimestamp: &past, EndTimestamp: &past, Completed: true,
+		}
+		if decentralized {
+			migration.Spec.Receive = &v1.VirtualMachineInstanceMigrationTarget{MigrationID: "remote-migration"}
+			vmi.Status.MigrationState.MigrationConfiguration = &v1.MigrationConfiguration{}
+			vmi.Status.MigrationState.SourceState = &v1.VirtualMachineInstanceMigrationSourceState{
+				VirtualMachineInstanceCommonMigrationState: v1.VirtualMachineInstanceCommonMigrationState{MigrationUID: "remote-migration"},
+			}
+			vmi.Status.MigrationState.TargetState = &v1.VirtualMachineInstanceMigrationTargetState{
+				VirtualMachineInstanceCommonMigrationState: v1.VirtualMachineInstanceCommonMigrationState{MigrationUID: migration.UID},
+			}
+		}
+		addMigration(migration)
+		addVirtualMachineInstance(vmi)
+		addPod(newSourcePodForVirtualMachine(vmi))
+		targetPod := newTargetPodForVirtualMachine(vmi, migration, k8sv1.PodFailed)
+		targetPod.Spec.NodeName = "node01"
+		addPod(targetPod)
+		sanityExecute()
+		expectVirtualMachineInstanceMigrationState(vmi.Namespace, vmi.Name, PointTo(MatchFields(IgnoreExtras, Fields{
+			"StartTimestamp": Equal(&past), "EndTimestamp": Equal(&past),
+			"Completed": BeTrue(), "Failed": BeFalse(), "FailureReason": BeEmpty(),
+		})))
+	}, Entry("within one cluster", false), Entry("on a decentralized target", true))
+
+	DescribeTable("finalizes failed target migration without replacing its timestamps", func(alreadyEnded bool) {
+		vmi := newVirtualMachine("testvmi", v1.Running)
+		addNodeNameToVMI(vmi, "node02")
+		migration := newMigration("testmigration", vmi.Name, v1.MigrationFailed)
+
+		pastTime := metav1.NewTime(time.Now().Add(-30 * time.Second).Truncate(time.Second))
+		vmi.Status.MigrationState = &v1.VirtualMachineInstanceMigrationState{
+			MigrationUID:   migration.UID,
+			TargetNode:     "node01",
+			SourceNode:     "node02",
+			StartTimestamp: &pastTime,
+		}
+		expectedEnd := Not(BeNil())
+		if alreadyEnded {
+			vmi.Status.MigrationState.EndTimestamp = &pastTime
+			expectedEnd = Equal(&pastTime)
+		}
+		addMigration(migration)
+		addVirtualMachineInstance(vmi)
+		addPod(newSourcePodForVirtualMachine(vmi))
+		targetPod := newTargetPodForVirtualMachine(vmi, migration, k8sv1.PodFailed)
+		targetPod.Spec.NodeName = "node01"
+		addPod(targetPod)
+
+		sanityExecute()
+
+		expectVirtualMachineInstanceMigrationState(vmi.Namespace, vmi.Name, PointTo(MatchFields(IgnoreExtras, Fields{
+			"StartTimestamp": Equal(&pastTime),
+			"EndTimestamp":   expectedEnd,
+			"Completed":      BeTrue(),
+			"Failed":         BeTrue(),
+		})))
+		testutils.ExpectEvent(recorder, virtcontroller.FailedMigrationReason)
+	},
+		Entry("before domain completion", false),
+		Entry("after domain completion raced with failure", true),
+	)
 })
 
 func newPDB(name string, vmi *virtv1.VirtualMachineInstance, pods int32) *policyv1.PodDisruptionBudget {
@@ -3185,8 +3304,7 @@ func newPDB(name string, vmi *virtv1.VirtualMachineInstance, pods int32) *policy
 	}
 }
 
-func newMigration(name string, vmiName string, phase virtv1.VirtualMachineInstanceMigrationPhase) *virtv1.VirtualMachineInstanceMigration {
-
+func newMigration(name, vmiName string, phase virtv1.VirtualMachineInstanceMigrationPhase) *virtv1.VirtualMachineInstanceMigration {
 	migration := &virtv1.VirtualMachineInstanceMigration{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
@@ -3492,6 +3610,14 @@ var _ = Describe("initializeMigrateSourceState", func() {
 		Expect(vmi.Status.MigrationState.SourceState.MigrationUID).To(Equal(types.UID("next")))
 		Expect(vmi.Status.MigrationState.TargetState.MigrationUID).To(BeEmpty())
 		Expect(*vmi.Status.MigrationState.TargetState.SyncAddress).To(Equal("10.0.0.2:9185"))
+	})
+
+	It("uses the annotated address before the original ConnectURL", func() {
+		migration := newMigrationTo("source-migration")
+		migration.Annotations = map[string]string{virtv1.MigrationPeerSyncAddressAnnotation: "new-address:9185"}
+		vmi := &virtv1.VirtualMachineInstance{}
+		controller.initializeMigrateSourceState(migration, vmi)
+		Expect(vmi.Status.MigrationState.TargetState.SyncAddress).To(PointTo(Equal("new-address:9185")))
 	})
 
 	It("keeps the failure of the migration itself", func() {

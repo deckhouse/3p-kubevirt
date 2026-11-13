@@ -762,12 +762,22 @@ func (v *VirtualMachineInstance) IsTargetPreparing(migration *VirtualMachineInst
 	}
 }
 
+// IsDecentralizedMigration reports whether this VMI is participating in a
+// decentralized live migration. SyncAddress on SourceState/TargetState is only
+// populated for decentralized migrations; local migrations never set it.
+//
+// Historically this used SyncAddress XOR (exactly one side set), which only
+// matches the pre-sync handshake. Once both sides have published a SyncAddress,
+// XOR becomes false and callers incorrectly treat a still-decentralized VMI as
+// local (for example skipping the source Succeeded transition after handoff).
+// Presence of either SyncAddress is the durable signal for the full lifetime
+// until SourceState/TargetState are cleared on the target after success.
 func (v *VirtualMachineInstance) IsDecentralizedMigration() bool {
 	return v.Status.MigrationState != nil &&
 		v.Status.MigrationState.TargetState != nil &&
 		v.Status.MigrationState.SourceState != nil &&
-		((v.Status.MigrationState.SourceState.SyncAddress == nil && v.Status.MigrationState.TargetState.SyncAddress != nil) ||
-			(v.Status.MigrationState.SourceState.SyncAddress != nil && v.Status.MigrationState.TargetState.SyncAddress == nil))
+		(v.Status.MigrationState.SourceState.SyncAddress != nil ||
+			v.Status.MigrationState.TargetState.SyncAddress != nil)
 }
 
 type VirtualMachineInstanceConditionType string
@@ -1456,9 +1466,11 @@ const (
 
 	// This annotation is used to mark a VMI as a migration target, and to start a receiver pod.
 	CreateMigrationTarget = "kubevirt.io/create-migration-target"
-	// MigrationPeerSyncPinAnnotation on a decentralized VirtualMachineInstanceMigration carries the pin of the
-	// synchronization controller key of the peer cluster, handed over out of band by the management layer.
-	MigrationPeerSyncPinAnnotation = "virtualization.deckhouse.io/peer-sync-pin"
+	// MigrationPeerSyncPinAnnotation pins the peer synchronization key for this migration.
+	MigrationPeerSyncPinAnnotation = "kubevirt.io/migration-peer-sync-pin"
+	// MigrationPeerSyncAddressAnnotation overrides the synchronization address exchanged in VMI status.
+	MigrationPeerSyncAddressAnnotation = "kubevirt.io/migration-peer-sync-address"
+
 	// This annotation is to keep virt launcher container alive when an VMI encounters a failure for debugging purpose
 	KeepLauncherAfterFailureAnnotation string = "kubevirt.io/keep-launcher-alive-after-failure"
 

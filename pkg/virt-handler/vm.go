@@ -2863,6 +2863,9 @@ func isACPIEnabled(vmi *v1.VirtualMachineInstance, domain *api.Domain) bool {
 func (c *VirtualMachineController) calculateVmPhaseForStatusReason(domain *api.Domain, vmi *v1.VirtualMachineInstance) (v1.VirtualMachineInstancePhase, error) {
 
 	if domain == nil {
+		if vmi.IsMigrationTarget() && vmi.Status.MigrationState != nil && vmi.Status.MigrationState.Failed {
+			return vmi.Status.Phase, nil
+		}
 		switch {
 		case vmi.IsScheduled():
 			isUnresponsive, isInitialized, err := c.launcherClients.IsLauncherClientUnresponsive(vmi)
@@ -2874,6 +2877,9 @@ func (c *VirtualMachineController) calculateVmPhaseForStatusReason(domain *api.D
 				c.queue.AddAfter(controller.VirtualMachineInstanceKey(vmi), time.Second*1)
 				return vmi.Status.Phase, err
 			} else if isUnresponsive {
+				if vmi.IsMigrationTarget() {
+					return v1.WaitingForSync, nil
+				}
 				// virt-launcher is gone and VirtualMachineInstance never transitioned
 				// from scheduled to Running.
 				return v1.Failed, nil
@@ -2882,6 +2888,9 @@ func (c *VirtualMachineController) calculateVmPhaseForStatusReason(domain *api.D
 		case !vmi.IsRunning() && !vmi.IsFinal():
 			return v1.Scheduled, nil
 		case !vmi.IsFinal():
+			if vmi.IsMigrationTarget() {
+				return v1.WaitingForSync, nil
+			}
 			// That is unexpected. We should not be able to delete a VirtualMachineInstance before we stop it.
 			// However, if someone directly interacts with libvirt it is possible
 			return v1.Failed, nil
@@ -2978,7 +2987,7 @@ func (c *VirtualMachineController) isHostModelMigratable(vmi *v1.VirtualMachineI
 	if cpu := vmi.Spec.Domain.CPU; cpu != nil && cpu.Model == v1.CPUModeHostModel {
 		if c.hostCpuModel == "" {
 			err := fmt.Errorf("the node \"%s\" does not allow migration with host-model", vmi.Status.NodeName)
-			log.Log.Object(vmi).Errorf(err.Error())
+			log.Log.Object(vmi).Error(err.Error())
 			return err
 		}
 	}

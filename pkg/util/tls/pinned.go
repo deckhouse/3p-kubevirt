@@ -11,7 +11,6 @@ import (
 	"crypto/x509/pkix"
 	"encoding/base64"
 	"errors"
-	"fmt"
 	"math/big"
 	"time"
 )
@@ -75,10 +74,10 @@ func Pin(cert *x509.Certificate) string {
 // because the peer publishes its pin after the listener is up.
 func (id *Identity) ServerConfig(peerPin func() string) *tls.Config {
 	return &tls.Config{
-		Certificates:          []tls.Certificate{id.cert},
-		ClientAuth:            tls.RequireAnyClientCert,
-		MinVersion:            tls.VersionTLS12,
-		VerifyPeerCertificate: verifyPin(peerPin),
+		Certificates:     []tls.Certificate{id.cert},
+		ClientAuth:       tls.RequireAnyClientCert,
+		MinVersion:       tls.VersionTLS12,
+		VerifyConnection: verifyPin(peerPin),
 	}
 }
 
@@ -88,27 +87,23 @@ func (id *Identity) ClientConfig(peerPin func() string, serverName string) *tls.
 	return &tls.Config{
 		Certificates: []tls.Certificate{id.cert},
 		ServerName:   serverName,
-		// The pin check in VerifyPeerCertificate is the verification, no CA is involved.
-		InsecureSkipVerify:    true,
-		MinVersion:            tls.VersionTLS12,
-		VerifyPeerCertificate: verifyPin(peerPin),
+		// VerifyConnection checks the pin on full and resumed handshakes; no CA is involved.
+		InsecureSkipVerify: true,
+		MinVersion:         tls.VersionTLS12,
+		VerifyConnection:   verifyPin(peerPin),
 	}
 }
 
-func verifyPin(peerPin func() string) func([][]byte, [][]*x509.Certificate) error {
-	return func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
-		if len(rawCerts) == 0 {
+func verifyPin(peerPin func() string) func(tls.ConnectionState) error {
+	return func(state tls.ConnectionState) error {
+		if len(state.PeerCertificates) == 0 {
 			return errors.New("the peer presented no certificate")
-		}
-		cert, err := x509.ParseCertificate(rawCerts[0])
-		if err != nil {
-			return fmt.Errorf("parse the peer certificate: %w", err)
 		}
 		expected := peerPin()
 		if expected == "" {
 			return errors.New("the pin of the peer is not known yet")
 		}
-		if subtle.ConstantTimeCompare([]byte(Pin(cert)), []byte(expected)) != 1 {
+		if subtle.ConstantTimeCompare([]byte(Pin(state.PeerCertificates[0])), []byte(expected)) != 1 {
 			return errors.New("the peer key does not match the pinned one")
 		}
 		return nil

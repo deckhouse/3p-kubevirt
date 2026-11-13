@@ -371,6 +371,8 @@ func (c *Controller) updateStatus(vmi *virtv1.VirtualMachineInstance, pod *k8sv1
 		c.backendStorage.UpdateVolumeStatus(vmiCopy, pvc)
 	}
 
+	migrationTargetFailed := vmiCopy.IsMigrationTarget() && vmiCopy.Status.MigrationState != nil && vmiCopy.Status.MigrationState.Failed
+
 	switch {
 	case vmi.IsUnprocessed():
 		if vmiPodExists {
@@ -496,12 +498,21 @@ func (c *Controller) updateStatus(vmi *virtv1.VirtualMachineInstance, pod *k8sv1
 					}
 				}
 			} else if controller.IsPodDownOrGoingDown(pod) {
-				vmiCopy.Status.Phase = virtv1.Failed
+				if vmiCopy.IsMigrationTarget() {
+					log.Log.Object(vmi).Infof("setting VMI to WaitingForSync while scheduling because pod is down")
+					vmiCopy.Status.Phase = virtv1.WaitingForSync
+				} else {
+					vmiCopy.Status.Phase = virtv1.Failed
+				}
 			}
 		} else {
-			log.Log.Object(vmi).V(5).Infof("setting VMI to failed during scheduling because pod does not exist")
-			// someone other than the controller deleted the pod unexpectedly
-			vmiCopy.Status.Phase = virtv1.Failed
+			if vmiCopy.IsMigrationTarget() {
+				log.Log.Object(vmi).Infof("setting VMI to WaitingForSync while scheduling because pod does not exist")
+				vmiCopy.Status.Phase = virtv1.WaitingForSync
+			} else {
+				log.Log.Object(vmi).Infof("setting VMI to failed during scheduling because pod does not exist")
+				vmiCopy.Status.Phase = virtv1.Failed
+			}
 		}
 	case vmi.IsFinal():
 		allDeleted, err := c.allPodsDeleted(vmi)
@@ -568,10 +579,15 @@ func (c *Controller) updateStatus(vmi *virtv1.VirtualMachineInstance, pod *k8sv1
 		c.syncMigrationRequiredCondition(vmiCopy)
 
 	case vmi.IsScheduled():
-		if !vmiPodExists {
-			if vmiCopy.IsDecentralizedMigration() {
+		if !vmiPodExists || (vmiCopy.IsMigrationTarget() && controller.PodIsDown(pod)) || migrationTargetFailed {
+			if vmiCopy.IsMigrationTarget() {
 				log.Log.Object(vmi).V(2).Infof("setting VMI to WaitingForSync while scheduled because pod does not exist")
 				vmiCopy.Status.Phase = virtv1.WaitingForSync
+				if vmiCopy.Status.MigrationState != nil {
+					vmiCopy.Status.MigrationState.Failed = true
+					vmiCopy.Status.MigrationState.Completed = true
+					vmiCopy.Status.MigrationState.EndTimestamp = ptr.To(v1.Now())
+				}
 				break
 			}
 			log.Log.Object(vmi).V(5).Infof("setting VMI to failed while scheduled because pod does not exist")
@@ -592,7 +608,7 @@ func (c *Controller) updateStatus(vmi *virtv1.VirtualMachineInstance, pod *k8sv1
 				// if there's no owner VM around still, then remove the VM controller's finalizer if it exists
 				controller.RemoveFinalizer(vmiCopy, virtv1.VirtualMachineControllerFinalizer)
 			}
-		} else if vmiPodExists {
+		} else if vmiPodExists && !migrationTargetFailed && !(vmiCopy.IsMigrationTarget() && controller.PodIsDown(pod)) {
 			vmiCopy.Status.Phase = virtv1.Scheduling
 		}
 	default:

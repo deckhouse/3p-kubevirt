@@ -832,6 +832,7 @@ var _ = Describe("VirtualMachineInstance migration target", func() {
 
 		Expect(virtcache.GhostRecordGlobalStore.Exists(vmi.Namespace, vmi.Name)).To(BeFalse())
 	})
+
 })
 
 type stubTargetPasstRepairHandler struct {

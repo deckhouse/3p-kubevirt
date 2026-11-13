@@ -92,6 +92,7 @@ go_test(
     timeout = "long",
     srcs = [
         "controller_test.go",
+        "decentralized-lifecycle_test.go",
         "ksm_test.go",
         "migrated_here_test.go",
         "migration-source_test.go",
@@ -155,6 +156,7 @@ go_test(
         "//vendor/k8s.io/client-go/kubernetes/fake:go_default_library",
         "//vendor/k8s.io/client-go/tools/cache:go_default_library",
         "//vendor/k8s.io/client-go/tools/record:go_default_library",
+        "//vendor/k8s.io/client-go/util/workqueue:go_default_library",
         "//vendor/libvirt.org/go/libvirtxml:go_default_library",
     ],
 )

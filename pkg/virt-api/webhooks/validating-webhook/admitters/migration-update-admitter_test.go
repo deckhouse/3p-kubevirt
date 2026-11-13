@@ -252,3 +252,45 @@ func newAdmissionReviewForVMIMUpdate(oldMigration, newMigration *v1.VirtualMachi
 		},
 	}, nil
 }
+
+var _ = Describe("Migration synchronization endpoint updates", func() {
+	It("allows rotation on either side while keeping migration identity immutable", func() {
+		for _, source := range []bool{false, true} {
+			old := &v1.VirtualMachineInstanceMigration{Spec: v1.VirtualMachineInstanceMigrationSpec{VMIName: "vm"}}
+			if source {
+				old.Spec.SendTo = &v1.VirtualMachineInstanceMigrationSource{MigrationID: "id", ConnectURL: "old:9185"}
+			} else {
+				old.Spec.Receive = &v1.VirtualMachineInstanceMigrationTarget{MigrationID: "id"}
+			}
+			updated := old.DeepCopy()
+			updated.Annotations = map[string]string{
+				v1.MigrationPeerSyncPinAnnotation:     "sha256:new",
+				v1.MigrationPeerSyncAddressAnnotation: "new:9185",
+			}
+			ar, err := newAdmissionReviewForVMIMUpdate(old, updated)
+			Expect(err).NotTo(HaveOccurred())
+			response := (&admitters.MigrationUpdateAdmitter{}).Admit(context.Background(), ar)
+			Expect(response.Allowed).To(BeTrue(), "annotation rotation must not require a spec change")
+			if source {
+				updated.Spec.SendTo.MigrationID = "other"
+			} else {
+				updated.Spec.Receive.MigrationID = "other"
+			}
+			ar, err = newAdmissionReviewForVMIMUpdate(old, updated)
+			Expect(err).NotTo(HaveOccurred())
+			Expect((&admitters.MigrationUpdateAdmitter{}).Admit(context.Background(), ar).Allowed).To(BeFalse())
+		}
+	})
+	It("rejects changes to the bootstrap connectURL", func() {
+		old := &v1.VirtualMachineInstanceMigration{Spec: v1.VirtualMachineInstanceMigrationSpec{
+			VMIName: "vm",
+			SendTo:  &v1.VirtualMachineInstanceMigrationSource{MigrationID: "id", ConnectURL: "old:9185"},
+		}}
+		updated := old.DeepCopy()
+		updated.Spec.SendTo.ConnectURL = "new:9185"
+		ar, err := newAdmissionReviewForVMIMUpdate(old, updated)
+		Expect(err).NotTo(HaveOccurred())
+		Expect((&admitters.MigrationUpdateAdmitter{}).Admit(context.Background(), ar).Allowed).To(BeFalse())
+	})
+
+})

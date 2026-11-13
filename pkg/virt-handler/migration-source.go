@@ -24,6 +24,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"time"
 
@@ -253,28 +254,56 @@ func (c *MigrationSourceController) setMigrationProgressStatus(vmi *v1.VirtualMa
 	if migrationMetadata.UID != vmi.Status.MigrationState.MigrationUID {
 		return
 	}
-	vmi.Status.MigrationState.StartTimestamp = migrationMetadata.StartTimestamp
-
-	vmi.Status.MigrationState.Failed = migrationMetadata.Failed
+	if migrationMetadata.StartTimestamp != nil {
+		vmi.Status.MigrationState.StartTimestamp = migrationMetadata.StartTimestamp
+	}
+	// Peer failure is terminal for this migration; older local metadata cannot undo it.
+	vmi.Status.MigrationState.Failed = vmi.Status.MigrationState.Failed || migrationMetadata.Failed
 
 	if migrationMetadata.Failed {
-		vmi.Status.MigrationState.EndTimestamp = migrationMetadata.EndTimestamp
-		vmi.Status.MigrationState.FailureReason = migrationMetadata.FailureReason
+		if migrationMetadata.EndTimestamp != nil {
+			vmi.Status.MigrationState.EndTimestamp = migrationMetadata.EndTimestamp
+		}
+		if migrationMetadata.FailureReason != "" {
+			vmi.Status.MigrationState.FailureReason = migrationMetadata.FailureReason
+		}
 		c.recorder.Event(vmi, k8sv1.EventTypeWarning, v1.Migrated.String(), fmt.Sprintf("VirtualMachineInstance migration uid %s failed. reason:%s", string(migrationMetadata.UID), migrationMetadata.FailureReason))
 	}
 
 	vmi.Status.MigrationState.AbortStatus = v1.MigrationAbortStatus(migrationMetadata.AbortStatus)
-	if migrationMetadata.AbortStatus == string(v1.MigrationAbortSucceeded) {
+	if migrationMetadata.AbortStatus == string(v1.MigrationAbortSucceeded) && migrationMetadata.EndTimestamp != nil {
 		vmi.Status.MigrationState.EndTimestamp = migrationMetadata.EndTimestamp
 	}
 
 	vmi.Status.MigrationState.Mode = migrationMetadata.Mode
 }
 
+// failPostMigration marks the VMI as failed after a completed domain migration
+// when ownership cannot be transferred. MigrationState mutations are skipped
+// (with a warning) if MigrationState is unexpectedly nil.
+func (c *MigrationSourceController) failPostMigration(vmi *v1.VirtualMachineInstance) {
+	vmi.Status.Phase = v1.Failed
+	if vmi.Status.MigrationState == nil {
+		log.Log.Object(vmi).Warning("cannot update MigrationState on failed post-migration: MigrationState is nil")
+		return
+	}
+	vmi.Status.MigrationState.Completed = true
+	vmi.Status.MigrationState.Failed = true
+	if vmi.Status.MigrationState.EndTimestamp == nil {
+		vmi.Status.MigrationState.EndTimestamp = pointer.P(metav1.NewTime(time.Now()))
+	}
+}
+
 func (c *MigrationSourceController) updateStatus(vmi *v1.VirtualMachineInstance, domain *api.Domain) error {
 	c.setMigrationProgressStatus(vmi, domain)
 	if vmi.Status.MigrationState != nil && c.isMigrationSource(vmi) && !isMigrationDone(vmi.Status.MigrationState) {
 		client, err := c.launcherClients.GetLauncherClient(vmi)
+		if err != nil && decentralizedSourceLauncherGone(vmi, domain, err) {
+			failMigrationOfGoneSource(vmi)
+			log.Log.Object(vmi).Warning("the source virt-launcher is gone during the migration to another cluster")
+			c.recorder.Event(vmi, k8sv1.EventTypeWarning, v1.Migrated.String(), "The source virt-launcher is gone: the guest stopped during the migration.")
+			return nil
+		}
 		if err != nil {
 			log.Log.Object(vmi).V(4).Reason(err).Info("Failed to get launcher client for migration progress")
 		} else {
@@ -284,85 +313,85 @@ func (c *MigrationSourceController) updateStatus(vmi *v1.VirtualMachineInstance,
 		c.queue.AddAfter(controller.VirtualMachineInstanceKey(vmi), time.Second)
 	}
 
-	// handle migrations differently than normal status updates.
-	//
-	// When a successful migration is detected, we must transfer ownership of the VMI
-	// from the source node (this node) to the target node (node the domain was migrated to).
-	//
-	// Transfer ownership by...
-	// 1. Marking vmi.Status.MigrationState as completed
-	// 2. Update the vmi.Status.NodeName to reflect the target node's name
-	// 3. Update the VMI's NodeNameLabel annotation to reflect the target node's name
-	// 4. Clear the LauncherContainerImageVersion which virt-controller will detect
-	//    and accurately based on the version used on the target pod
-	//
-	// After a migration, the VMI's phase is no longer owned by this node. Only the
-	// MigrationState status field is eligible to be mutated.
-	// The source of a migration between clusters learns the target node over the synchronization
-	// channel, and the node can come later than the address: an empty TargetNode does not mean the
-	// domain went to an unknown host, it may not have left yet. Failing the VMI here shuts down a
-	// running guest, so ownership is transferred only once libvirt reports the migration over.
-	if isCrossClusterSource(vmi) && !domainMigrationEnded(vmi, domain) {
-		return nil
+	// The target transfers NodeName through ackMigrationCompletion; the source publishes its own final phase.
+	if domainMigrated(domain) {
+		// The guest has left this node. A target failure must not leave a fictitious
+		// Running source VMI that its owner could mistake for a safe rollback.
+		if vmi.IsDecentralizedMigration() && vmi.Status.MigrationState.Failed {
+			c.failPostMigration(vmi)
+			return nil
+		}
+		migrationHost := ""
+		if vmi.Status.MigrationState != nil {
+			migrationHost = vmi.Status.MigrationState.TargetNode
+		}
+
+		targetNodeDetectedDomain, timeLeft := c.hasTargetDetectedReadyDomain(vmi)
+		if migrationHost == "" {
+			// No TargetNode → cannot hand off; fail so the cluster controller cleans up.
+			c.failPostMigration(vmi)
+			log.Log.Object(vmi).Warning("the vmi migrated to an unknown host")
+			c.recorder.Event(vmi, k8sv1.EventTypeWarning, v1.Migrated.String(), "The VirtualMachineInstance migrated to unknown host.")
+		} else if !targetNodeDetectedDomain {
+			if timeLeft <= 0 {
+				// Target never ACK'd the domain within the grace window.
+				c.failPostMigration(vmi)
+				log.Log.Object(vmi).Warning("the domain was never observed on the target after the migration completed within the timeout period")
+				c.recorder.Event(vmi, k8sv1.EventTypeWarning, v1.Migrated.String(),
+					"The VirtualMachineInstance's domain was never observed on the target after the migration completed within the timeout period.")
+			}
+			// else: still waiting for target ACK (requeued by hasTargetDetectedReadyDomain).
+		}
+
+		// Decentralized migrations have no shared VMI controller to advance phase;
+		// the source marks Succeeded once the target has the domain and migration completed.
+		if targetNodeDetectedDomain && vmi.IsDecentralizedMigration() && vmi.Status.MigrationState != nil &&
+			vmi.Status.MigrationState.Completed && !vmi.Status.MigrationState.Failed {
+			log.Log.Object(vmi).Infof("decentralized migration completed successfully, marking VMI as succeeded")
+			vmi.Status.Phase = v1.Succeeded
+		}
 	}
 
-	migrationHost := ""
-	if vmi.Status.MigrationState != nil {
-		migrationHost = vmi.Status.MigrationState.TargetNode
-	}
-
-	targetNodeDetectedDomain, timeLeft := c.hasTargetDetectedReadyDomain(vmi)
-	// If we can't detect where the migration went to, then we have no
-	// way of transferring ownership. The only option here is to move the
-	// vmi to failed.  The cluster vmi controller will then tear down the
-	// resulting pods.
-	if migrationHost == "" {
-		// migrated to unknown host.
-		vmi.Status.Phase = v1.Failed
+	// Publish a failed source to the peer once, including failures detected by the VMI controller.
+	if vmi.Status.Phase == v1.Failed && vmi.IsDecentralizedMigration() &&
+		(!vmi.Status.MigrationState.Completed || !vmi.Status.MigrationState.Failed) {
 		vmi.Status.MigrationState.Completed = true
 		vmi.Status.MigrationState.Failed = true
-		if vmi.Status.MigrationState.EndTimestamp == nil {
-			vmi.Status.MigrationState.EndTimestamp = pointer.P(metav1.NewTime(time.Now()))
-		}
-
-		log.Log.Object(vmi).Warning("the vmi migrated to an unknown host")
-		c.recorder.Event(vmi, k8sv1.EventTypeWarning, v1.Migrated.String(), fmt.Sprintf("The VirtualMachineInstance migrated to unknown host."))
-	} else if !targetNodeDetectedDomain {
-		if timeLeft <= 0 {
-			vmi.Status.Phase = v1.Failed
-			vmi.Status.MigrationState.Completed = true
-			vmi.Status.MigrationState.Failed = true
-			if vmi.Status.MigrationState.EndTimestamp == nil {
-				vmi.Status.MigrationState.EndTimestamp = pointer.P(metav1.NewTime(time.Now()))
-			}
-
-			log.Log.Object(vmi).Warning("the domain was never observed on the taget after the migration completed within the timeout period")
-			c.recorder.Event(vmi, k8sv1.EventTypeWarning, v1.Migrated.String(), fmt.Sprintf("The VirtualMachineInstance's domain was never observed on the target after the migration completed within the timeout period."))
-		}
-	}
-
-	if targetNodeDetectedDomain && vmi.IsDecentralizedMigration() && vmi.Status.MigrationState != nil && vmi.Status.MigrationState.Completed {
-		log.Log.Object(vmi).V(2).Infof("decentralized migration completed successfully, marking VMI as succeeded")
-		// this is a decentralized migration, and the migration completed successfully, we need to mark the VMI as succeeded
-		vmi.Status.Phase = v1.Succeeded
+		log.Log.Object(vmi).Warning("the decentralized migration failed due to the source VMI being failed")
+		c.recorder.Event(vmi, k8sv1.EventTypeWarning, v1.Migrated.String(),
+			"The VirtualMachineInstance's decentralized migration failed due to the source VMI being failed.")
 	}
 
 	return nil
 }
 
-// isCrossClusterSource reports a source of a migration to another cluster. IsDecentralizedMigration
-// is not used: it is false once both sides have published their synchronization addresses.
-func isCrossClusterSource(vmi *v1.VirtualMachineInstance) bool {
-	state := vmi.Status.MigrationState
-	return state != nil && state.TargetState != nil && state.TargetState.SyncAddress != nil
+// The source launcher and its socket are gone, so nothing else can finish this decentralized migration.
+func decentralizedSourceLauncherGone(vmi *v1.VirtualMachineInstance, domain *api.Domain, err error) bool {
+	return hasTargetSyncAddress(vmi) && domain == nil && errors.Is(err, os.ErrNotExist)
 }
 
-func domainMigrationEnded(vmi *v1.VirtualMachineInstance, domain *api.Domain) bool {
-	if domain == nil || domain.Spec.Metadata.KubeVirt.Migration == nil {
-		return false
+// failMigrationOfGoneSource ends the migration and the VMI: the guest stopped with its launcher. The VMI
+// controller then removes the pods, and the owner of the VMI decides whether to start it again.
+func failMigrationOfGoneSource(vmi *v1.VirtualMachineInstance) {
+	now := pointer.P(metav1.NewTime(time.Now()))
+	state := vmi.Status.MigrationState
+	state.Completed = true
+	state.Failed = true
+	if state.StartTimestamp == nil {
+		state.StartTimestamp = now
 	}
-	migration := domain.Spec.Metadata.KubeVirt.Migration
-	return migration.UID == vmi.Status.MigrationState.MigrationUID && migration.EndTimestamp != nil
+	if state.EndTimestamp == nil {
+		state.EndTimestamp = now
+	}
+	if state.FailureReason == "" {
+		state.FailureReason = "the source virt-launcher is gone"
+	}
+	vmi.Status.Phase = v1.Failed
+}
+
+func hasTargetSyncAddress(vmi *v1.VirtualMachineInstance) bool {
+	state := vmi.Status.MigrationState
+	return state != nil && state.TargetState != nil && state.TargetState.SyncAddress != nil
 }
 
 func (c *MigrationSourceController) Run(threadiness int, stopCh chan struct{}) {
@@ -482,7 +511,7 @@ func (c *MigrationSourceController) execute(key string) error {
 		return err
 	}
 
-	if !vmiExists || vmi.IsFinal() || vmi.DeletionTimestamp != nil {
+	if !vmiExists || (vmi.IsFinal() && !(vmi.Status.Phase == v1.Failed && vmi.IsDecentralizedMigration())) || vmi.DeletionTimestamp != nil {
 		log.Log.V(4).Infof("vmi for key %v is terminating, final or does not exists", key)
 		return nil
 	}
@@ -513,6 +542,11 @@ func (c *MigrationSourceController) execute(key string) error {
 			c.conntrackSync.Cleanup(vmi.UID)
 		}
 		c.migrationProxy.StopSourceListener(string(vmi.UID))
+		// Completion can arrive before this node observes the migrated domain. The source
+		// still needs to publish Succeeded; other nodes must not take ownership of its phase.
+		if vmi.IsDecentralizedMigration() && vmi.Status.Phase != v1.Succeeded && vmi.Status.MigrationState.SourceNode == c.host {
+			return c.sync(vmi.DeepCopy(), domain)
+		}
 		return nil
 	}
 
@@ -729,6 +763,12 @@ func (c *MigrationSourceController) targetProxyPin(key string) func() string {
 }
 
 func (c *MigrationSourceController) processVMI(vmi *v1.VirtualMachineInstance, domain *api.Domain) error {
+	// A completed source may still need a status update after the domain event arrives.
+	// That reconciliation must not reopen proxies, cancel or issue another migration.
+	if isMigrationDone(vmi.Status.MigrationState) {
+		return nil
+	}
+
 	if err := c.pinSourceProxy(vmi); err != nil {
 		return err
 	}

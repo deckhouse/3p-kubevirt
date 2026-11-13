@@ -34,9 +34,14 @@ type MockLauncherClientManager struct {
 	UnResponsive      bool
 	Initialized       bool
 	UnResponsiveError error
+	// Error, when set, is returned instead of the client.
+	Error error
 }
 
 func (m *MockLauncherClientManager) GetVerifiedLauncherClient(vmi *v1.VirtualMachineInstance) (client cmdclient.LauncherClient, err error) {
+	if m.Error != nil {
+		return nil, m.Error
+	}
 	if m.Client != nil {
 		return m.Client, nil
 	}
