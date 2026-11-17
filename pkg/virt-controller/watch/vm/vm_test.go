@@ -5618,7 +5618,7 @@ var _ = Describe("VirtualMachine", func() {
 					})
 				})
 
-				It("should not add addRestartRequiredIfNeeded to VM if live-updatable", func() {
+				It("should not add RestartRequired condition to VM if live-updatable", func() {
 					updatedInstancetype := originalInstancetype.DeepCopy()
 					updatedInstancetype.Generation = originalInstancetype.Generation + 1
 					updatedInstancetype.Spec.CPU.Guest = uint32(2)
@@ -5635,11 +5635,10 @@ var _ = Describe("VirtualMachine", func() {
 						Kind:         instancetypeapi.SingularResourceName,
 						RevisionName: updatedRevision.Name,
 					}
-					Expect(controller.addRestartRequiredIfNeeded(&originalVM.Spec, updatedVM, vmi)).To(BeFalse())
-					vmConditionController := virtcontroller.NewVirtualMachineConditionManager()
-					Expect(vmConditionController.HasCondition(updatedVM, v1.VirtualMachineRestartRequired)).To(BeFalse())
+					Expect(controller.syncRestartRequired(&originalVM.Spec, updatedVM, vmi)).To(BeFalse())
+					Expect(virtcontroller.NewVirtualMachineConditionManager().HasCondition(updatedVM, v1.VirtualMachineRestartRequired)).To(BeFalse())
 				})
-				It("should add addRestartRequiredIfNeeded to VM if not live-updatable", func() {
+				It("should add RestartRequired condition to VM if not live-updatable", func() {
 					updatedInstancetype := originalInstancetype.DeepCopy()
 					updatedInstancetype.Generation = originalInstancetype.Generation + 1
 					updatedInstancetype.Spec.CPU.Guest = uint32(2)
@@ -5660,9 +5659,8 @@ var _ = Describe("VirtualMachine", func() {
 						RevisionName: updatedRevision.Name,
 					}
 
-					Expect(controller.addRestartRequiredIfNeeded(&originalVM.Spec, updatedVM, vmi)).To(BeTrue())
-					vmConditionController := virtcontroller.NewVirtualMachineConditionManager()
-					Expect(vmConditionController.HasCondition(updatedVM, v1.VirtualMachineRestartRequired)).To(BeTrue())
+					Expect(controller.syncRestartRequired(&originalVM.Spec, updatedVM, vmi)).To(BeTrue())
+					Expect(virtcontroller.NewVirtualMachineConditionManager().HasConditionWithStatus(updatedVM, v1.VirtualMachineRestartRequired, k8sv1.ConditionTrue)).To(BeTrue())
 				})
 			})
 		})
@@ -6156,6 +6154,84 @@ var _ = Describe("VirtualMachine", func() {
 						v1.VirtualMachineRestartRequired)).To(BeTrue())
 				})
 			})
+
+			It("should clear existing RestartRequired condition when VM and VMI specs match", func() {
+				By("Creating a VM with an existing RestartRequired condition")
+				vm.Status.Conditions = append(vm.Status.Conditions, v1.VirtualMachineCondition{
+					Type:   v1.VirtualMachineRestartRequired,
+					Status: k8sv1.ConditionTrue,
+				})
+				controller.crIndexer.Add(createVMRevision(vm))
+
+				By("Creating a VMI with matching spec")
+				vmi = controller.setupVMIFromVM(vm)
+				controller.vmiIndexer.Add(vmi)
+
+				vm, err := virtFakeClient.KubevirtV1().VirtualMachines(vm.Namespace).Create(context.TODO(), vm, metav1.CreateOptions{})
+				Expect(err).To(Succeed())
+				addVirtualMachine(vm)
+
+				By("Executing the controller")
+				sanityExecute(vm)
+				vm, err = virtFakeClient.KubevirtV1().VirtualMachines(vm.Namespace).Get(context.TODO(), vm.Name, metav1.GetOptions{})
+				Expect(err).To(Succeed())
+
+				By("Verifying the RestartRequired condition was removed")
+				Expect(virtcontroller.NewVirtualMachineConditionManager().HasCondition(vm, v1.VirtualMachineRestartRequired)).To(BeFalse())
+			})
+			DescribeTable("should retain a new instance when a status conflict leaves RestartRequired set", func(phase v1.VirtualMachineInstancePhase) {
+				By("Restoring the state left after creating an instance but failing to persist the cleared restart condition")
+				vm.Spec.Running = nil
+				vm.Spec.RunStrategy = pointer.P(v1.RunStrategyManual)
+				vm.Status.StateChangeRequests = []v1.VirtualMachineStateChangeRequest{{Action: v1.StartRequest}}
+				vm.Status.Conditions = append(vm.Status.Conditions, v1.VirtualMachineCondition{
+					Type:   v1.VirtualMachineRestartRequired,
+					Status: k8sv1.ConditionTrue,
+				})
+				controller.crIndexer.Add(createVMRevision(vm))
+				vmi = controller.setupVMIFromVM(vm)
+				vmi.Status.Phase = phase
+				vmi.UID = types.UID("new-instance")
+				Expect(controller.vmiIndexer.Add(vmi)).To(Succeed())
+				createdVMI, err := virtFakeClient.KubevirtV1().VirtualMachineInstances(vmi.Namespace).Create(context.TODO(), vmi, metav1.CreateOptions{})
+				Expect(err).To(Succeed())
+
+				vm, err := virtFakeClient.KubevirtV1().VirtualMachines(vm.Namespace).Create(context.TODO(), vm, metav1.CreateOptions{})
+				Expect(err).To(Succeed())
+				addVirtualMachine(vm)
+
+				statusAttempts := 0
+				virtFakeClient.PrependReactor("update", "virtualmachines", func(action testing.Action) (bool, runtime.Object, error) {
+					if action.GetSubresource() != "status" {
+						return false, nil, nil
+					}
+					statusAttempts++
+					if statusAttempts == 1 {
+						return true, nil, k8serrors.NewConflict(v1.VirtualMachineGroupVersionKind.GroupVersion().WithResource("virtualmachines").GroupResource(), vm.Name, fmt.Errorf("concurrent status update"))
+					}
+					return false, nil, nil
+				})
+
+				key, err := virtcontroller.KeyFunc(vm)
+				Expect(err).To(Succeed())
+				By("Retrying a conflicting status update without deleting the new instance")
+				Expect(k8serrors.IsConflict(controller.execute(key))).To(BeTrue())
+				Expect(controller.execute(key)).To(Succeed())
+				Expect(statusAttempts).To(Equal(2))
+
+				updatedVM, err := virtFakeClient.KubevirtV1().VirtualMachines(vm.Namespace).Get(context.TODO(), vm.Name, metav1.GetOptions{})
+				Expect(err).To(Succeed())
+				Expect(virtcontroller.NewVirtualMachineConditionManager().HasCondition(updatedVM, v1.VirtualMachineRestartRequired)).To(BeFalse())
+				Expect(updatedVM.Status.Created).To(BeTrue())
+				retainedVMI, err := virtFakeClient.KubevirtV1().VirtualMachineInstances(vmi.Namespace).Get(context.TODO(), vmi.Name, metav1.GetOptions{})
+				Expect(err).To(Succeed())
+				Expect(retainedVMI.UID).To(Equal(createdVMI.UID))
+				Expect(retainedVMI.DeletionTimestamp).To(BeNil())
+			},
+				Entry("while Pending", v1.Pending),
+				Entry("while Scheduling", v1.Scheduling),
+			)
+
 		})
 
 		clearExpectations := func(vm *v1.VirtualMachine) {
