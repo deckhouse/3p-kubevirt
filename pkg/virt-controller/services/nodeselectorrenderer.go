@@ -8,6 +8,7 @@ import (
 	k8sv1 "k8s.io/api/core/v1"
 	v1 "kubevirt.io/api/core/v1"
 
+	"kubevirt.io/kubevirt/pkg/util"
 	"kubevirt.io/kubevirt/pkg/virt-controller/watch/topology"
 )
 
@@ -168,13 +169,21 @@ func cpuModelLabel(cpuModel string) string {
 	return v1.CPUModelLabel + cpuModel
 }
 
+// CPUFeatureLabelsFromCPUFeatures returns the node labels that the required CPU features of the VMI need.
+// The arch-capabilities features of a VMI that runs with a machine type keeping them are left out: the nodes
+// do not advertise them on QEMU 10.1 and newer, while the migration target provides them through the machine type.
 func CPUFeatureLabelsFromCPUFeatures(vmi *v1.VirtualMachineInstance) []string {
 	var labels []string
 	if vmi.Spec.Domain.CPU != nil && vmi.Spec.Domain.CPU.Features != nil {
+		skipArchCapabilities := vmi.Status.Machine != nil && util.MachineTypeKeepsArchCapabilities(vmi.Status.Machine.Type)
 		for _, feature := range vmi.Spec.Domain.CPU.Features {
-			if feature.Policy == "" || feature.Policy == "require" {
-				labels = append(labels, v1.CPUFeatureLabel+feature.Name)
+			if feature.Policy != "" && feature.Policy != "require" {
+				continue
 			}
+			if skipArchCapabilities && util.IsArchCapabilitiesCPUFeature(feature.Name) {
+				continue
+			}
+			labels = append(labels, v1.CPUFeatureLabel+feature.Name)
 		}
 	}
 	return labels
