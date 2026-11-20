@@ -172,3 +172,63 @@ func selectors(userSelectors ...selector) map[string]string {
 func HaveLabel(labelKey string) types.GomegaMatcher {
 	return HaveKeyWithValue(labelKey, "true")
 }
+
+var _ = Describe("CPU feature labels of a VMI", func() {
+	archCapabilitiesFeatures := []string{"arch-capabilities", "mds-no", "rdctl-no", "gds-no", "rfds-no", "skip-l1dfl-vmentry", "pschange-mc-no"}
+
+	newVMI := func(machineType *string, features ...v1.CPUFeature) *v1.VirtualMachineInstance {
+		vmi := &v1.VirtualMachineInstance{}
+		vmi.Spec.Domain.CPU = &v1.CPU{Model: "qemu64", Features: features}
+		if machineType != nil {
+			vmi.Status.Machine = &v1.Machine{Type: *machineType}
+		}
+		return vmi
+	}
+
+	features := func(names []string, policy string) []v1.CPUFeature {
+		result := make([]v1.CPUFeature, 0, len(names))
+		for _, name := range names {
+			result = append(result, v1.CPUFeature{Name: name, Policy: policy})
+		}
+		return result
+	}
+
+	label := func(name string) string { return v1.CPUFeatureLabel + name }
+
+	DescribeTable("leaves the arch-capabilities features out only for a machine type that keeps them",
+		func(machineType *string, expectArchLabels bool) {
+			vmiFeatures := append(features(archCapabilitiesFeatures, "require"), v1.CPUFeature{Name: "avx2", Policy: "require"}, v1.CPUFeature{Name: "sse4.2"})
+			labels := CPUFeatureLabelsFromCPUFeatures(newVMI(machineType, vmiFeatures...))
+
+			Expect(labels).To(ContainElements(label("avx2"), label("sse4.2")))
+			for _, name := range archCapabilitiesFeatures {
+				if expectArchLabels {
+					Expect(labels).To(ContainElement(label(name)))
+				} else {
+					Expect(labels).ToNot(ContainElement(label(name)))
+				}
+			}
+		},
+		Entry("pc-q35-9.2", machineTypePtr("pc-q35-9.2"), false),
+		Entry("pc-q35-10.0", machineTypePtr("pc-q35-10.0"), false),
+		Entry("pc-i440fx-8.2", machineTypePtr("pc-i440fx-8.2"), false),
+		Entry("pc-q35-10.1", machineTypePtr("pc-q35-10.1"), true),
+		Entry("pc-q35-10.2", machineTypePtr("pc-q35-10.2"), true),
+		Entry("the q35 alias", machineTypePtr("q35"), true),
+		Entry("a VMI that has no machine type yet", nil, true),
+	)
+
+	It("keeps ignoring the features whose policy is not require", func() {
+		machineType := "pc-q35-9.2"
+		vmiFeatures := append(features([]string{"arch-capabilities"}, "optional"), features([]string{"invtsc", "avx2"}, "optional")...)
+		vmiFeatures = append(vmiFeatures, v1.CPUFeature{Name: "vmx", Policy: "disable"}, v1.CPUFeature{Name: "svm", Policy: "forbid"})
+
+		Expect(CPUFeatureLabelsFromCPUFeatures(newVMI(&machineType, vmiFeatures...))).To(BeEmpty())
+	})
+
+	It("returns no labels for a VMI without CPU", func() {
+		Expect(CPUFeatureLabelsFromCPUFeatures(&v1.VirtualMachineInstance{})).To(BeEmpty())
+	})
+})
+
+func machineTypePtr(s string) *string { return &s }
