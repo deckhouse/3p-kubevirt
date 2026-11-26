@@ -297,6 +297,17 @@ func (c *MigrationSourceController) failPostMigration(vmi *v1.VirtualMachineInst
 func (c *MigrationSourceController) updateStatus(vmi *v1.VirtualMachineInstance, domain *api.Domain) error {
 	c.setMigrationProgressStatus(vmi, domain)
 	if vmi.Status.MigrationState != nil && c.isMigrationSource(vmi) && !isMigrationDone(vmi.Status.MigrationState) {
+		if hasTargetSyncAddress(vmi) && domain == nil {
+			unresponsive, initialized, err := c.launcherClients.IsLauncherClientUnresponsive(vmi)
+			if err != nil {
+				return err
+			}
+			if initialized && unresponsive {
+				failMigrationOfGoneSource(vmi)
+				c.recorder.Event(vmi, k8sv1.EventTypeWarning, v1.Migrated.String(), "The source virt-launcher is gone: the guest stopped during the migration.")
+				return nil
+			}
+		}
 		client, err := c.launcherClients.GetLauncherClient(vmi)
 		if err != nil && decentralizedSourceLauncherGone(vmi, domain, err) {
 			failMigrationOfGoneSource(vmi)

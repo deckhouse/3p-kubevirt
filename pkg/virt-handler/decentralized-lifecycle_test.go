@@ -31,6 +31,7 @@ import (
 	"go.uber.org/mock/gomock"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/workqueue"
@@ -297,6 +298,30 @@ var _ = Describe("Decentralized source lifecycle", func() {
 		Expect(vmi.Status.MigrationState.FailureReason).To(Equal("the source virt-launcher is gone"))
 		testutils.ExpectEvent(recorder, v1.Migrated.String())
 	})
+	DescribeTable("finishes a source whose cached launcher stopped responding", func(unresponsive, initialized, domainExists, failed bool) {
+		vmi := newDecentralizedSource()
+		vmi.Status.MigrationState.StartTimestamp = pointer.P(metav1.Now())
+		manager := controller.launcherClients.(*launcher_clients.MockLauncherClientManager)
+		manager.UnResponsive = unresponsive
+		manager.Initialized = initialized
+		var domain *api.Domain
+		if domainExists {
+			domain = newDomain(nil)
+		}
+		Expect(controller.updateStatus(vmi, domain)).To(Succeed())
+		Expect(vmi.Status.MigrationState.Completed).To(Equal(failed))
+		if failed {
+			Expect(vmi.Status.Phase).To(Equal(v1.Failed))
+			testutils.ExpectEvent(recorder, v1.Migrated.String())
+		} else {
+			Expect(vmi.Status.Phase).To(Equal(v1.Running))
+		}
+	},
+		Entry("watchdog confirmed a dead cached launcher", true, true, false, true),
+		Entry("the domain is still observed", true, true, true, false),
+		Entry("the launcher is responsive", false, true, false, false),
+		Entry("the launcher is still initializing", true, false, false, false),
+	)
 	It("keeps polling while the domain of the source is still there", func() {
 		vmi := newDecentralizedSource()
 		controller.launcherClients = &launcher_clients.MockLauncherClientManager{
@@ -717,6 +742,88 @@ var _ = Describe("Decentralized target lifecycle", func() {
 		Expect(updatedVMI.Status.MigrationState.SourceState).NotTo(BeNil())
 		Expect(updatedVMI.Status.MigrationState.TargetState).NotTo(BeNil())
 	})
+})
+
+var _ = Describe("Decentralized source hotplug cleanup", func() {
+	DescribeTable("cleans up a deleting source after its domain is marked gone",
+		func(domainUID types.UID, domainDeleted, vmiDeleting, migrationDone, expectCleanup bool) {
+			const host = "source-node"
+			const sourceUID types.UID = "source-vmi-uid"
+			now := metav1.Now()
+			vmi := api2.NewMinimalVMI("source")
+			vmi.UID = sourceUID
+			vmi.Labels = map[string]string{v1.NodeNameLabel: host}
+			vmi.Status.NodeName = host
+			vmi.Status.Phase = v1.Running
+			if vmiDeleting {
+				vmi.DeletionTimestamp = &now
+			}
+			vmi.Status.MigrationState = &v1.VirtualMachineInstanceMigrationState{
+				SourceNode: host,
+				Completed:  migrationDone,
+				Failed:     migrationDone,
+				TargetState: &v1.VirtualMachineInstanceMigrationTargetState{
+					VirtualMachineInstanceCommonMigrationState: v1.VirtualMachineInstanceCommonMigrationState{
+						SyncAddress: pointer.P("target:9185"),
+					},
+					NodeAddress: pointer.P("target"),
+				},
+			}
+			Expect(vmi.IsMigrationSource()).To(BeTrue())
+
+			mocks := gomock.NewController(GinkgoT())
+			objects := kubevirtfake.NewSimpleClientset(vmi.DeepCopy())
+			client := kubecli.NewMockKubevirtClient(mocks)
+			client.EXPECT().CoreV1().Return(fake.NewSimpleClientset().CoreV1()).AnyTimes()
+			client.EXPECT().VirtualMachineInstance(vmi.Namespace).
+				Return(objects.KubevirtV1().VirtualMachineInstances(vmi.Namespace)).AnyTimes()
+			config, _, _ := testutils.NewFakeClusterConfigUsingKVConfig(&v1.KubeVirtConfiguration{})
+			vmiInformer, _ := testutils.NewFakeInformerFor(&v1.VirtualMachineInstance{})
+			domainInformer, _ := testutils.NewFakeInformerFor(&api.Domain{})
+			Expect(vmiInformer.GetStore().Add(vmi)).To(Succeed())
+			if domainUID != "" {
+				domain := api.NewMinimalDomainWithUUID(vmi.Name, domainUID)
+				domain.Status.Status = api.Running
+				if domainDeleted {
+					domain.DeletionTimestamp = &now
+				}
+				Expect(domainInformer.GetStore().Add(domain)).To(Succeed())
+			}
+
+			portRange, err := migrationproxy.NewPortRange(49152, 49215)
+			Expect(err).NotTo(HaveOccurred())
+			proxy := migrationproxy.NewMigrationProxyManager(portRange, nil, nil, config)
+			recorder := record.NewFakeRecorder(10)
+			virtcache.InitializeGhostRecordCache(virtcache.NewIterableCheckpointManager(GinkgoT().TempDir()))
+			c, err := NewVirtualMachineController(recorder, client, host, GinkgoT().TempDir(), GinkgoT().TempDir(),
+				&launcher_clients.MockLauncherClientManager{Error: os.ErrNotExist}, vmiInformer, vmiInformer.GetStore(),
+				domainInformer, 10, config, nil, proxy, newFakeManager(), nil, "", &netConfStub{}, &netStatStub{}, nil, nil)
+			Expect(err).NotTo(HaveOccurred())
+			DeferCleanup(c.queue.ShutDown)
+
+			volumes := hotplugvolume.NewMockVolumeMounter(mocks)
+			c.hotplugVolumeMounter = volumes
+			if expectCleanup {
+				volumes.EXPECT().UnmountAll(vmi, gomock.Any()).Return(nil)
+			}
+
+			Expect(c.execute(virtcontroller.VirtualMachineInstanceKey(vmi))).To(Succeed())
+			updated, err := objects.KubevirtV1().VirtualMachineInstances(vmi.Namespace).
+				Get(context.Background(), vmi.Name, metav1.GetOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			if expectCleanup {
+				Expect(updated.Status.Phase).To(Equal(v1.Failed))
+			} else {
+				Expect(updated.Status.Phase).To(Equal(v1.Running))
+			}
+		},
+		Entry("watchdog marked the domain of the source gone", types.UID("source-vmi-uid"), true, true, true, true),
+		Entry("the source VMI was deleted before the migration finished", types.UID("source-vmi-uid"), true, true, false, true),
+		Entry("the domain is still running", types.UID("source-vmi-uid"), false, true, true, false),
+		Entry("the domain cache has no entry", types.UID(""), false, true, true, false),
+		Entry("the domain cache entry is for an older VMI", types.UID("old-vmi-uid"), true, true, true, false),
+		Entry("the source VMI is not being deleted", types.UID("source-vmi-uid"), true, false, true, false),
+	)
 })
 
 var _ = Describe("Decentralized target phase calculation", func() {

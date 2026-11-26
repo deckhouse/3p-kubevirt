@@ -505,7 +505,13 @@ func (c *VirtualMachineController) execute(key string) error {
 		return nil
 	}
 
-	if vmiExists && !vmi.IsMigrationTarget() && vmi.IsMigrationSource() && !isMigratedHere(vmi, c.host) {
+	// A cached UID without a domain means the domain was marked deleted.
+	// The migration source controller skips deleting VMIs, so let the local
+	// controller clean up once the domain of this VMI is gone.
+	deletingWithGoneDomain := vmi.DeletionTimestamp != nil && !domainExists &&
+		domainCachedUID != "" && domainCachedUID == vmi.UID
+	if vmiExists && !vmi.IsMigrationTarget() && vmi.IsMigrationSource() &&
+		!isMigratedHere(vmi, c.host) && !deletingWithGoneDomain {
 		log.Log.Object(vmi).V(4).Info("ignoring vmi as it is a migration source")
 		return nil
 	}
